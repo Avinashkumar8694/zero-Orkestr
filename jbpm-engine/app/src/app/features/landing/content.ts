@@ -9,6 +9,7 @@ export interface PublicPlan {
   contactConfig: { type: 'email' | 'url'; value: string; label?: string } | null;
   limits: Record<string, unknown>;
   features: string[];
+  status?: 'active' | 'disabled' | 'upcoming';
 }
 
 export const FALLBACK_PLANS: PublicPlan[] = [

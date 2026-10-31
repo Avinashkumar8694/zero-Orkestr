@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import type { Request } from 'express';
 import { asyncHandler, forbidden } from '../infra/errors.ts';
-import { Collections, type Role } from '../domain.ts';
+import { Collections, type Role, type Tenant } from '../domain.ts';
 import type { AppContext } from '../context.ts';
 import { WorkflowService } from '../modules/workflows/service.ts';
 import { FolderService } from '../modules/folders/service.ts';
@@ -85,6 +85,7 @@ function getJavaReferenceReadme(): string {
 import { resolveWorkflowServiceStore } from '../workflow-service/store/index.ts';
 import { buildWorkflowInstanceRoutes } from './routes/workflow-instances.ts';
 import { buildTeamRoutes } from './team-routes.ts';
+import { PlanService } from '../modules/plans/plans.ts';
 import { buildCaseServiceRoutes } from './routes/case-service.ts';
 import { hub } from '../infra/ws-hub.ts';
 import { requirePermission, callerPermissions } from './auth-middleware.ts';
@@ -617,6 +618,20 @@ export function buildRoutes(): Router {
   // mode vs the SCRIPT_OVERFLOW_MODE env default) — so operators can see the real limit, not just the setting.
   // the workspace's plan, its limits and what it has used (every member may look; the platform admin edits plans)
   r.get('/plan/usage', perm('team:read'), asyncHandler(async (req, res) => res.json(await planUsageFor(ctxOf(req)))));
+  // the plans this workspace is offered (hidden ones are not listed) and switching itself to one it may select
+  r.get('/plan/options', perm('team:read'), asyncHandler(async (req, res) => {
+    const ctx = ctxOf(req);
+    const tenant = await ctx.store.repo<Tenant>(Collections.tenants).get(ctx.tenantId);
+    res.json({ items: await new PlanService(ctx.store).catalogue(tenant?.plan) });
+  }));
+  r.put('/plan', perm('team:manage'), asyncHandler(async (req, res) => {
+    const ctx = ctxOf(req);
+    const u = await planUsageFor(ctx);
+    const used: Record<string, number> = { maxWorkflows: u.resources.workflows.used, maxTeamMembers: u.resources.teamMembers.used, maxDeployments: u.resources.deployments.used, maxActiveInstances: u.resources.activeInstances.used, maxActiveTimers: u.resources.activeTimers.used };
+    const t = await new PlanService(ctx.store).select(ctx.tenantId, String(req.body?.planKey || ''), used);
+    await ctx.audit({ actor: actorOf(req), kind: 'plan.selected', data: { plan: t.plan, planExpiresAt: t.planExpiresAt } });
+    res.json({ success: true, data: { plan: t.plan, planExpiresAt: t.planExpiresAt } });
+  }));
   r.get('/settings/system', asyncHandler(async (req, res) => {
     // secrets (SMTP password, outbound allow-list) are only revealed to someone who administers the workspace
     const isAdmin = permissionGrants(await callerPermissions(req), 'admin:iam');
