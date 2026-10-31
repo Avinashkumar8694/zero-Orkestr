@@ -38,7 +38,7 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
           <h3>Plan limits</h3>
           <p class="hint">What each plan allows, per workspace. <b>-1 = unlimited</b>. A plan can only tighten the platform-wide caps, never lift them. Saved plans apply to every workspace on them within a couple of seconds.</p>
           @if (plans().length) {
-            <div class="tablewrap"><table>
+            <div class="tablewrap"><table data-keep>
               <thead><tr><th>Limit</th>@for (p of plans(); track p.key) { <th>{{ p.name }}<div class="muted small">{{ p.key }}</div></th> }</tr></thead>
               <tbody>
                 @for (k of limitKeys(); track k) {
@@ -111,9 +111,7 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
     .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 8px 0; border-top: 1px solid var(--border); }
     .shint { display: block; font-size: 12px; color: var(--muted); font-weight: 400; } .actions { margin-top: 12px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; } th, td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--border); }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 14px 0 0; }
-    .tabs button { border: 0; background: transparent; padding: 10px 14px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; cursor: pointer; }
-    .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
     .hint { color: var(--muted); font-size: 13px; } .small-btn { padding: 2px 8px; font-size: 11px; margin-top: 4px; }
     .tablewrap { overflow-x: auto; } .small { font-size: 11px; } .err { color: var(--danger, #c0392b); }
   `],

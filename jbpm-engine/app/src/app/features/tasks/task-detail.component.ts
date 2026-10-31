@@ -176,9 +176,7 @@ const TABS: { key: Tab; label: string }[] = [
     .mono { font-family: var(--font-mono); font-size: 12.5px; }
     .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
     .badge.purple { background: var(--purple-bg); color: var(--purple); border-color: transparent; }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
-    .tabs button { border: none; background: transparent; padding: 9px 4px; margin-right: 18px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
     .actionrow { gap: 8px; margin-bottom: 14px; }
     .wrap { max-width: 640px; }
     .pad { padding: 20px; }

@@ -261,13 +261,7 @@ const TASK_STATUSES = [
     .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
     .small { font-size: 12px; }
 
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
-    .tabs button {
-      border: none; background: transparent; padding: 10px 14px; font-size: 13px; font-weight: 600;
-      color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
-    }
-    .tabs button:hover { color: var(--text); }
-    .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
 
     /* KPI tiles */
     .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
@@ -275,7 +269,6 @@ const TASK_STATUSES = [
     .kpi .kv { font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: 650; letter-spacing: -.02em; }
     .kpi .kl { font-size: var(--text-xs); color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; white-space: nowrap; }
     .kpi-skel { height: 84px; border-radius: var(--radius); }
-
     /* Chart cards */
     .chartgrid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
     .chart { padding: 18px; }
@@ -283,14 +276,12 @@ const TASK_STATUSES = [
     .chartsub { color: var(--muted); font-size: 11.5px; margin: 0 0 12px; }
     .tall { height: 260px; }
     .nodata { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
-
     /* Horizontal bars */
     .barlist { display: flex; flex-direction: column; gap: 10px; }
     .barrow .lab { font-size: 12.5px; margin-bottom: 4px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
     .track { height: 8px; background: var(--surface-3); border-radius: var(--radius-pill); overflow: hidden; }
     .track span { display: block; height: 100%; border-radius: var(--radius-pill); transition: width .3s ease; }
-
     /* Donut */
     .donutcard { display: flex; flex-direction: column; }
     .donutwrap { display: flex; gap: 18px; align-items: center; flex: 1; padding-top: 8px; }
@@ -302,7 +293,6 @@ const TASK_STATUSES = [
     .legend { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: var(--text-secondary); }
     .legend .li { display: flex; align-items: center; gap: 7px; }
     .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
-
     /* Duration tables */
     .tablecard { overflow: hidden; }
     .cardhead { padding: 14px 16px 10px; }

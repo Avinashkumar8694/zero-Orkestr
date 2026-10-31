@@ -98,7 +98,7 @@ type Selection = 'all' | 'unfiled' | string;
   `,
   styles: [`
     .page { display: flex; flex-direction: column; }
-    .hero { padding: 32px 32px 0; background: var(--surface); border-bottom: 1px solid var(--border); }
+    .hero { padding: 28px 28px 0; background: transparent; border-bottom: 0; }
     .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 22px; }
     .hero-titles h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -.01em; }
     .sub { margin: 0; font-size: 14px; color: var(--text-secondary); }
@@ -139,6 +139,7 @@ type Selection = 'all' | 'unfiled' | string;
     .menu-item.danger { color: var(--red); }
     .menu-item.danger:hover { background: var(--red-bg); }
     .menu-sep { height: 1px; background: var(--border); margin: 6px 4px; }
+      @media (max-width: 900px) { .hero-top { flex-direction: column; align-items: stretch !important; gap: 14px; } .hero-titles { width: 100%; } .create { flex-wrap: wrap; flex-shrink: 1; width: 100%; } .create .in { flex: 1 1 100%; width: 100% !important; } .create .btn { flex: 1 1 auto; } .hero { padding-left: 16px; padding-right: 16px; } .main { padding-left: 16px; padding-right: 16px; } }
   `],
 })
 export class WorkflowsComponent {

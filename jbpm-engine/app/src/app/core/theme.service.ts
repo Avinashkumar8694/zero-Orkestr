@@ -6,7 +6,7 @@ type Theme = 'light' | 'dark';
 function initialTheme(): Theme {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved === 'light' || saved === 'dark') return saved;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return 'light';   // the lavender light theme is the signature look; dark is opt-in via the toggle
 }
 
 // Signal-based, matching the rest of the app's no-NgRx style. Stamps data-theme on <html> so

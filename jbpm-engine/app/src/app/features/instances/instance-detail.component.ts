@@ -261,9 +261,7 @@ interface DocRow { variable: string; filename: string; url?: string; mimeType?: 
     .actionrow { gap: 8px; margin-bottom: 14px; }
     .badge { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
     .btn.danger { color: var(--red); border-color: var(--border-strong); } .btn.danger:hover { background: var(--red-bg); }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-    .tabs button { border: none; background: transparent; padding: 9px 4px; margin-right: 18px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
     /* Related Processes is a nav aid, not the main content — a narrow LEFT rail keeps it out of the
        way. The Diagram tab drops it entirely (see [class.full]) so the canvas gets the full page width
        instead of losing a fixed column to a panel that's rarely relevant while reading a diagram. */
@@ -330,6 +328,8 @@ interface DocRow { variable: string; filename: string; url?: string; mimeType?: 
     .relrow { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; margin-bottom: 8px; }
     .relcard .badge { white-space: normal; word-break: break-word; line-height: 1.4; }
     .empty-state .btn { margin-top: 10px; }
+      .topbar { flex-wrap: wrap; }
+    @media (max-width: 900px) { .topbar .spacer { display: none; } .crumbwrap { display: none; } .topbar { gap: 6px; } .row { flex-wrap: wrap; } }
   `],
 })
 export class InstanceDetailComponent implements OnDestroy {

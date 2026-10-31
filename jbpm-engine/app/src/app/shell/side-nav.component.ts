@@ -69,39 +69,41 @@ interface NavItem { label: string; icon: string; link: string; }
     </nav>
   `,
   styles: [`
-    .sidenav { width: var(--sidenav-w); background: var(--surface); border-right: 1px solid var(--border); height: 100%; display: flex; flex-direction: column; transition: width .15s; padding: 0; }
-    .sidenav.collapsed { width: 68px; }
-    .brand { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: var(--header-h); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
-    .sidenav.collapsed .brand { flex-direction: column; justify-content: center; height: auto; padding: 14px 6px 12px; gap: 8px; }
+    .sidenav { width: var(--sidenav-w); background: var(--surface); border-radius: var(--radius-shell); box-shadow: var(--shadow-card); border: 1px solid var(--border); height: 100%; display: flex; flex-direction: column; transition: width .18s ease; overflow: hidden; }
+    .sidenav.collapsed { width: 78px; }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 22px 20px 14px; flex: 0 0 auto; }
+    .sidenav.collapsed .brand { flex-direction: column; padding: 20px 8px 10px; gap: 10px; }
     .sidenav.collapsed .theme-toggle, .sidenav.collapsed .collapse { margin-left: 0; }
-    .logo { width: 28px; height: 28px; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 8px; box-shadow: 0 1px 2px rgba(35, 42, 110, .35), 0 1px 0 rgba(255,255,255,.2) inset; }
-    .brand-name { font-weight: 650; letter-spacing: -.02em; font-size: 15px; }
-    .theme-toggle { margin-left: auto; border: none; background: transparent; border-radius: var(--radius-xs); width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer; color: var(--muted); }
-    .theme-toggle:hover { background: var(--surface-3); color: var(--text); }
-    .collapse { border: none; background: transparent; cursor: pointer; color: var(--muted); width: 28px; height: 28px; border-radius: var(--radius-xs); display: grid; place-items: center; }
-    .collapse:hover { background: var(--surface-3); color: var(--text); }
-    .glabel { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; padding: 18px 22px 6px; }
+    .logo { width: 36px; height: 36px; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 12px; box-shadow: 0 10px 20px -8px rgba(90, 56, 204, .8); flex: 0 0 auto; }
+    .brand-name { font-weight: 800; letter-spacing: -.03em; font-size: 17px; color: var(--text); }
+    .theme-toggle, .collapse { border: none; background: var(--surface-3); border-radius: 50%; width: 30px; height: 30px; display: grid; place-items: center; cursor: pointer; color: var(--muted); flex: 0 0 auto; }
+    .theme-toggle { margin-left: auto; }
+    .theme-toggle:hover, .collapse:hover { background: var(--primary-50); color: var(--primary); }
+    .glabel { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 700; padding: 18px 26px 6px; }
     .backdrop { display: none; }
-    .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 0 8px; }
-    ul { list-style: none; margin: 0; padding: 0 12px; display: flex; flex-direction: column; gap: 1px; }
-    /* Quiet rows; the active one gets a tonal fill and an accent bar, not a coloured block. */
-    a { position: relative; display: flex; align-items: center; gap: 11px; padding: 7px 10px; color: var(--text-secondary); border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500; letter-spacing: -.005em; transition: background-color .12s ease, color .12s ease; }
-    a:hover { background: var(--surface-3); color: var(--text); }
-    a.active { color: var(--text); background: var(--surface-3); font-weight: 600; }
-    a.active::before { content: ''; position: absolute; left: -12px; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--primary); }
-    .ic { opacity: .75; } a.active .ic { opacity: 1; color: var(--primary); } a:hover .ic { opacity: 1; }
+    .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 0 8px; }
+    ul { list-style: none; margin: 0; padding: 0 14px; display: flex; flex-direction: column; gap: 2px; }
+    /* Quiet rows. The active one is violet (icon + label) with a soft tint and a bar on the card's right edge, as in the reference. */
+    a { position: relative; display: flex; align-items: center; gap: 14px; padding: 10px 14px; color: var(--text-secondary); border-radius: 16px; font-size: 14px; font-weight: 600; transition: background-color .14s ease, color .14s ease; }
+    .sidenav.collapsed a { justify-content: center; padding: 11px 0; }
+    a:hover { background: var(--primary-50); color: var(--primary); }
+    a.active { color: var(--primary); background: var(--primary-50); font-weight: 700; }
+    a.active::after { content: ''; position: absolute; right: -14px; top: 9px; bottom: 9px; width: 4px; border-radius: 4px 0 0 4px; background: var(--primary); }
+    .ic { opacity: .85; flex: 0 0 auto; } a.active .ic, a:hover .ic { opacity: 1; }
     .spacer { flex: 0 0 0; }
-    .account { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 14px; border-top: 1px solid var(--border); flex: 0 0 auto; }
-    .avatar { flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--primary-50); color: var(--primary); border: 1px solid var(--primary-100); display: grid; place-items: center; font-size: 12px; font-weight: 650; }
+    .account { display: flex; align-items: center; gap: 11px; margin: 8px 14px 16px; padding: 10px 12px; border-radius: 20px; background: var(--surface-2); flex: 0 0 auto; }
+    .sidenav.collapsed .account { margin: 8px 10px 14px; padding: 8px 0; flex-direction: column; background: transparent; }
+    .avatar { flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%; background: var(--grad-brand); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--primary-100); }
     .who { min-width: 0; flex: 1; }
-    .uname { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .uname { font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .roles { font-size: 12px; text-transform: capitalize; color: var(--muted); }
     .logout { flex-shrink: 0; padding: 4px 8px; }
     @media (max-width: 900px) {
-      .backdrop { display: block; position: fixed; inset: 0; background: rgba(8, 10, 16, .55); backdrop-filter: blur(2px); z-index: 299; }
-      .sidenav, .sidenav.collapsed { position: fixed; z-index: 300; top: 0; bottom: 0; left: 0; width: min(300px, 86vw); transform: translateX(-102%); transition: transform .2s ease; box-shadow: var(--shadow-pop); }
+      .backdrop { display: block; position: fixed; inset: 0; background: rgba(20, 14, 50, .5); backdrop-filter: blur(3px); z-index: 299; }
+      .sidenav, .sidenav.collapsed { position: fixed; z-index: 300; top: 0; bottom: 0; left: 0; width: min(300px, 86vw); border-radius: 0 var(--radius-shell) var(--radius-shell) 0; transform: translateX(-102%); transition: transform .22s ease; box-shadow: var(--shadow-pop); }
       .sidenav.open { transform: none; }
       .collapse { display: none; }
+      a.active::after { right: 0; }
     }
   `],
 })

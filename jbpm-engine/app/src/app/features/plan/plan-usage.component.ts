@@ -81,6 +81,7 @@ const LIMIT_LABELS: Array<[string, string]> = [
     .num { text-align: right; font-variant-numeric: tabular-nums; } .muted { color: var(--muted); } .small { font-size: 12px; }
     .bad { color: var(--red); } .error { color: var(--red); background: var(--red-bg); padding: 8px 10px; border-radius: var(--radius-sm); }
     table { width: 100%; border-collapse: collapse; } td { padding: 7px 4px; border-top: 1px solid var(--border); }
+      @media (max-width: 900px) { .row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; } .row .bar { grid-column: 1 / -1; grid-row: 2; } .row .small { grid-column: 1 / -1; margin-top: 0; } .num { text-align: right; white-space: nowrap; } }
   `],
 })
 export class PlanUsageComponent implements OnInit {

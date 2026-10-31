@@ -48,95 +48,26 @@ function roleLabel(role?: string | null): string {
     </header>
   `,
   styles: [`
-    .menu-btn { display: none; flex: 0 0 auto; width: 36px; height: 36px; margin-right: 8px; place-items: center; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: var(--radius-sm); cursor: pointer; }
-    .header {
-      height: var(--header-h);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 24px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    .header-breadcrumb {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .header-badge {
-      display: inline-block;
-      padding: 3px 10px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-pill);
-      background: var(--surface-2);
-      color: var(--text-secondary);
-      font-size: 12px;
-      font-weight: 550;
-      text-transform: capitalize;
-    }
-    .header-breadcrumb-separator {
-      color: var(--border-strong);
-      font-size: 14px;
-      font-weight: 500;
-    }
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-    .header-dev-badge {
-      font-size: 10px;
-      font-weight: 750;
-      padding: 2px 6px;
-      background: var(--orange-bg);
-      color: var(--orange);
-      border: 1px solid rgba(234, 88, 12, .3);
-      border-radius: var(--radius-xs);
-      letter-spacing: .06em;
-    }
-    .header-user {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding-left: 12px;
-      border-left: 1px solid var(--border);
-    }
-    .header-user-avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      background: var(--primary-50);
-      color: var(--primary);
-      border: 1px solid var(--primary-100);
-      display: grid;
-      place-items: center;
-      font-size: 12.5px;
-      font-weight: 650;
-    }
-    .header-user-text {
-      line-height: 1.25;
-    }
-    .header-user-name {
-      font-size: 13px;
-      font-weight: 650;
-      color: var(--text);
-    }
-    .header-user-email {
-      font-size: 11.5px;
-      color: var(--muted);
-      text-transform: capitalize;
-    }
+    .header { height: var(--header-h); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 22px; background: transparent; position: sticky; top: 0; z-index: 100; }
+    .menu-btn { display: none; flex: 0 0 auto; width: 40px; height: 40px; margin-right: 4px; place-items: center; border: 0; background: var(--surface); color: var(--primary); border-radius: 50%; box-shadow: var(--shadow-card); cursor: pointer; }
+    .header-breadcrumb { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .header-badge { display: inline-block; padding: 6px 14px; border-radius: var(--radius-pill); background: var(--surface); box-shadow: var(--shadow-card); color: var(--primary); font-size: 12.5px; font-weight: 700; text-transform: capitalize; }
+    .header-breadcrumb-separator { color: var(--border-strong); font-size: 14px; }
+    .header-actions { display: flex; align-items: center; gap: 12px; }
+    .header-dev-badge { font-size: 10.5px; font-weight: 800; padding: 4px 9px; background: var(--orange-bg); color: var(--orange); border-radius: var(--radius-pill); letter-spacing: .08em; }
+    .header-user { display: flex; align-items: center; gap: 10px; padding: 5px 16px 5px 5px; border-radius: var(--radius-pill); background: var(--surface); box-shadow: var(--shadow-card); }
+    .header-user-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--grad-brand); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--primary-100); }
+    .header-user-text { line-height: 1.25; }
+    .header-user-name { font-size: 13px; font-weight: 700; color: var(--text); }
+    .header-user-email { font-size: 11.5px; color: var(--muted); text-transform: capitalize; }
     @media (max-width: 900px) {
       .menu-btn { display: grid; }
       .header { padding: 0 12px; gap: 8px; }
-      .header-breadcrumb { min-width: 0; flex: 1; }
+      .header-breadcrumb { flex: 1; min-width: 0; overflow: hidden; }
       .header-badge, .header-breadcrumb-separator, .header-user-text, .header-dev-badge { display: none; }
       .header-actions { gap: 8px; flex: 0 0 auto; }
-      app-tenant-switcher { min-width: 0; flex: 1; display: block; max-width: calc(100vw - 190px); }
-      .header-user { padding-left: 0; border-left: none; }
+      .header-user { padding: 3px; }
+      app-tenant-switcher { min-width: 0; display: block; max-width: 100%; }
     }
   `],
 })

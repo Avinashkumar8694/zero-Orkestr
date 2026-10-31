@@ -232,7 +232,7 @@ const COL_W = NW + 100, ROW_H = NH + 46;
     .body { flex: 1; display: flex; min-height: 0; }
 
     .palette { width: 236px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; padding: 14px 12px; }
-    .search { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; margin-bottom: 8px; font-size: 13px; }
+    .search { width: 100%; margin-bottom: 8px; font-size: 13px; }
     .search:focus { outline: none; border-color: var(--primary); }
     .cat-h { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 14px 2px 8px; }
     /* Compact single-column rows, not 2-up tiles. The palette carries 30+ node types across six
@@ -240,7 +240,7 @@ const COL_W = NW + 100, ROW_H = NH + 46;
        into a strip. Icon-left rows fit ~4x more per screen and scan faster. */
     .cat-grid { display: flex; flex-direction: column; gap: 2px; }
     .ptile { display: flex; flex-direction: row; align-items: center; gap: 9px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; cursor: grab; background: transparent; text-align: left; transition: background-color .12s, border-color .12s; }
-    .ptile:hover { background: var(--surface-3); border-color: var(--border); }
+    .ptile:hover { background: var(--primary-50); }
     .ptile:active { cursor: grabbing; }
     .pic { width: 24px; height: 24px; flex-shrink: 0; display: grid; place-items: center; border-radius: 7px; color: #fff; font-size: 12px; font-weight: 600; }
     .plabel { font-size: 12.5px; color: var(--text); line-height: 1.3; }
@@ -457,6 +457,15 @@ const COL_W = NW + 100, ROW_H = NH + 46;
     .vrow .x:hover { background: var(--red-bg); color: var(--red); }
     .modal-body .add { border: 1px dashed var(--border); background: var(--surface); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--muted); margin-top: 6px; }
     .modal-body .add:hover { border-color: var(--primary); color: var(--primary); }
+      @media (max-width: 900px) {
+      .body { flex-direction: column; }
+      .palette { width: 100%; height: 76px; flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; overflow-x: auto; overflow-y: hidden; padding: 8px 12px; }
+      .palette .search { flex: 0 0 150px; width: 150px; margin: 0; }
+      .palette .cat-h { display: none; }
+      .palette .cat-grid { display: contents; }
+      .palette .ptile { flex: 0 0 auto; background: var(--surface-3); border-radius: var(--radius-pill); padding: 6px 12px 6px 8px; white-space: nowrap; }
+      .canvas { min-height: 320px; }
+    }
   `],
 })
 export class ProcessCanvasComponent implements OnChanges {

@@ -104,35 +104,31 @@ import { IconComponent } from '../../shared/icon.component';
   `,
   styles: [`
     .proj { padding: 0; height: 100%; display: flex; flex-direction: column; min-height: 0; }
-    .crumbwrap { padding: 12px 22px 0; }
+    .crumbwrap { padding: 4px 22px 0; }
     /* Editing a process: the canvas needs the room, so the project chrome shrinks to one slim row (actions live on the other project tabs). */
     .proj.focus .crumbwrap, .proj.focus .phead .btn { display: none; }
-    .proj.focus .phead { padding: 6px 22px; }
-    .proj.focus .tabs a { padding: 8px 14px; }
-    .phead { display: flex; align-items: center; gap: 10px; padding: 14px 22px; background: var(--surface); border-bottom: 1px solid var(--border); }
-    .icon-btn { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
-    .pic { width: 34px; height: 34px; display: grid; place-items: center; background: var(--primary-50); color: var(--primary); border-radius: 9px; font-size: 17px; }
+    .proj.focus .phead { padding: 6px 14px; margin-top: 0; }
+    .phead { display: flex; align-items: center; gap: 10px; padding: 12px 18px; margin: 10px 22px 6px; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-card); flex-wrap: wrap; }
+    .icon-btn { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; border: 0; background: var(--surface-3); color: var(--muted); }
+    .pic { width: 34px; height: 34px; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 12px; font-size: 17px; }
     .titles { display: flex; align-items: center; gap: 10px; }
-    .pname { border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; font-size: 17px; font-weight: 700; width: 240px; }
-    .pname:hover { border-color: var(--border); } .pname:focus { border-color: var(--primary); outline: none; }
+    .pname { border: 1px solid transparent; background: transparent; border-radius: var(--radius-pill); padding: 6px 12px; font-size: 17px; font-weight: 800; width: 240px; }
+    .pname:hover { background: var(--surface-3); } .pname:focus { border-color: var(--primary); outline: none; }
     .key { font-size: 12px; color: var(--muted); background: var(--surface-2); padding: 3px 8px; border-radius: 999px; }
-    .tabs { display: flex; gap: 4px; padding: 0 22px; background: var(--surface); border-bottom: 1px solid var(--border); }
-    .tabs a { border: none; background: transparent; padding: 12px 14px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tabs a:hover { color: var(--text); } .tabs a.active { color: var(--primary); border-bottom-color: var(--primary); }
-    .tabbody { padding: 22px; flex: 1; min-height: 0; overflow-y: auto; }
 
+    .tabbody { padding: 22px; flex: 1; min-height: 0; overflow-y: auto; }
     .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 100; backdrop-filter: blur(2px); }
     .modal.denial-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; width: 680px; max-width: 92vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: var(--shadow-pop); }
     .modal-h.denial-h { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
-    .denial-ic { width: 36px; height: 36px; border-radius: 10px; background: #fee2e2; color: #dc2626; display: grid; place-items: center; flex-shrink: 0; }
+    .denial-ic { width: 36px; height: 36px; border-radius: 10px; background: var(--red-bg); color: var(--red); display: grid; place-items: center; flex-shrink: 0; }
     .denial-titles { display: flex; flex-direction: column; gap: 2px; }
     .denial-title { font-weight: 700; font-size: 16px; color: var(--text); }
     .denial-sub { font-size: 12.5px; color: var(--muted); }
     .modal-h .x { border: none; background: transparent; font-size: 16px; cursor: pointer; color: var(--muted); padding: 4px; border-radius: 6px; }
     .modal-h .x:hover { background: var(--surface-2); color: var(--text); }
     .modal-body.denial-body { padding: 18px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
-    .denial-banner { background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px; padding: 12px 14px; font-size: 12.5px; color: #9b2c2c; line-height: 1.45; }
-    .denial-banner strong { color: #742a2a; }
+    .denial-banner { background: var(--red-bg); border: 1px solid transparent; border-radius: 8px; padding: 12px 14px; font-size: 12.5px; color: var(--red); line-height: 1.45; }
+    .denial-banner strong { color: var(--red); }
     .issues-hdr { font-size: 13px; font-weight: 700; color: var(--text); display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
     .denial-issues-list { display: flex; flex-direction: column; gap: 10px; }
     .issue-card { border: 1px solid var(--border); border-radius: 9px; padding: 12px 14px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; border-left: 4px solid var(--border-strong); }
@@ -140,7 +136,7 @@ import { IconComponent } from '../../shared/icon.component';
     .issue-card.node { border-left-color: #f59e0b; }
     .issue-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
     .issue-badge { padding: 2px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; background: #f1f2f6; color: var(--muted); }
-    .issue-badge.code { background: #fee2e2; color: #dc2626; }
+    .issue-badge.code { background: var(--red-bg); color: var(--red); }
     .issue-badge.node { background: #fef3c7; color: #b45309; }
     .issue-loc { color: var(--muted); }
     .issue-loc strong { color: var(--text); }
@@ -148,6 +144,9 @@ import { IconComponent } from '../../shared/icon.component';
     .issue-remedy { font-size: 12px; color: var(--muted); background: var(--surface); padding: 6px 10px; border-radius: 6px; border: 1px dashed var(--border); }
     .remedy-lbl { font-weight: 600; color: var(--text-secondary); }
     .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; background: var(--surface); border-radius: 0 0 14px 14px; }
+      .tabs { margin: 4px 22px 6px; }
+      @media (max-width: 900px) { .proj.focus .phead { display: none; } .phead { margin: 6px 12px; padding: 10px 12px; } .phead .btn { padding: 6px 12px; font-size: 12.5px; } .pname { width: 100%; min-width: 0; flex: 1; } .titles { flex: 1; min-width: 0; } .tabs { margin: 4px 12px 6px; display: flex; overflow-x: auto; flex-wrap: nowrap; } .tabbody { padding: 12px; } .crumbwrap { padding: 4px 14px 0; } }
+      @media (max-width: 900px) { .phead .titles { order: 5; flex: 1 1 100%; } .phead .pname { flex: 1; width: auto; min-width: 0; } .phead .key { flex: 0 0 auto; } }
   `],
 })
 export class ProjectShellComponent {

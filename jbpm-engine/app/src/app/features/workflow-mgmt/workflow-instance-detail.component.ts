@@ -106,9 +106,7 @@ const TABS: { key: Tab; label: string }[] = [
     .spacer { flex: 1; }
     .muted { color: var(--muted); } .mono { font-family: ui-monospace, monospace; } .sm { font-size: 12px; }
     .err { color: var(--red); }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 14px 0 16px; }
-    .tabs button { border: none; background: transparent; padding: 9px 4px; margin-right: 18px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
     .card { padding: 16px; margin-bottom: 10px; }
     textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 12.5px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 8px; }
     .taskrow { display: flex; flex-direction: column; gap: 4px; }

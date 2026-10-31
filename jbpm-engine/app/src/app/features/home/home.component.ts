@@ -27,7 +27,7 @@ import type { Instance, Summary, Task, Workflow } from '../../core/models';
     <div class="page">
       <header class="head">
         <div>
-          <h1>{{ greeting() }}, {{ auth.user()?.username }}</h1>
+          <h1>{{ greeting() }}, <span class="grad">{{ auth.user()?.username }}</span></h1>
           <p class="sub">Here's what's happening across your projects.</p>
         </div>
         <span class="spacer"></span>
@@ -132,7 +132,8 @@ import type { Instance, Summary, Task, Workflow } from '../../core/models';
     /* Tinted top edge: the one place the brand gradient appears on an otherwise calm surface, so the
        numbers read as the page's focal point without shouting. */
     .kpi { position: relative; overflow: hidden; padding: 18px 20px 16px; display: flex; flex-direction: column-reverse; gap: 6px; }
-    .kpi:hover { border-color: var(--border-strong); }
+    .grad { background: var(--grad-brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .kpis > .kpi:nth-child(1) .n { color: var(--primary); } .kpis > .kpi:nth-child(2) .n { color: var(--amber); } .kpis > .kpi:nth-child(3) .n { color: var(--green); } .kpis > .kpi:nth-child(4) .n { color: var(--red); }
     .kpi .n { font-size: var(--text-2xl); line-height: 1.1; font-weight: 650; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
     .kpi .n.amber { color: var(--amber); } .kpi .n.red { color: var(--red); }
     .kpi .l { font-size: 13px; font-weight: 500; color: var(--text-secondary); }

@@ -42,15 +42,16 @@ import { IconComponent } from '../../shared/icon.component';
     </div>
   `,
   styles: [`
-    .page { display: flex; flex-direction: column; height: 100%; margin: -22px; }
+    .page { display: flex; flex-direction: column; height: 100%; min-height: 520px; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-card); overflow: hidden; }
     .pheader { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-    .back { width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); text-decoration: none; }
+    @media (max-width: 900px) { .pheader { flex-wrap: wrap; row-gap: 6px; padding: 8px 12px; } .pheader .btn { padding: 6px 12px; font-size: 12.5px; } .spacer { flex-basis: 100%; height: 0; } .page { height: calc(100vh - 150px) !important; min-height: 460px !important; border-radius: var(--radius-sm); } }
+    .back { width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; border: 0; background: var(--surface-3); color: var(--muted); text-decoration: none; }
     .back:hover { color: var(--text); background: var(--surface-2); }
     .titles { display: flex; align-items: center; gap: 10px; min-width: 0; }
     .pname { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
     .savestate { font-size: 12px; color: var(--muted); flex-shrink: 0; } .savestate.dirty { color: var(--amber); }
     .divider { width: 1px; height: 20px; background: var(--border); }
-    .icon-btn { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border); background: var(--surface); border-radius: 8px; cursor: pointer; color: var(--muted); font-size: 13px; }
+    .icon-btn { width: 30px; height: 30px; display: grid; place-items: center; border: 0; background: var(--surface-3); border-radius: 50%; cursor: pointer; color: var(--muted); font-size: 13px; }
     .icon-btn:hover { background: var(--surface-2); color: var(--text); }
     .canvas-body { flex: 1; min-height: 0; }
   `],

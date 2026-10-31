@@ -7,6 +7,7 @@ import { HeaderComponent } from './shell/header.component';
 import { ToastComponent } from './shared/toast.component';
 import { ModalComponent } from './shared/modal.component';
 import { ThemeService } from './core/theme.service';
+import { installResponsiveTables } from './shared/responsive-tables';
 
 /** pages that render on their own (no sidebar/header): landing, every auth screen, invitation + SSO landing, workspace setup */
 const STANDALONE = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/auth/callback', '/accept-invite', '/no-workspace'];
@@ -36,14 +37,17 @@ const isStandalone = (url: string) => { const u = url.split('?')[0].split('#')[0
   styles: [`
     :host { display: flex; flex-direction: column; height: 100vh; padding: 0; }
     /* Full-bleed workspace: sidebar and content meet the window edges, separated by hairlines rather than a floating rounded card. */
-    .layout { flex: 1; display: flex; min-height: 0; background: var(--surface); }
-    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--grad-page), var(--bg); position: relative; }
-    .page-content { flex: 1; min-height: 0; overflow: auto; position: relative; }
+    /* Floating cards on a lavender canvas: sidebar card on the left, header + content on the right. */
+    .layout { flex: 1; display: flex; gap: 18px; padding: 18px; min-height: 0; background: transparent; }
+    .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: transparent; position: relative; }
+    .page-content { flex: 1; min-height: 0; overflow: auto; position: relative; border-radius: var(--radius-shell); }
+    @media (max-width: 900px) { .layout { padding: 0; gap: 0; } .page-content { border-radius: 0; } }
   `],
 })
 export class AppComponent {
   private router = inject(Router);
   private theme = inject(ThemeService);
+  constructor() { installResponsiveTables(); }
 
   isStandalonePage = toSignal(
     this.router.events.pipe(

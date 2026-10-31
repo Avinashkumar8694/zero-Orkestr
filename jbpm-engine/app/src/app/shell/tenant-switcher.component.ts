@@ -100,17 +100,21 @@ function roleLabel(role?: string | null): string {
   styles: [`
     .tenant-switcher {
       position: relative;
-      display: inline-block;
+      display: block;
+      max-width: 100%;
       font-family: var(--font);
     }
     .tenant-switcher-button {
+      max-width: 100%;
+      min-width: 0;
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 6px 12px;
-      background: var(--surface-2);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--radius-xs);
+      padding: 7px 14px;
+      background: var(--surface);
+      border: 1px solid transparent;
+      box-shadow: var(--shadow-card);
+      border-radius: var(--radius-pill);
       color: var(--text);
       font-size: 13.5px;
       font-weight: 550;
@@ -118,8 +122,7 @@ function roleLabel(role?: string | null): string {
       transition: background-color .15s, border-color .15s;
     }
     .tenant-switcher-button:hover:not(:disabled) {
-      background: var(--surface-3);
-      border-color: var(--primary);
+      background: var(--primary-50);
     }
     .tenant-switcher-button:disabled {
       cursor: default;
@@ -127,6 +130,7 @@ function roleLabel(role?: string | null): string {
     }
     .tenant-icon { font-size: 14px; }
     .tenant-name {
+      min-width: 0;
       max-width: 170px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -153,8 +157,8 @@ function roleLabel(role?: string | null): string {
       left: 0;
       width: 320px;
       background: var(--surface);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
       box-shadow: var(--shadow-pop);
       z-index: 1000;
       padding: 8px;

@@ -127,23 +127,19 @@ type Tab = 'deployment' | 'schema';
     td.right { text-align: right; }
     .empty-state { padding: 40px; text-align: center; }
     .es-icon { margin: 0 auto 10px; color: var(--muted); }
-
     .modal-bg { position: fixed; inset: 0; background: rgba(16,24,40,.4); display: grid; place-items: center; z-index: 50; }
     .modal { background: var(--surface); border-radius: 14px; width: 440px; max-width: 92vw; max-height: 86vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-pop); }
     .modal.wide { width: 760px; max-width: 94vw; }
     .modal-h { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--border); font-weight: 700; }
     .modal-h .x { border: none; background: transparent; font-size: 16px; cursor: pointer; color: var(--muted); }
     .modal-body { padding: 16px 18px; overflow: auto; }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding: 0 18px; }
-    .tabs button { border: none; background: transparent; padding: 9px 4px; margin-right: 18px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
 
     .fld { display: block; margin-bottom: 10px; } .fld span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
     .fld input, .fld select { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 13px; font-family: inherit; }
     .fld input:disabled { opacity: .6; }
     .hint.sm { font-size: 12px; color: var(--muted); margin: -4px 0 12px; }
     .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; margin: 14px 0 8px; }
-
     .depgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
     .depcard { text-align: left; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
     .depcard:hover { border-color: var(--border-strong); }
@@ -151,14 +147,12 @@ type Tab = 'deployment' | 'schema';
     .dc-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .dc-name { font-weight: 600; font-size: 13px; }
     .dc-row { display: flex; justify-content: space-between; font-size: 12px; }
-
     .setting-row { display: flex; align-items: center; gap: 16px; padding: 8px 0; }
     .setting-row .lbl { flex: 1; font-size: 13px; }
     .setting-row .shint { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
     .switch { width: 34px; height: 20px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-3); position: relative; cursor: pointer; flex: none; }
     .switch::after { content: ''; position: absolute; top: 1px; left: 1px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .12s; }
     .switch.on { background: var(--primary); border-color: var(--primary); } .switch.on::after { transform: translateX(14px); }
-
     .fieldrow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
     .fkey { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 13px; }
     .fieldrow select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 13px; }

@@ -62,8 +62,8 @@ import { IconComponent } from '../shared/icon.component';
   styles: [`
     /* Lives in the header's action row (it used to float over the page and sat on top of the DEV badge). */
     :host { position: relative; display: inline-flex; align-items: center; }
-    .bell { position: relative; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); border-radius: 50%; cursor: pointer; box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.06)); }
-    .bell:hover { color: var(--text); background: var(--surface-3); }
+    .bell { position: relative; width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: var(--surface); color: var(--text-secondary); border-radius: 50%; cursor: pointer; box-shadow: var(--shadow-card); }
+    .bell:hover { color: var(--primary); background: var(--primary-50); }
     .dot { position: absolute; top: 7px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--red, #ef4444); border: 2px solid var(--surface); }
     .panel { position: absolute; top: 44px; right: 0; z-index: 200; width: min(340px, calc(100vw - 24px)); box-shadow: var(--shadow-pop, 0 12px 32px -8px rgba(0,0,0,.25)); border-radius: var(--radius-md, 12px); background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
     .head { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }

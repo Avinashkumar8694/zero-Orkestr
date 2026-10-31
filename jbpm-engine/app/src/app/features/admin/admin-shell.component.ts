@@ -31,10 +31,9 @@ import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
     .ahead { padding: 10px 22px 14px; }
     h1 { font-size: 20px; margin: 0; }
     .scope { margin: 4px 0 0; font-size: 13px; } .warn { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: var(--amber-bg, #fff4d6); color: var(--amber, #8a5a00); }
-    .tabs { display: flex; gap: 4px; padding: 0 22px; background: var(--surface); border-bottom: 1px solid var(--border); }
-    .tabs a { border: none; background: transparent; padding: 12px 14px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tabs a:hover { color: var(--text); } .tabs a.active { color: var(--primary); border-bottom-color: var(--primary); }
+
     .tabbody { padding: 22px; }
+      .tabs { margin: 4px 22px 6px; }
   `],
 })
 export class AdminShellComponent {

@@ -177,9 +177,7 @@ type SettingsTab = 'account' | 'system';
     h1 { font-size: 19px; margin: 0; }
     .muted { color: var(--muted); }
     .pagehead p { margin: 4px 0 0; font-size: 13px; }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-    .tab { border: none; background: none; padding: 9px 4px; margin-right: 18px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
     .sections { display: flex; flex-direction: column; gap: 16px; }
     .card { padding: 20px; }
     h3 { font-size: 14px; margin: 0 0 4px; }
