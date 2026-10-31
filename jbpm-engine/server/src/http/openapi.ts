@@ -230,14 +230,19 @@ const paths: Record<string, any> = {
     get: { tags: ['IAM'], summary: 'List groups (admin)', responses: ok(listOf('Group')) },
     post: { tags: ['IAM'], summary: 'Create a group (admin)', requestBody: jsonBody({ type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } } }), responses: created(ref('Group')) },
   },
-  '/groups/{id}': { delete: { tags: ['IAM'], summary: 'Delete a group (admin)', parameters: [idParam()], responses: { '204': { description: 'Deleted' } } } },
+  '/groups/{id}': {
+    patch: { tags: ['IAM'], summary: 'Rename / re-describe a group; a rename carries every member along (admin)', parameters: [idParam()], requestBody: jsonBody({ type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } } }), responses: ok(ref('Group')) },
+    delete: { tags: ['IAM'], summary: 'Delete a group and detach it from its members (admin)', parameters: [idParam()], responses: { '204': { description: 'Deleted' } } },
+  },
+  '/groups/{id}/members': { put: { tags: ['IAM'], summary: 'Replace a group’s membership with exactly these users (admin)', parameters: [idParam()], requestBody: jsonBody({ type: 'object', properties: { userIds: { type: 'array', items: { type: 'string' } } } }), responses: { '200': { description: 'Updated' } } } },
   '/roles': {
     get: { tags: ['IAM'], summary: 'List roles (admin)', responses: ok(listOf('Role')) },
     post: { tags: ['IAM'], summary: 'Create a role (admin)', requestBody: jsonBody({ type: 'object', properties: { name: { type: 'string' }, permissions: { type: 'array', items: { type: 'string' } } } }), responses: created(ref('Role')) },
   },
+  '/roles/permissions': { get: { tags: ['IAM'], summary: 'The permission strings roles may carry, grouped for display (admin)', responses: { '200': { description: 'Permission catalogue' } } } },
   '/roles/{id}': {
     patch: { tags: ['IAM'], summary: 'Replace a role’s permissions (admin; the built-in "admin" role is immutable)', parameters: [idParam()], requestBody: jsonBody({ type: 'object', properties: { permissions: { type: 'array', items: { type: 'string' } } } }), responses: ok(ref('Role')) },
-    delete: { tags: ['IAM'], summary: 'Delete a role (admin; the built-in "admin" role cannot be deleted)', parameters: [idParam()], responses: { '204': { description: 'Deleted' } } },
+    delete: { tags: ['IAM'], summary: 'Delete a custom role (409 while assigned), or reset a customised built-in role to its defaults (200 { reset: true }); "admin" cannot be deleted (admin)', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, '200': { description: 'Built-in role reset to defaults' } } },
   },
 };
 

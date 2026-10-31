@@ -44,8 +44,10 @@ import { IconComponent } from '../../shared/icon.component';
           <div class="tabbody">
             <div class="field"><label>Roles</label>
               @for (r of roles(); track r.id) {
-                <label class="chkrow"><input type="checkbox" [checked]="editRoles.includes(r.name)" (change)="toggle(editRoles, r.name)" /> {{ r.name }}</label>
+                <label class="chkrow"><input type="checkbox" [checked]="editRoles.includes(r.name)" (change)="toggle(editRoles, r.name)" /> {{ r.name }}@if (r.builtIn) { <span class="muted sm"> · built-in</span> }</label>
               }
+              @if (!roles().length) { <p class="muted sm">No roles could be loaded for this workspace.</p> }
+              @if (!editRoles.length) { <p class="muted sm">A user with no role cannot access this workspace.</p> }
             </div>
             <div class="field"><label>Groups</label>
               @for (g of groups(); track g.id) {
@@ -72,8 +74,9 @@ import { IconComponent } from '../../shared/icon.component';
             <div class="field"><label>Password</label><input type="password" [(ngModel)]="newPasswordField" placeholder="min 8 characters" /></div>
             <div class="field"><label>Roles</label>
               @for (r of roles(); track r.id) {
-                <label class="chkrow"><input type="checkbox" [checked]="newRoles.includes(r.name)" (change)="toggle(newRoles, r.name)" /> {{ r.name }}</label>
+                <label class="chkrow"><input type="checkbox" [checked]="newRoles.includes(r.name)" (change)="toggle(newRoles, r.name)" /> {{ r.name }}@if (r.builtIn) { <span class="muted sm"> · built-in</span> }</label>
               }
+              @if (!newRoles.length) { <p class="muted sm">A user with no role cannot access this workspace.</p> }
             </div>
             <div class="field"><label>Groups</label>
               @for (g of groups(); track g.id) {
@@ -119,9 +122,9 @@ export class UsersListComponent {
   constructor() { this.reload(); }
   reload() {
     this.loading.set(true);
-    this.api.listUsers().subscribe({ next: (u) => { this.users.set(u); this.loading.set(false); }, error: () => this.loading.set(false) });
-    this.api.listRoles().subscribe((r) => this.roles.set(r));
-    this.api.listGroups().subscribe((g) => this.groups.set(g));
+    this.api.listUsers().subscribe({ next: (u) => { this.users.set(u); this.loading.set(false); }, error: (e) => { this.loading.set(false); this.toast.error(e?.error?.error?.message || 'Could not load users'); } });
+    this.api.listRoles().subscribe({ next: (r) => this.roles.set(r), error: (e) => this.toast.error(e?.error?.error?.message || 'Could not load roles') });
+    this.api.listGroups().subscribe({ next: (g) => this.groups.set(g), error: () => {} });
   }
   toggle(list: string[], name: string) { const i = list.indexOf(name); if (i >= 0) list.splice(i, 1); else list.push(name); }
   select(u: AppUser) { this.sel.set(u); this.editRoles = [...u.roles]; this.editGroups = [...u.groups]; this.editActive = u.active; this.newPassword = ''; }

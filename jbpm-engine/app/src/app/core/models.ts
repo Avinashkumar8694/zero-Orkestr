@@ -155,8 +155,9 @@ export interface VariableChange { name: string; from: unknown; to: unknown; at: 
 
 // ---- IAM (users/groups/roles) ----
 export interface AppUser { id: string; username: string; roles: string[]; groups: string[]; active: boolean; createdAt: string; }
-export interface AppGroup { id: string; name: string; description?: string; }
-export interface AppRole { id: string; name: string; permissions: string[]; }
+export interface AppGroup { id: string; name: string; description?: string; memberCount?: number; }
+export interface AppRole { id: string; name: string; permissions: string[]; builtIn?: boolean; overridden?: boolean; protected?: boolean; userCount?: number; memberCount?: number; }
+export interface PermissionInfo { key: string; label: string; group: string; }
 
 // ---- query / task-admin / analytics (docs/17) ----
 export interface UserRow { user: string; groups: string[]; startedInstances: number; openTasks: number; completedTasks: number; }

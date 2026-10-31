@@ -33,7 +33,8 @@ import { openapiSpec, swaggerHtml } from './openapi.ts';
 import { buildWorkflowInstanceRoutes } from './routes/workflow-instances.ts';
 import { buildTeamRoutes } from './team-routes.ts';
 import { hub } from '../infra/ws-hub.ts';
-import { requirePermission } from './auth-middleware.ts';
+import { requirePermission, callerPermissions } from './auth-middleware.ts';
+import { PERMISSION_CATALOG } from '../modules/iam/permissions.ts';
 import { rateLimit } from './rate-limit.ts';
 
 const ctxOf = (req: Request): AppContext => (req as any).ctx;
@@ -301,17 +302,20 @@ export function buildRoutes(): Router {
   // --- IAM: users, groups, roles (admin-only) ---
   const iam = (req: Request) => new IamService(ctxOf(req));
   r.get('/users', perm('admin:iam'), asyncHandler(async (req, res) => res.json({ items: await iam(req).listUsers() })));
-  r.post('/users', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createUser(req.body, actorOf(req)))));
+  r.post('/users', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createUser(req.body || {}, actorOf(req), await callerPermissions(req)))));
   r.get('/users/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).getUser(req.params.id))));
-  r.patch('/users/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateUser(req.params.id, req.body, actorOf(req)))));
+  r.patch('/users/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateUser(req.params.id, req.body || {}, actorOf(req), await callerPermissions(req)))));
   r.post('/users/:id/password', perm('admin:iam'), asyncHandler(async (req, res) => { await iam(req).setPassword(req.params.id, req.body?.password, actorOf(req)); res.status(204).end(); }));
   r.get('/groups', perm('admin:iam'), asyncHandler(async (req, res) => res.json({ items: await iam(req).listGroups() })));
-  r.post('/groups', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createGroup(req.body, actorOf(req)))));
+  r.post('/groups', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createGroup(req.body || {}, actorOf(req)))));
+  r.patch('/groups/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateGroup(req.params.id, req.body || {}, actorOf(req)))));
+  r.put('/groups/:id/members', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).setGroupMembers(req.params.id, req.body?.userIds, actorOf(req)))));
   r.delete('/groups/:id', perm('admin:iam'), asyncHandler(async (req, res) => { await iam(req).deleteGroup(req.params.id, actorOf(req)); res.status(204).end(); }));
   r.get('/roles', perm('admin:iam'), asyncHandler(async (req, res) => res.json({ items: await iam(req).listRoles() })));
-  r.post('/roles', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createRole(req.body, actorOf(req)))));
-  r.patch('/roles/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateRole(req.params.id, req.body?.permissions || [], actorOf(req)))));
-  r.delete('/roles/:id', perm('admin:iam'), asyncHandler(async (req, res) => { await iam(req).deleteRole(req.params.id, actorOf(req)); res.status(204).end(); }));
+  r.get('/roles/permissions', perm('admin:iam'), asyncHandler(async (_req, res) => res.json({ items: PERMISSION_CATALOG })));
+  r.post('/roles', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createRole(req.body || {}, actorOf(req), await callerPermissions(req)))));
+  r.patch('/roles/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateRole(req.params.id, req.body?.permissions, actorOf(req), await callerPermissions(req)))));
+  r.delete('/roles/:id', perm('admin:iam'), asyncHandler(async (req, res) => { const out = await iam(req).deleteRole(req.params.id, actorOf(req)); out.reset ? res.json(out) : res.status(204).end(); }));
 
   // --- Workflow Instance Management (Case Management) ---
   r.use(buildWorkflowInstanceRoutes());

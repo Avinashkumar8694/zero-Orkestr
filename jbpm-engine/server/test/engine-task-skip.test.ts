@@ -103,6 +103,7 @@ test('group membership is enforced ONLY for real registered IAM users — ad-hoc
 test('a registered user NOT in the task\'s group is rejected; a member of the group (or the assignee) succeeds', async () => {
   const ctx = newCtx();
   const iam = new IamService(ctx);
+  await iam.createGroup({ name: 'finance' }, 'admin'); await iam.createGroup({ name: 'ops' }, 'admin');
   await iam.createUser({ username: 'outsider', password: 'password123', groups: ['finance'] }, 'admin');
   await iam.createUser({ username: 'ops-carol', password: 'password123', groups: ['ops'] }, 'admin');
 

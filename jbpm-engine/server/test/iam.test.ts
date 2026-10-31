@@ -88,6 +88,8 @@ test('user/group CRUD: duplicate names rejected, groups deletable, users updatab
   assert.strictEqual((await iam.listGroups()).length, 0);
 
   const dave = (await iam.listUsers()).find((u) => u.username === 'dave')!;
+  await assert.rejects(() => iam.updateUser(dave.id, { groups: ['ops'] }, 'admin'), /unknown group/, 'a deleted group cannot be assigned');
+  await iam.createGroup({ name: 'ops' }, 'admin');
   const updated = await iam.updateUser(dave.id, { roles: ['worker'], groups: ['ops'] }, 'admin');
   assert.deepStrictEqual(updated.roles, ['worker']);
   assert.deepStrictEqual(updated.groups, ['ops']);

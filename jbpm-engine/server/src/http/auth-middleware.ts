@@ -128,3 +128,15 @@ export function requireWorkspaceAccess(req: Request, _res: Response, next: NextF
     }
   })();
 }
+
+/** What the caller may hand out to others: everything for the platform administrator, else what their own seat in the
+ *  request's workspace (or, for local IAM users, their Role rows) grants. Used to stop role/permission escalation. */
+export async function callerPermissions(req: Request): Promise<string[]> {
+  const access = (req as any).access as Access | undefined;
+  if (access?.platformAdmin) return ['*'];
+  const ctx = (req as any).ctx as AppContext;
+  const user = (req as any).user as JwtClaims;
+  if (access?.member) return access.member.permissions ?? await permissionsForMemberRole(ctx, ctx.tenantId, access.member.role);
+  const roles = await ctx.store.repo<Role>(Collections.roles).query((r) => r.tenantId === ctx.tenantId && (user?.roles || []).includes(r.name));
+  return roles.flatMap((r) => r.permissions);
+}
