@@ -1,9 +1,10 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, isDevMode } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AuthService } from '../core/auth/auth.service';
 import { TenantService } from '../core/tenant/tenant.service';
 import { TenantSwitcherComponent } from './tenant-switcher.component';
 import { NotificationsBellComponent } from './notifications-bell.component';
+import { NavDrawerService } from './nav-drawer.service';
 
 function roleLabel(role?: string | null): string {
   if (!role) return 'Member';
@@ -18,6 +19,9 @@ function roleLabel(role?: string | null): string {
   imports: [CommonModule, TenantSwitcherComponent, NotificationsBellComponent],
   template: `
     <header class="header">
+      <button class="menu-btn" (click)="drawer.toggle()" aria-label="Open navigation menu" [attr.aria-expanded]="drawer.open()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
       <div class="header-breadcrumb">
         <span class="header-badge" title="Your role in this workspace">
           {{ roleLabel(tenant.role()) }}
@@ -27,7 +31,7 @@ function roleLabel(role?: string | null): string {
       </div>
 
       <div class="header-actions">
-        <span class="header-dev-badge" title="Development build">DEV</span>
+        @if (dev) { <span class="header-dev-badge" title="Development build">DEV</span> }
         <app-notifications-bell />
         @if (auth.user(); as u) {
           <div class="header-user" [title]="u.username">
@@ -44,6 +48,7 @@ function roleLabel(role?: string | null): string {
     </header>
   `,
   styles: [`
+    .menu-btn { display: none; flex: 0 0 auto; width: 36px; height: 36px; margin-right: 8px; place-items: center; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: var(--radius-sm); cursor: pointer; }
     .header {
       height: var(--header-h);
       display: flex;
@@ -123,11 +128,22 @@ function roleLabel(role?: string | null): string {
       color: var(--muted);
       text-transform: capitalize;
     }
+    @media (max-width: 900px) {
+      .menu-btn { display: grid; }
+      .header { padding: 0 12px; gap: 8px; }
+      .header-breadcrumb { min-width: 0; flex: 1; }
+      .header-badge, .header-breadcrumb-separator, .header-user-text, .header-dev-badge { display: none; }
+      .header-actions { gap: 8px; flex: 0 0 auto; }
+      app-tenant-switcher { min-width: 0; flex: 1; display: block; max-width: calc(100vw - 190px); }
+      .header-user { padding-left: 0; border-left: none; }
+    }
   `],
 })
 export class HeaderComponent {
+  drawer = inject(NavDrawerService);
   auth = inject(AuthService);
   tenant = inject(TenantService);
 
   roleLabel = roleLabel;
+  dev = isDevMode();
 }

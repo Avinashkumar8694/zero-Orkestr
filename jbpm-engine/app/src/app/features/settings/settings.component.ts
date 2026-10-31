@@ -22,7 +22,7 @@ type SettingsTab = 'account' | 'system';
   template: `
     <div class="page">
       <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Settings' }]" /></div>
-      <header class="pagehead"><h1>Settings</h1><p class="muted">Your appearance, account and password@if (canAdmin()) { , plus system-wide configuration }.</p></header>
+      <header class="pagehead"><h1>Settings</h1><p class="muted">Your appearance, account and password{{ canAdmin() ? ', plus system-wide configuration' : '' }}.</p></header>
 
       @if (canAdmin()) {
         <div class="tabs">

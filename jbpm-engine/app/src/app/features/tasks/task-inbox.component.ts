@@ -59,6 +59,9 @@ const SCOPES: { key: Scope; label: string }[] = [
             <div class="es-icon"><app-icon name="success" [size]="24" /></div>
             <h3>{{ hasFilters() ? 'No tasks match your filters' : 'Nothing here' }}</h3>
             <p>{{ hasFilters() ? 'Try widening the filters above.' : (scope() === 'mine' ? "You don't have any tasks assigned." : scope() === 'available' ? 'No unclaimed tasks are waiting for your groups right now.' : 'No tasks exist yet.') }}</p>
+            @if (!hasFilters() && scope() !== 'all' && countFor('all') > 0) {
+              <button class="btn sm" (click)="setScope('all')">Show all {{ countFor('all') }} task{{ countFor('all') === 1 ? '' : 's' }} in this workspace</button>
+            }
           </div>
         } @else {
           <table>

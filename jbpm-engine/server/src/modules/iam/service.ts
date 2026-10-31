@@ -283,7 +283,7 @@ export class IamService {
     const users = await this.users().query((u) => u.tenantId === this.ctx.tenantId);
     const seats = await this.ctx.store.repo<TenantMember>(Collections.tenantMembers).query((m) => m.tenantId === this.ctx.tenantId && (m.status === 'active' || m.status === 'invited'));
     const info = (r: Role, virtual: boolean): RoleInfo => ({
-      ...r, builtIn: r.name in DEFAULT_ROLES, overridden: r.name in DEFAULT_ROLES && !virtual, protected: r.name === 'admin',
+      ...r, builtIn: r.name in DEFAULT_ROLES, overridden: r.name in DEFAULT_ROLES && !virtual && [...r.permissions].sort().join() !== [...DEFAULT_ROLES[r.name]!].sort().join(), protected: r.name === 'admin',
       userCount: users.filter((u) => u.roles.includes(r.name)).length, memberCount: seats.filter((m) => m.role === r.name).length,
     });
     const have = new Set(rows.map((r) => r.name));

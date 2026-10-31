@@ -31,8 +31,8 @@ import { IconComponent } from '../../shared/icon.component';
                 <tr (click)="select(r)" [class.sel]="sel()?.name === r.name">
                   <td><b>{{ r.name }}</b>
                     @if (r.protected) { <span class="badge">protected</span> } @else if (r.builtIn) { <span class="badge">{{ r.overridden ? 'built-in · customised' : 'built-in' }}</span> } @else { <span class="badge">custom</span> }</td>
-                  <td class="muted">{{ summary(r) }}</td>
-                  <td class="muted">{{ r.userCount || 0 }} users · {{ r.memberCount || 0 }} seats</td>
+                  <td class="muted nw">{{ summary(r) }}</td>
+                  <td class="muted nw">{{ r.userCount || 0 }} {{ r.userCount === 1 ? 'user' : 'users' }} · {{ r.memberCount || 0 }} {{ r.memberCount === 1 ? 'seat' : 'seats' }}</td>
                 </tr>
               }
             </tbody>
@@ -86,7 +86,7 @@ import { IconComponent } from '../../shared/icon.component';
   styles: [`
     .split { display: grid; grid-template-columns: minmax(380px, 520px) 1fr; gap: 16px; align-items: start; }
     .list tr { cursor: pointer; } .list tbody tr:hover { background: var(--surface-2); } .list tr.sel td { background: var(--primary-50); }
-    .badge { margin-left: 6px; }
+    .badge { margin-left: 6px; } .nw { white-space: nowrap; }
     .d-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
     .tabbody { padding: 14px 16px; }
     .pad { padding: 14px; }

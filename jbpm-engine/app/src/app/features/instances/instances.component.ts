@@ -1,3 +1,4 @@
+import { processLabel } from '../../core/process-label';
 import { Component, HostListener, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -36,7 +37,8 @@ const SAVED_KEY = 'instances.savedFilters';
 
       <div class="layout">
         <!-- FILTER RAIL (ux_design/mockups/instances-list.html) — persistent, not a flyout. -->
-        <aside class="rail card">
+        <button class="btn filter-toggle" (click)="railOpen.set(!railOpen())" [attr.aria-expanded]="railOpen()"><app-icon name="list" [size]="14" /> {{ railOpen() ? 'Hide filters' : 'Filters' }}</button>
+        <aside class="rail card" [class.shown]="railOpen()">
           <div class="rail-h">
             <span class="section-title">Filters</span>
             <span class="spacer"></span>
@@ -195,6 +197,9 @@ const SAVED_KEY = 'instances.savedFilters';
     .list table { width: 100%; border-collapse: collapse; min-width: 720px; }
     .list th, .list td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
     tbody tr:hover { background: var(--surface-2); } tr.sel td { background: var(--primary-50); }
+    .filter-toggle { display: none; }
+    @media (max-width: 900px) { .filter-toggle { display: inline-flex; align-items: center; gap: 6px; justify-self: start; } .rail:not(.shown) { display: none; } }
+    .piid { white-space: nowrap; }
     .piid a, .plain { color: var(--primary); font-weight: 600; text-decoration: none; }
     .piid a:hover, .plain:hover { text-decoration: underline; }
     .proj { font-size: 11.5px; margin-top: 2px; }
@@ -281,6 +286,8 @@ export class InstancesComponent {
     const def = this.savedFilters().find((sf) => sf.isDefault);
     if (def) this.applySaved(def);
   }
+
+  railOpen = signal(false);
 
   reload() {
     const workflowId = this.projectFilter() || undefined;
@@ -370,7 +377,7 @@ export class InstancesComponent {
   }
 
   statusColor(s: string) { return ({ running: '#2563eb', waiting: '#f59e0b', completed: '#16a34a', failed: '#dc2626', aborted: '#6b7280', suspended: '#7c3aed' } as any)[s] || '#6b7280'; }
-  procName(i: Instance) { return (i.processId || i.workflowId || '').split('.').pop() || i.workflowId; }
+  procName(i: Instance) { return processLabel(i.processId, i.workflowId); }
   /** Tail of a ULID: the first 8 chars are the ms timestamp, so same-batch ids front-slice
    *  identically (three rows all reading "01KZBZ4N" on the live list). The random part is the END. */
   shortId(id: string) { return id.length > 10 ? '…' + id.slice(-7) : id; }

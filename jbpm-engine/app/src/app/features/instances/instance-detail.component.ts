@@ -1,3 +1,4 @@
+import { processLabel } from '../../core/process-label';
 import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -478,7 +479,7 @@ export class InstanceDetailComponent implements OnDestroy {
   visual(t: string) { return this.catalog()?.diagram?.[t] || { icon: 'info', color: '#64748b', shape: 'rectangle' as const }; }
   shapeOf(t: string) { return this.visual(t).shape; }
   statusColor(s: string) { return ({ running: '#2563eb', waiting: '#f59e0b', completed: '#16a34a', failed: '#dc2626', aborted: '#6b7280', suspended: '#7c3aed' } as any)[s] || '#6b7280'; }
-  procName(i: Instance) { return (i.processId || i.workflowId || '').split('.').pop() || i.workflowId; }
+  procName(i: Instance) { return processLabel(i.processId, i.workflowId); }
   shortId(id: string) { return id.length > 10 ? id.slice(-7) : id; }
   version(i: Instance) { const d = this.deployments()[i.deploymentId]; return d ? (d.versionLabel || ('v' + (d.versionNumber ?? '?'))) + ' · ' + d.environment : '—'; }
   count(id: string) { return this.graph().counts?.[id] || 0; }

@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
 
 interface Period { used: number; limit: number | null; remaining: number | null; resetsAt: string }
 interface Res { used: number; limit: number | null }
@@ -20,8 +21,10 @@ const LIMIT_LABELS: Array<[string, string]> = [
 @Component({
   selector: 'app-plan-usage',
   standalone: true,
+  imports: [BreadcrumbComponent],
   template: `
     <div class="page">
+      <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Plan & usage' }]" /></div>
       <header>
         <h1>Plan &amp; usage</h1>
         @if (data(); as d) {
@@ -67,6 +70,7 @@ const LIMIT_LABELS: Array<[string, string]> = [
     </div>
   `,
   styles: [`
+    .crumbwrap { margin-bottom: 10px; }
     .page { padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
     h1 { margin: 0 0 4px; font-size: var(--text-xl); } h3 { margin: 0 0 12px; font-size: 15px; }
     .card { padding: 16px 18px; border-radius: var(--radius-shell); }

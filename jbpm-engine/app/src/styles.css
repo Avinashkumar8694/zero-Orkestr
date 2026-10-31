@@ -319,3 +319,12 @@ input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 1
 .auth-links a, .auth-foot a { color: var(--primary); cursor: pointer; text-decoration: none; } .auth-links a:hover, .auth-foot a:hover { text-decoration: underline; }
 .auth-foot { text-align: center; font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
 .auth-card .btn.primary, .auth-card .btn.secondary { justify-content: center; padding: 10px; font-size: 14px; width: 100%; }
+
+/* ---- Small screens: master/detail and multi-column pages stack into one column; wide tables scroll inside their card ---- */
+@media (max-width: 900px) {
+  .split, .layout, .grid2, .grid3, .tabgrid, .chartgrid { grid-template-columns: 1fr !important; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .card { max-width: 100%; overflow-x: auto; }
+  .pagehead { flex-wrap: wrap; gap: 8px; }
+  .page, .page-content > * { max-width: 100%; }
+}

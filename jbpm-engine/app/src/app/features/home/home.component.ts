@@ -1,3 +1,4 @@
+import { processLabel } from '../../core/process-label';
 import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { SlicePipe } from '@angular/common';
@@ -127,7 +128,7 @@ import type { Instance, Summary, Task, Workflow } from '../../core/models';
     .sub { margin-top: 4px; color: var(--text-secondary); }
     .spacer { flex: 1; }
 
-    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
     /* Tinted top edge: the one place the brand gradient appears on an otherwise calm surface, so the
        numbers read as the page's focal point without shouting. */
     .kpi { position: relative; overflow: hidden; padding: 18px 20px; display: flex; flex-direction: column; gap: 2px; }
@@ -221,7 +222,7 @@ export class HomeComponent {
     const h = new Date().getHours();
     return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   }
-  procName(i: Instance) { return (i.processId || i.workflowId || '').split('.').pop() || i.workflowId; }
+  procName(i: Instance) { return processLabel(i.processId, i.workflowId); }
   /** Tail of a ULID: the first 8 chars are the ms timestamp, so same-batch ids front-slice
    *  identically (three rows all reading "01KZBZ4N" on the live list). The random part is the END. */
   shortId(id: string) { return id.length > 10 ? '\u2026' + id.slice(-7) : id; }

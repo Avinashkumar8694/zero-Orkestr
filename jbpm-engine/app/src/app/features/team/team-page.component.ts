@@ -4,15 +4,17 @@ import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { TenantService } from '../../core/tenant/tenant.service';
 import { TeamApiService, type InviteResult, type TeamMember } from '../../core/team/team.service';
+import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
 import { ModalService } from '../../shared/modal.service';
 import { ToastService } from '../../shared/toast.service';
 
 @Component({
   selector: 'app-team-page',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, BreadcrumbComponent],
   template: `
     <div class="page">
+      <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Team' }]" /></div>
       <header class="head">
         <div>
           <h1>Team</h1>
@@ -89,6 +91,7 @@ import { ToastService } from '../../shared/toast.service';
     </div>
   `,
   styles: [`
+    .crumbwrap { margin-bottom: 10px; }
     .page { padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 1000px; }
     .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     h1 { margin: 0 0 4px; font-size: var(--text-xl); } h3 { margin: 0 0 10px; }
