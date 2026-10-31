@@ -2,6 +2,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IamApiService } from '../../core/api/iam-api.service';
+import { ModalService } from '../../shared/modal.service';
 import { ToastService } from '../../shared/toast.service';
 import { FULL_ACCESS, KNOWN_PERMISSIONS } from './permission-taxonomy';
 import type { AppRole, PermissionInfo } from '../../core/models';
@@ -103,6 +104,7 @@ import { IconComponent } from '../../shared/icon.component';
 export class RolesListComponent {
   private api = inject(IamApiService);
   private toast = inject(ToastService);
+  private modal = inject(ModalService);
   roles = signal<AppRole[]>([]);
   catalog = signal<PermissionInfo[]>(KNOWN_PERMISSIONS);
   loading = signal(true);
@@ -166,9 +168,10 @@ export class RolesListComponent {
       error: (e) => this.toast.error(e?.error?.error?.message || 'Could not update role'),
     });
   }
-  remove(r: AppRole) {
+  async remove(r: AppRole) {
     const reset = !!r.builtIn;
-    if (!confirm(reset ? `Reset "${r.name}" to its default permissions?` : `Delete the role "${r.name}"?`)) return;
+    const ok = await this.modal.confirm({ title: reset ? 'Reset role' : 'Delete role', message: reset ? `Reset "${r.name}" to its default permissions? This workspace's customisation is lost.` : `Delete the role "${r.name}"? This cannot be undone.`, confirmLabel: reset ? 'Reset' : 'Delete', danger: true });
+    if (!ok) return;
     this.api.deleteRole(r.id).subscribe({
       next: () => { this.toast.success(reset ? `"${r.name}" reset to default` : `Role "${r.name}" deleted`); this.reload(reset ? r.name : undefined); },
       error: (e) => this.toast.error(e?.error?.error?.message || 'Could not delete role'),

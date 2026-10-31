@@ -69,7 +69,7 @@ const TABS: { key: Tab; label: string }[] = [
             <div class="card">
               <div class="fieldrow"><input [(ngModel)]="newComment" placeholder="Add a comment…" (keyup.enter)="addComment()" /><button class="btn sm" (click)="addComment()">Post</button></div>
               @for (c of comments(); track c.id) {
-                <div class="crow"><div class="crow-h"><strong>{{ c.author }}</strong><span class="muted sm">{{ c.at | slice:0:19 }}</span><button class="btn sm danger" (click)="deleteComment(c)"><app-icon name="trash" [size]="12" /></button></div><p>{{ c.body }}</p></div>
+                <div class="crow"><div class="crow-h"><strong>{{ c.author }}</strong><span class="muted sm">{{ c.at | slice:0:19 }}</span><button class="btn sm danger" (click)="deleteComment(c)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button></div><p>{{ c.body }}</p></div>
               }
             </div>
           }
@@ -77,7 +77,7 @@ const TABS: { key: Tab; label: string }[] = [
             <div class="card">
               <div class="fieldrow"><input [(ngModel)]="newAuditKind" placeholder="kind, e.g. workflowInstance.note" /><input [(ngModel)]="newAuditData" placeholder="data (JSON, optional)" /><button class="btn sm" (click)="addAudit()">Add</button></div>
               @for (au of audits(); track au.id) {
-                <div class="crow"><div class="crow-h"><strong class="mono">{{ au.kind }}</strong><span class="muted sm">{{ au.actor }} · {{ au.at | slice:0:19 }}</span><button class="btn sm danger" (click)="deleteAudit(au)"><app-icon name="trash" [size]="12" /></button></div>
+                <div class="crow"><div class="crow-h"><strong class="mono">{{ au.kind }}</strong><span class="muted sm">{{ au.actor }} · {{ au.at | slice:0:19 }}</span><button class="btn sm danger" (click)="deleteAudit(au)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button></div>
                 @if (au.data) { <pre class="mono sm">{{ au.data | json }}</pre> }</div>
               }
             </div>

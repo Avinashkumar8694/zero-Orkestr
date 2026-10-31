@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import { IamApiService } from '../../core/api/iam-api.service';
+import { ModalService } from '../../shared/modal.service';
 import { ToastService } from '../../shared/toast.service';
 import type { AppGroup, AppUser } from '../../core/models';
 import { IconComponent } from '../../shared/icon.component';
@@ -89,6 +90,7 @@ import { IconComponent } from '../../shared/icon.component';
 export class GroupsListComponent {
   private api = inject(IamApiService);
   private toast = inject(ToastService);
+  private modal = inject(ModalService);
   groups = signal<AppGroup[]>([]);
   users = signal<AppUser[]>([]);
   loading = signal(true);
@@ -142,9 +144,10 @@ export class GroupsListComponent {
     this.api.updateGroup(g.id, { name: this.editName.trim(), description: this.editDescription.trim() }).subscribe({ next: run, error: (e) => this.toast.error(e?.error?.error?.message || 'Could not update group') });
   }
   private done(id: string) { this.toast.success('Group updated'); this.reload(id); }
-  remove(g: AppGroup) {
+  async remove(g: AppGroup) {
     const n = g.memberCount || 0;
-    if (!confirm(n ? `Delete "${g.name}"? It will be removed from its ${n} member(s).` : `Delete the group "${g.name}"?`)) return;
+    const ok = await this.modal.confirm({ title: 'Delete group', message: n ? `Delete "${g.name}"? It will be removed from its ${n} member(s).` : `Delete the group "${g.name}"?`, confirmLabel: 'Delete', danger: true });
+    if (!ok) return;
     this.api.deleteGroup(g.id).subscribe({
       next: () => { this.toast.success(`Group "${g.name}" deleted`); this.reload(); },
       error: (e) => this.toast.error(e?.error?.error?.message || 'Could not delete group'),

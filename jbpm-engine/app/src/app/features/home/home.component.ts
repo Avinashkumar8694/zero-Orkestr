@@ -33,6 +33,9 @@ import type { Instance, Summary, Task, Workflow } from '../../core/models';
         @if (canBuild()) { <a class="btn primary" routerLink="/projects"><app-icon name="plus" [size]="15" /> New project</a> }
       </header>
 
+      @if (failed() && !loading()) {
+        <div class="loadfail" role="alert">Some of your dashboard could not be loaded, so the numbers below may be incomplete. <button class="btn sm" (click)="retry()">Retry</button></div>
+      }
       @if (loading()) {
         <div class="kpis">
           @for (_ of [1,2,3,4]; track $index) { <div class="card kpi skeleton" style="height:96px"></div> }
@@ -147,6 +150,7 @@ import type { Instance, Summary, Task, Workflow } from '../../core/models';
     .when { font-size: var(--text-xs); text-transform: capitalize; }
     .due { font-size: var(--text-xs); font-weight: 600; padding: 3px 9px; border-radius: var(--radius-pill); background: var(--green-bg); color: var(--green); white-space: nowrap; }
     .due.over { background: var(--red-bg); color: var(--red); }
+    .loadfail { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; font-size: 13px; background: var(--red-bg, #fdecea); color: var(--red, #b3261e); }
     .empty-state.sm { padding: 26px 12px; }
     .empty-state.sm .es-icon { width: 46px; height: 46px; border-radius: 15px; }
   `],
@@ -158,6 +162,7 @@ export class HomeComponent {
   private wfApi = inject(WorkflowApiService);
 
   loading = signal(true);
+  failed = signal(false);
   summary = signal<Summary | null>(null);
   myTasks = signal<Task[]>([]);
   recent = signal<Instance[]>([]);
@@ -187,26 +192,30 @@ export class HomeComponent {
     this.auth.ready.then(() => this.load());
   }
 
+  /** Resolves when every request has settled (success OR failure) — the tiles must not show zeros while data is in flight,
+   *  nor stay blank without a word when something failed. */
   private load() {
     const user = this.auth.user()?.username;
-    const done = () => this.loading.set(false);
-
+    this.loading.set(true); this.failed.set(false);
+    let pending = 0; let bad = 0;
+    const track = <T>(obs: import('rxjs').Observable<T>, next: (v: T) => void) => {
+      pending++;
+      obs.subscribe({
+        next,
+        error: () => { bad++; if (--pending === 0) this.finish(bad); },
+        complete: () => { if (--pending === 0) this.finish(bad); },
+      });
+    };
     if (this.canView()) {
-      this.q.analyticsSummary().subscribe({ next: (s) => this.summary.set(s), error: () => {} });
-      this.instApi.listInstances({}).subscribe({
-        next: (list: Instance[]) => this.recent.set([...list].sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1)).slice(0, 5)),
-        error: () => {},
-      });
-      this.wfApi.listWorkflows().subscribe({ next: (w: Workflow[]) => this.workflows.set(w), error: () => {} });
+      track(this.q.analyticsSummary(), (s) => this.summary.set(s));
+      track(this.instApi.listInstances({}), (list: Instance[]) => this.recent.set([...list].sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1)).slice(0, 5)));
+      track(this.wfApi.listWorkflows(), (w: Workflow[]) => this.workflows.set(w));
     }
-    if (this.canTasks() && user) {
-      this.q.userTasks(user).subscribe({
-        next: (t) => this.myTasks.set(t.filter((x) => x.status !== 'completed').slice(0, 5)),
-        error: () => {},
-      });
-    }
-    done();
+    if (this.canTasks() && user) track(this.q.userTasks(user), (t) => this.myTasks.set(t.filter((x) => x.status !== 'completed').slice(0, 5)));
+    if (pending === 0) this.finish(0);
   }
+  private finish(bad: number) { this.failed.set(bad > 0); this.loading.set(false); }
+  retry() { this.load(); }
 
   greeting() {
     const h = new Date().getHours();

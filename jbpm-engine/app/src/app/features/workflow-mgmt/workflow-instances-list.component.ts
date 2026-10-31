@@ -63,7 +63,7 @@ import type { WorkflowInstance } from '../../core/models';
     @if (starting(); as s) {
       <div class="modal-bg" (click)="closeStart()">
         <div class="modal" (click)="$event.stopPropagation()">
-          <div class="modal-h"><span>Start Case</span><span class="spacer"></span><button class="x" (click)="closeStart()"><app-icon name="close" [size]="15" /></button></div>
+          <div class="modal-h"><span>Start Case</span><span class="spacer"></span><button class="x" (click)="closeStart()" title="Remove" aria-label="Remove"><app-icon name="close" [size]="15" /></button></div>
           <div class="modal-body">
             <label class="fld"><span>Workflow name</span><input [(ngModel)]="s.workflowName" placeholder="claim-review-v1" /></label>
             <label class="fld"><span>Variables (JSON, for the BPM process)</span><textarea rows="3" [(ngModel)]="s.variables" placeholder="{}"></textarea></label>

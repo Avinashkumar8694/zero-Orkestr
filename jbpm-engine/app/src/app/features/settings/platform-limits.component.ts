@@ -26,7 +26,8 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
     <div class="page">
       <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Platform limits' }]" /></div>
       <header class="pagehead"><h1>Platform limits</h1><p class="muted">Effective value = min(workspace setting, per-workspace cap, global cap). Changes apply live — no restart. Caps and queues are per server pod.</p></header>
-      @if (error()) { <p class="err">{{ error() }}</p> }
+      @if (error()) { <p class="err" role="alert">{{ error() }}</p> }
+      @if (!usage() && !error()) { <p class="muted">Loading…</p> }
       <nav class="tabs">
         <button [class.active]="tab() === 'workspaces'" (click)="tab.set('workspaces')">Workspaces</button>
         <button [class.active]="tab() === 'plans'" (click)="tab.set('plans')">Plans</button>

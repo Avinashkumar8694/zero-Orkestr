@@ -284,7 +284,7 @@ export class InstancesComponent {
 
   reload() {
     const workflowId = this.projectFilter() || undefined;
-    this.api.listInstances({ workflowId }).subscribe((is) => this.instances.set(is));
+    this.api.listInstances({ workflowId }).subscribe({ next: (is) => this.instances.set(is), error: (e) => this.toast.error(e?.error?.error?.message || 'Could not load instances') });
     this.deploymentApi.listDeploymentsGlobal({ workflowId }).subscribe((ds) => this.deployments.set(Object.fromEntries(ds.map((d) => [d.id, d]))));
   }
   setProjectFilter(id: string) { this.projectFilter.set(id); this.reload(); }

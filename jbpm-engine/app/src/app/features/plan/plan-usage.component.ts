@@ -33,7 +33,8 @@ const LIMIT_LABELS: Array<[string, string]> = [
           </p>
         }
       </header>
-      @if (error()) { <div class="error">{{ error() }}</div> }
+      @if (error()) { <div class="error" role="alert">{{ error() }}</div> }
+      @if (!data() && !error()) { <p class="muted">Loading your plan…</p> }
       @if (data(); as d) {
         <section class="card">
           <h3>Process starts</h3>

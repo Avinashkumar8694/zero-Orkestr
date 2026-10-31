@@ -181,10 +181,10 @@ interface DocRow { variable: string; filename: string; url?: string; mimeType?: 
                                 <button class="btn sm" (click)="saveVar(kv.name)">Save</button>
                                 <button class="btn ghost sm" (click)="editingVar.set(null)">Cancel</button>
                               } @else {
-                                <button class="btn ghost sm" (click)="startEdit(kv.name, kv.raw)"><app-icon name="edit" [size]="12" /></button>
+                                <button class="btn ghost sm" (click)="startEdit(kv.name, kv.raw)" title="Edit" aria-label="Edit"><app-icon name="edit" [size]="12" /></button>
                               }
                             }
-                            <button class="btn ghost sm" (click)="toggleHistory(kv.name)"><app-icon name="clock" [size]="12" /></button>
+                            <button class="btn ghost sm" (click)="toggleHistory(kv.name)" title="Show history" aria-label="Show history"><app-icon name="clock" [size]="12" /></button>
                           </td>
                         </tr>
                         @if (historyFor() === kv.name) {
