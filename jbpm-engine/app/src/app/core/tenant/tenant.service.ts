@@ -57,6 +57,9 @@ export class TenantService {
     return this.profileSig()?.member?.permissions ?? [];
   });
 
+  /** whether the SERVER lets this user manage the platform (plans, limits) — unlike isSystemAdmin, never inferred from a role label */
+  isPlatformAdmin = computed(() => this.profileSig()?.platformAdmin === true);
+
   isSystemAdmin = computed(() => {
     return (
       this.role() === 'system_admin' ||

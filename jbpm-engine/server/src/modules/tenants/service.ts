@@ -44,6 +44,8 @@ export interface InactiveMembership {
 }
 
 export interface MyProfileResult {
+  /** the server's own verdict: may this caller manage the platform (plans, limits, every workspace)? */
+  platformAdmin: boolean;
   userId: string;
   email: string;
   member?: {
@@ -264,6 +266,7 @@ export class TenantService {
 
     if (tenantId === 'all' && isSystemAdmin) {
       return {
+        platformAdmin: isSystemAdmin,
         userId,
         email: email || `${id.username || userId}@platform.local`,
         member: {
@@ -289,6 +292,7 @@ export class TenantService {
     const permissions = membership?.permissions ?? await this.permissionsForRole(tenantId, role);
 
     return {
+      platformAdmin: isSystemAdmin,
       userId,
       email: membership?.email || email || `${id.username || userId}@local`,
       member: {

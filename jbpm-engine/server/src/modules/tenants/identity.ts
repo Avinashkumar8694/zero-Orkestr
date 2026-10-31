@@ -63,8 +63,15 @@ export async function membershipsOf(store: Store, id: Identity): Promise<TenantM
 
 /** The single platform administrator is config.platformAdminEmail — nobody else is one, whatever their role,
  *  membership or local-IAM role says. An OIDC caller counts when that email is VERIFIED on their token. */
-export async function isPlatformAdmin(_store: Store, id: Identity, _memberships?: TenantMember[]): Promise<boolean> {
-  return id.source === 'oidc' && id.emailVerified === true && lower(id.email) === config.platformAdminEmail;
+export async function isPlatformAdmin(store: Store, id: Identity, memberships?: TenantMember[]): Promise<boolean> {
+  if (id.source === 'oidc' && id.emailVerified === true && lower(id.email) === config.platformAdminEmail) return true;
+  // Local development without SSO: the bootstrap account (a REAL local user — matched by id or username — holding a `system_admin` seat — never an e-mail
+  // placeholder seat, so a token merely carrying the platform e-mail does not qualify) may manage the platform. Off in production.
+  if (config.platformAdminAllowLocal && id.source !== 'oidc' && id.sub) {
+    const seats = memberships ?? await membershipsOf(store, id);
+    return seats.some((m) => m.role === 'system_admin' && m.status === 'active' && !isPlaceholderUserId(m) && (m.userId === id.sub || lower(m.userId) === lower(id.username)));
+  }
+  return false;
 }
 
 /** Idempotent start-up bootstrap: the platform admin is always a system_admin member of the default workspace

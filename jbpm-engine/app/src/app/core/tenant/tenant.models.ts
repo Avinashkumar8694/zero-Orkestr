@@ -35,6 +35,8 @@ export interface TenantInfo {
 
 /** GET /api/me/profile */
 export interface MyProfile {
+  /** server's verdict: may manage the platform (plans, limits) */
+  platformAdmin?: boolean;
   userId: string;
   email: string;
   member?: {

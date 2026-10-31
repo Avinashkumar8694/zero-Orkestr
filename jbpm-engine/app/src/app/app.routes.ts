@@ -1,5 +1,5 @@
 import { inject } from '@angular/core';
-import { Routes } from '@angular/router';
+import { Router, Routes } from '@angular/router';
 import { TenantService } from './core/tenant/tenant.service';
 import { authGuard, guestGuard, permissionGuard } from './core/auth/auth.guard';
 import { tenantGuard } from './core/tenant/tenant.guard';
@@ -31,7 +31,6 @@ export const routes: Routes = [
           { path: 'processes', loadComponent: () => import('./features/project/project-processes.component').then((m) => m.ProjectProcessesComponent) },
           { path: 'processes/:pid', loadComponent: () => import('./features/project/project-process-canvas-page.component').then((m) => m.ProjectProcessCanvasPageComponent) },
           { path: 'assets', loadComponent: () => import('./features/project/project-assets.component').then((m) => m.ProjectAssetsComponent) },
-          { path: 'platform-limits', canActivate: [() => inject(TenantService).isSystemAdmin()], loadComponent: () => import('./features/settings/platform-limits.component').then((m) => m.PlatformLimitsComponent) },
           { path: 'audit', loadComponent: () => import('./features/project/project-audit.component').then((m) => m.ProjectAuditComponent) },
           { path: 'settings', loadComponent: () => import('./features/project/project-settings.component').then((m) => m.ProjectSettingsComponent) },
         ],
@@ -39,6 +38,7 @@ export const routes: Routes = [
       // Deployments/Instances are top-level, cross-project pages (like Tasks) — a deployment/instance
       // always belongs to one project, but browsing them is a cross-project concern, matching real
       // jBPM's Deploy/Manage menus. Project header links pass ?workflowId= to pre-filter.
+      { path: 'platform-limits', canActivate: [async () => { const t = inject(TenantService); await t.ready; return t.isPlatformAdmin() || inject(Router).createUrlTree(['/home']); }], loadComponent: () => import('./features/settings/platform-limits.component').then((m) => m.PlatformLimitsComponent) },
       { path: 'deployments', loadComponent: () => import('./features/deployments/deployments.component').then((m) => m.DeploymentsComponent) },
       { path: 'deployments/:id', loadComponent: () => import('./features/deployments/deployment-detail.component').then((m) => m.DeploymentDetailComponent) },
       { path: 'instances', loadComponent: () => import('./features/instances/instances.component').then((m) => m.InstancesComponent) },
