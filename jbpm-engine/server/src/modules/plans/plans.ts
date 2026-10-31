@@ -376,8 +376,8 @@ export class PlanService {
     if (existing?.isDefault) throw conflict('The default plan cannot be deleted: make another plan the default first');
     const using = (await this.tenants().query((t) => (t.plan || 'enterprise') === key)).length;
     if (using > 0) throw conflict(`${using} workspace(s) are on this plan — move them to another plan, or set the plan's status to Hidden to retire it`);
-    if (existing) await this.plans().delete(existing.id);
-    else await this.plans().put({ id: `plan_${key}`, tenantId: 'system', key, name: key, description: '', isDefault: false, isCustom: false, trialDays: null, limits: {}, features: [], status: 'hidden', sortOrder: 0, deleted: true } as unknown as Plan);   // a built-in plan: hide it for good
+    if (existing && !DEFAULT_PLAN_LIMITS[key]) await this.plans().delete(existing.id);
+    else await this.plans().put({ id: existing?.id ?? `plan_${key}`, tenantId: 'system', key, name: key, description: '', isDefault: false, isCustom: false, trialDays: null, limits: {}, features: [], status: 'hidden', sortOrder: 0, deleted: true } as unknown as Plan);   // a built-in plan leaves a marker row so the seed never brings it back
     invalidatePlanCache(this.store); void actor;
   }
 

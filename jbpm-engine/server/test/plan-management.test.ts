@@ -114,3 +114,23 @@ test('PM-07 the dev-only local platform admin is tightly scoped', async () => {
   const ownerProfile = await h.call('GET', '/me/profile', owner);
   assert.strictEqual(ownerProfile.body.data.platformAdmin, false);
 });
+
+test('PM-08 a fresh deployment is seeded with the 7-day default trial and the custom plan, and the trial is enforced', async () => {
+  const h = await boot();
+  try {
+    const rows = await h.store.repo<any>(Collections.plans).query(() => true);
+    const trial = rows.find((p: any) => p.key === 'trial'), custom = rows.find((p: any) => p.key === 'custom');
+    assert.equal(trial.trialDays, 7); assert.equal(trial.isDefault, true); assert.equal(trial.status, 'active');
+    assert.equal(custom.isCustom, true); assert.equal(custom.status, 'active'); assert.equal(custom.trialDays, null);
+    for (const k of ['starter', 'pro', 'enterprise']) assert.equal(rows.find((p: any) => p.key === k)?.status, 'hidden', `${k} is seeded hidden`);
+    const pub = await h.tenants.listPublicPlans();
+    assert.deepEqual(pub.map((p) => p.key).sort(), ['custom', 'trial']);
+    const t = await h.tenants.signup({ name: 'fresh', slug: 'fresh', ownerEmail: 'fresh-owner@example.com' });
+    const stored = await h.store.repo<any>(Collections.tenants).get(t.id);
+    assert.equal(stored.plan, 'trial');
+    const days = (Date.parse(stored.planExpiresAt) - Date.now()) / 86_400_000;
+    assert.ok(days > 6.9 && days <= 7.01, `trial ends in ${days} days`);
+    await h.tenants.seedDefaultsIfEmpty();                       // idempotent: no duplicates
+    assert.equal((await h.store.repo<any>(Collections.plans).query((p: any) => p.key === 'trial')).length, 1);
+  } finally { await h.close(); }
+});
