@@ -28,6 +28,14 @@ function decodeJwt(token: string): JwtClaims | null {
   }
 }
 
+/** The Identity Server sends roles/teams as objects ({ id, name, ... }), local tokens as plain strings: always hand the UI strings. */
+function claimNames(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((x) => (typeof x === 'string' ? x : x && typeof x === 'object' ? String((x as any).name ?? (x as any).role ?? (x as any).id ?? '') : ''))
+    .filter(Boolean);
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private api = inject(AuthApiService);
@@ -52,8 +60,8 @@ export class AuthService {
     return {
       id: claims.sub,
       username: claims.username || claims.email || claims.preferred_username || claims.sub,
-      roles: claims.roles ?? [],
-      groups: claims.groups ?? [],
+      roles: claimNames(claims.roles),
+      groups: claimNames(claims.groups),
       email: claims.email,
       name: claims.name,
     };
