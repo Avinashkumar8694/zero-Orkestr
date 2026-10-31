@@ -339,7 +339,6 @@ export function buildRoutes(): Router {
     // Fetch instances without pagination first so unified search and case-joining can be performed accurately
     const instances = await instService.list({
       workflowId: req.query.workflowId as string,
-      status: req.query.status as string,
       deploymentId: req.query.deploymentId as string,
       correlationKey: req.query.correlationKey as string,
       full: isFull,
@@ -375,7 +374,7 @@ export function buildRoutes(): Router {
     }
 
     for (const c of orphanCases) {
-      if (!req.query.status || req.query.status === c.status) {
+      {
         if (!req.query.workflowId || req.query.workflowId === c.workflowName) {
           allItems.push({
             id: c.id,
@@ -402,28 +401,31 @@ export function buildRoutes(): Router {
     // Sort descending by startedAt
     allItems.sort((a, b) => ((b.startedAt || '') > (a.startedAt || '') ? 1 : -1));
 
-    const statusParam = req.query.status as string;
-    const statusSet = statusParam ? new Set(statusParam.split(',').map((s) => s.trim()).filter(Boolean)) : null;
-
-    // Apply type filter, status filter and search query filter
-    const filtered = allItems.filter((i) => {
-      if (statusSet && !statusSet.has(i.status)) return false;
-      if (typeFilter === 'cases' && !i.caseInstanceId) return false;
-      if (typeFilter === 'process' && !!i.caseInstanceId) return false;
+    // Every filter is applied HERE, on the server, so what is selected is what is fetched (and paging stays consistent).
+    // `status` is a comma-separated list; `startedBy` matches the initiator; `errorsOnly` keeps failed/errored instances.
+    const statusParam = (req.query.status as string) || '';
+    const statusSet = statusParam ? new Set(statusParam.split(',').map((x) => x.trim()).filter(Boolean)) : null;
+    const byStr = ((req.query.startedBy || '') as string).trim().toLowerCase();
+    const errorsOnly = req.query.errorsOnly === 'true';
+    const matches = (i: any, skip: 'status' | 'type' | null) => {
+      if (skip !== 'status' && statusSet && !statusSet.has(i.status)) return false;
+      if (skip !== 'type' && typeFilter === 'cases' && !i.caseInstanceId) return false;
+      if (skip !== 'type' && typeFilter === 'process' && !!i.caseInstanceId) return false;
+      if (errorsOnly && i.status !== 'failed' && !i.error) return false;
+      if (byStr && !(i.startedBy || '').toLowerCase().includes(byStr)) return false;
       if (qStr) {
-        const matchId = (i.id || '').toLowerCase().includes(qStr);
-        const matchProc = (i.processId || '').toLowerCase().includes(qStr);
-        const matchWf = (i.workflowId || '').toLowerCase().includes(qStr);
-        const matchCaseId = (i.caseInstanceId || '').toLowerCase().includes(qStr);
-        const matchCaseWf = (i.caseWorkflowName || '').toLowerCase().includes(qStr);
-        const matchBy = (i.startedBy || '').toLowerCase().includes(qStr);
-        const matchKey = (i.correlationKey || '').toLowerCase().includes(qStr);
-        if (!matchId && !matchProc && !matchWf && !matchCaseId && !matchCaseWf && !matchBy && !matchKey) {
-          return false;
-        }
+        const hay = [i.id, i.processId, i.workflowId, i.caseInstanceId, i.caseWorkflowName, i.startedBy, i.correlationKey];
+        if (!hay.some((h) => (h || '').toLowerCase().includes(qStr))) return false;
       }
       return true;
-    });
+    };
+    const filtered = allItems.filter((i) => matches(i, null));
+    // Faceted counts: how many there WOULD be per state / per type given every OTHER filter — so ticking a state never
+    // makes the other states' numbers collapse to 0.
+    const byStatus: Record<string, number> = {};
+    for (const i of allItems) if (matches(i, 'status')) byStatus[i.status] = (byStatus[i.status] || 0) + 1;
+    const typeBase = allItems.filter((i) => matches(i, 'type'));
+    const byType = { all: typeBase.length, cases: typeBase.filter((i) => !!i.caseInstanceId).length, process: typeBase.filter((i) => !i.caseInstanceId).length };
 
     const offset = req.query.offset ? Math.max(0, Number(req.query.offset)) : 0;
     const limit = req.query.limit ? Math.max(1, Number(req.query.limit)) : undefined;
@@ -437,6 +439,7 @@ export function buildRoutes(): Router {
       hasMore,
       offset,
       limit: limit ?? total,
+      counts: { byStatus, byType },
     });
   }));
 

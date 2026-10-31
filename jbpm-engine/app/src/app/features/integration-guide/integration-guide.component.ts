@@ -431,6 +431,11 @@ import { IconComponent } from '../../shared/icon.component';
       .page-header { flex-direction: column; align-items: flex-start; }
       .grid-two { grid-template-columns: 1fr; }
     }
+      .page-header { flex-wrap: wrap; gap: 16px; }
+    .header-content { min-width: 0; flex: 1 1 320px; }
+    .header-actions { flex-wrap: wrap; flex-shrink: 1; }
+    .page-subtitle { max-width: 100%; }
+      .badge-row { flex-wrap: wrap; }
   `],
 })
 export class IntegrationGuideComponent {

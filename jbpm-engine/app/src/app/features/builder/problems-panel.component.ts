@@ -98,6 +98,7 @@ import { IconComponent } from '../../shared/icon.component';
       border-radius: 5px; padding: 3px 7px; cursor: pointer; transition: all .15s ease;
     }
     .clear-pill:hover { background: #ef4444; color: #fff; }
+      .pill { white-space: nowrap; }
   `],
 })
 export class ProblemsPanelComponent {

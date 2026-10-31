@@ -166,6 +166,7 @@ code, pre { font-family: var(--font-mono); }
 
 /* ---------------------------------------------------------------- Buttons — pills */
 .btn {
+  white-space: nowrap; flex-shrink: 0;   /* a pill label never wraps onto a second line */
   border: 1px solid transparent; background: var(--surface); color: var(--primary);
   border-radius: var(--radius-pill); padding: 9px 18px; font-size: 13.5px; font-weight: 650; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 7px; box-shadow: var(--shadow-card); line-height: 1.35;
@@ -187,7 +188,7 @@ code, pre { font-family: var(--font-mono); }
 
 /* ---------------------------------------------------------------- Badges — soft pills */
 .badge {
-  font-size: 12px; font-weight: 650; letter-spacing: 0; padding: 3px 11px;
+  font-size: 12px; flex-shrink: 0; font-weight: 650; letter-spacing: 0; padding: 3px 11px;
   border-radius: var(--radius-pill); background: var(--surface-3); color: var(--text-secondary);
   border: 0; display: inline-flex; align-items: center; gap: 5px; line-height: 1.5; white-space: nowrap;
 }
@@ -242,7 +243,11 @@ input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 1
 .tabs a, .tabs button, .tabs .tab {
   display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; padding: 7px 18px; margin: 0; font-size: 13.5px; font-weight: 650; color: var(--text-secondary);
   border-radius: var(--radius-pill); cursor: pointer; transition: background-color .15s ease, color .15s ease;
+  white-space: nowrap; flex: 0 0 auto;   /* a tab label never wraps; the bar scrolls instead */
 }
+[role="tab"] { white-space: nowrap; flex: 0 0 auto; }
+[role="tablist"] { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+[role="tablist"]::-webkit-scrollbar { display: none; }
 .tabs a:hover, .tabs button:hover, .tabs .tab:hover { color: var(--primary); background: var(--primary-50); }
 .tabs a.active, .tabs button.active, .tabs .tab.active { background: var(--grad-brand); color: #fff; box-shadow: 0 8px 18px -10px rgba(90, 56, 204, .85); }
 
@@ -303,6 +308,8 @@ input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 1
    Below 900px they all fall back to normal document flow: one column, natural height, wrapping rows, and any wide
    table scrolls INSIDE its card instead of being clipped or pushing the whole page sideways. */
 @media (max-width: 900px) {
+  .tabs { max-width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
   .page, .page-content > * { min-width: 0; max-width: 100%; }
   .page { height: auto !important; min-height: 0 !important; }
   .split, .layout, .grid2, .grid3, .tabgrid, .chartgrid { grid-template-columns: minmax(0, 1fr) !important; flex: none !important; height: auto !important; min-height: 0 !important; }

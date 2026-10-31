@@ -1,5 +1,6 @@
 // User-task inbox: list/claim/complete. Completing a task resumes the waiting instance token.
 import type { AppContext } from '../../context.ts';
+import { inList } from '../../infra/filters.ts';
 import { Collections, type AuditEvent, type Deployment, type Group, type Task, type TaskAttachment, type TaskComment, type User } from '../../domain.ts';
 import { InstanceService } from '../instances/service.ts';
 import { NotificationService } from '../notifications/service.ts';
@@ -67,7 +68,7 @@ export class TaskService {
       t.tenantId === this.ctx.tenantId &&
       (!filter.assignee || t.assignee === filter.assignee) &&
       (!filter.group || t.group === filter.group) &&
-      (!filter.status || t.status === filter.status) &&
+      inList(filter.status, t.status) &&
       (!filter.overdue || (!!t.dueAt && t.dueAt < now && t.status !== 'completed' && t.status !== 'skipped')) &&
       (!q || t.name.toLowerCase().includes(q) || t.id.toLowerCase().includes(q) || (t.assignee || '').toLowerCase().includes(q) || (t.group || '').toLowerCase().includes(q))))
       // higher priority first (undefined = lowest), then newest first within the same priority

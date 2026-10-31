@@ -1457,6 +1457,7 @@ const TASK_STATUSES = [
       .fieldrow .fkey { width: 100%; }
       .presets { flex-wrap: wrap; }
     }
+      .vm-btn { white-space: nowrap; }
   `],
 })
 export class HomeComponent {

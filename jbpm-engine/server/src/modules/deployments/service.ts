@@ -1,6 +1,7 @@
 // Deployments: immutable runnable snapshots of a published version, labeled with tags, grouped by
 // environment. Exactly one deployment is ACTIVE per (workflow, environment). See docs/09.
 import type { AppContext } from '../../context.ts';
+import { inList } from '../../infra/filters.ts';
 import { Collections, type Branch, type Deployment, type TimerJob, type Version, type Workflow } from '../../domain.ts';
 import { conflict, notFound, validation } from '../../infra/errors.ts';
 import { computeDue } from '../../engine/duration.ts';
@@ -37,7 +38,7 @@ export class DeploymentService {
       d.tenantId === this.ctx.tenantId &&
       (!filter.workflowId || d.workflowId === filter.workflowId) &&
       (!filter.environment || d.environment === filter.environment) &&
-      (!filter.status || d.status === filter.status) &&
+      inList(filter.status, d.status) &&
       (!q || d.id.toLowerCase().includes(q) || d.workflowId.toLowerCase().includes(q) || d.environment.toLowerCase().includes(q) || (d.versionLabel || '').toLowerCase().includes(q))))
       .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt));
 

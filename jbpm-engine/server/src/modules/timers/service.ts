@@ -1,6 +1,7 @@
 // Durable timer scheduler: fires scheduled TimerJobs whose dueAt has passed by resuming their token.
 // A real interval in index.ts calls tick() periodically; tests call tick(now) with a fake clock.
 import type { AppContext } from '../../context.ts';
+import { inList } from '../../infra/filters.ts';
 import { Collections, type TimerJob } from '../../domain.ts';
 import { InstanceService } from '../instances/service.ts';
 import { SettingsService } from '../settings/service.ts';
@@ -114,7 +115,7 @@ export class TimerService {
   async list(q: { status?: string; instanceId?: string; kind?: string } = {}): Promise<TimerJob[]> {
     return (await this.repo().query((t) =>
       t.tenantId === this.ctx.tenantId &&
-      (!q.status || t.status === q.status) &&
+      inList(q.status, t.status) &&
       (!q.instanceId || t.instanceId === q.instanceId) &&
       (!q.kind || t.kind === q.kind)))
       // scheduled first (soonest due at the top), then the rest newest-first

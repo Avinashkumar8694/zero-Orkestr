@@ -14,6 +14,10 @@ export interface ListInstancesFilter {
   correlationKey?: string;
   type?: string;
   caseId?: string;
+  /** initiator contains (server-side) */
+  startedBy?: string;
+  /** failed / errored instances only (server-side) */
+  errorsOnly?: boolean;
   search?: string;
   q?: string;
   limit?: number;
@@ -21,7 +25,10 @@ export interface ListInstancesFilter {
   full?: boolean;
 }
 
+export interface InstanceCounts { byStatus: Record<string, number>; byType: { all: number; cases: number; process: number }; }
 export interface PagedResult<T> {
+  /** faceted counts for the instances list (each ignores its own filter) */
+  counts?: InstanceCounts;
   items: T[];
   total: number;
   hasMore: boolean;

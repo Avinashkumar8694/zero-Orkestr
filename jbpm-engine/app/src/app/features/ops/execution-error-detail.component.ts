@@ -502,6 +502,8 @@ import type { ExecutionError } from '../../core/models';
     .ack-status-box button {
       margin-left: auto;
     }
+      .content-grid > * { min-width: 0; }
+    @media (max-width: 1024px) { .content-grid { grid-template-columns: minmax(0, 1fr); } .col-left, .col-right { min-width: 0; max-width: 100%; } }
   `],
 })
 export class ExecutionErrorDetailComponent implements OnInit {

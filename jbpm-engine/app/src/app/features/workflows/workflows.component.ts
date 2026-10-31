@@ -305,6 +305,7 @@ type Selection = 'all' | 'unfiled' | 'archived' | string;
     .issue-remedy { font-size: 12px; color: var(--muted); background: var(--surface); padding: 6px 10px; border-radius: 6px; border: 1px dashed var(--border); }
     .remedy-lbl { font-weight: 600; color: var(--text-secondary); }
     .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; background: var(--surface); border-radius: 0 0 14px 14px; }
+      @media (max-width: 1200px) { .hero-top { flex-wrap: wrap; } .create { flex-wrap: wrap; flex-shrink: 1; min-width: 0; } }
   `],
 })
 export class WorkflowsComponent {

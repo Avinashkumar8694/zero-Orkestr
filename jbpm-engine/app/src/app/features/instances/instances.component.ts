@@ -3,7 +3,7 @@ import { Component, HostListener, computed, inject, signal } from '@angular/core
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { SlicePipe } from '@angular/common';
-import { InstanceApiService } from '../../core/api/instance-api.service';
+import { InstanceApiService, type InstanceCounts } from '../../core/api/instance-api.service';
 import { DeploymentApiService } from '../../core/api/deployment-api.service';
 import { WorkflowApiService } from '../../core/api/workflow-api.service';
 import { WorkflowDefinitionApiService } from '../../core/api/workflow-definition-api.service';
@@ -97,7 +97,7 @@ const DEFAULT_COLUMNS: TableColumnDef[] = [
 
           <div class="section-title">Instance Type</div>
           <div class="type-pills">
-            <button class="tpill" [class.active]="typeFilter() === 'all'" (click)="setTypeFilter('all')">All ({{ instances().length }})</button>
+            <button class="tpill" [class.active]="typeFilter() === 'all'" (click)="setTypeFilter('all')">All ({{ typeCounts().all }})</button>
             <button class="tpill" [class.active]="typeFilter() === 'cases'" (click)="setTypeFilter('cases')">Cases ({{ caseCount() }})</button>
             <button class="tpill" [class.active]="typeFilter() === 'process'" (click)="setTypeFilter('process')">Processes ({{ standaloneCount() }})</button>
           </div>
@@ -566,18 +566,21 @@ export class InstancesComponent {
     const workflowId = this.projectFilter() || undefined;
     const q = this.q().trim();
     const type = this.typeFilter();
-    const status = this.stateSet().size === STATUSES.length ? undefined : [...this.stateSet()].join(',');
     const offset = this.instances().length;
+    const seq = this.seq;
 
     this.api.listInstancesPaged({
       workflowId,
       q,
       type: type !== 'all' ? type : undefined,
-      status,
+      status: this.statusParam(),
+      startedBy: this.qBy().trim() || undefined,
+      errorsOnly: this.errorsOnly() || undefined,
       limit: 25,
       offset,
     }).subscribe({
       next: (res) => {
+        if (seq !== this.seq) { this.loadingMore.set(false); return; }   // the filters changed while this page was loading
         this.instances.update((current) => [...current, ...res.items]);
         this.totalCount.set(res.total);
         this.hasMore.set(res.hasMore);
@@ -594,8 +597,22 @@ export class InstancesComponent {
     this.menuFor.set(this.menuFor() === id ? null : id);
   }
 
-  caseCount = computed(() => this.instances().filter((i) => !!i.caseInstanceId).length);
-  standaloneCount = computed(() => this.instances().filter((i) => !i.caseInstanceId).length);
+  /** faceted counts from the server (they ignore their own filter, so ticking a state never zeroes the other states) */
+  serverCounts = signal<InstanceCounts | null>(null);
+  typeCounts = computed(() => this.serverCounts()?.byType ?? {
+    all: this.instances().length,
+    cases: this.instances().filter((i) => !!i.caseInstanceId).length,
+    process: this.instances().filter((i) => !i.caseInstanceId).length,
+  });
+  caseCount = computed(() => this.typeCounts().cases);
+  standaloneCount = computed(() => this.typeCounts().process);
+  /** the states filter as the server wants it: nothing ticked → nothing matches (not "everything") */
+  private statusParam(): string | undefined {
+    const n = this.stateSet().size;
+    return n === STATUSES.length ? undefined : n === 0 ? '__none__' : [...this.stateSet()].join(',');
+  }
+  /** each reload supersedes the previous one — a slow earlier response must never overwrite a newer selection */
+  private seq = 0;
 
   filtered = computed(() => {
     const states = this.stateSet();
@@ -628,6 +645,8 @@ export class InstancesComponent {
 
   hasFilters = computed(() => this.stateSet().size < STATUSES.length || this.typeFilter() !== 'all' || this.errorsOnly() || !!this.q() || !!this.qBy());
   countByStatus = computed(() => {
+    const server = this.serverCounts();
+    if (server) return server.byStatus;
     const out: Record<string, number> = {};
     for (const i of this.instances()) out[i.status] = (out[i.status] || 0) + 1;
     return out;
@@ -651,23 +670,27 @@ export class InstancesComponent {
     const workflowId = this.projectFilter() || undefined;
     const q = this.q().trim();
     const type = this.typeFilter();
-    const status = this.stateSet().size === STATUSES.length ? undefined : [...this.stateSet()].join(',');
+    const seq = ++this.seq;
 
     this.api.listInstancesPaged({
       workflowId,
       q,
       type: type !== 'all' ? type : undefined,
-      status,
+      status: this.statusParam(),
+      startedBy: this.qBy().trim() || undefined,
+      errorsOnly: this.errorsOnly() || undefined,
       limit: 25,
       offset: 0,
     }).subscribe({
       next: (res) => {
+        if (seq !== this.seq) return;   // a newer selection has already been requested
+        this.serverCounts.set(res.counts ?? null);
         this.instances.set(res.items);
         this.totalCount.set(res.total);
         this.hasMore.set(res.hasMore);
         this.loading.set(false);
       },
-      error: (e) => { this.loading.set(false); this.toast.error(e?.error?.error?.message || 'Could not load instances'); },
+      error: (e) => { if (seq !== this.seq) return; this.loading.set(false); this.toast.error(e?.error?.error?.message || 'Could not load instances'); },
     });
 
     this.deploymentApi.listDeploymentsGlobal({ workflowId }).subscribe((ds) => this.deployments.set(Object.fromEntries(ds.map((d) => [d.id, d]))));
