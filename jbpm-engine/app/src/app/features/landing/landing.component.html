@@ -315,15 +315,19 @@
             <ul class="lp-ticks lp-small">
               <li *ngFor="let f of p.features">{{ f }}</li>
             </ul>
+            <span class="lp-plan-badge-soft" *ngIf="p.status === 'upcoming'">Coming soon</span>
+            <button *ngIf="p.status === 'upcoming' || p.status === 'disabled'" class="lp-btn lp-btn-secondary lp-btn-block" disabled>
+              {{ p.status === 'upcoming' ? 'Coming soon' : 'Unavailable' }}
+            </button>
             <a
-              *ngIf="p.isCustom && p.contactConfig?.value"
+              *ngIf="p.status !== 'upcoming' && p.status !== 'disabled' && p.isCustom && p.contactConfig?.value"
               class="lp-btn lp-btn-secondary lp-btn-block"
-              [href]="'mailto:' + p.contactConfig?.value"
+              [href]="p.contactConfig?.type === 'url' ? p.contactConfig?.value : 'mailto:' + p.contactConfig?.value"
             >
               {{ p.contactConfig?.label || 'Contact sales' }}
             </a>
             <a
-              *ngIf="!p.isCustom || !p.contactConfig?.value"
+              *ngIf="p.status !== 'upcoming' && p.status !== 'disabled' && (!p.isCustom || !p.contactConfig?.value)"
               class="lp-btn lp-btn-block"
               [class.lp-btn-primary]="!p.isCustom"
               [class.lp-btn-secondary]="p.isCustom"

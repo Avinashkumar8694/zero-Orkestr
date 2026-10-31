@@ -50,10 +50,20 @@ export function buildPlatformRoutes(): Router {
   // ---- plans: the commercial layer. Every limit is enforced; -1 = unlimited. ----
   const plans = (req: Request) => new PlanService(((req as any).ctx as AppContext).store);
   r.get('/plans', asyncHandler(async (req, res) => res.json({ success: true, data: { plans: await plans(req).list(), catalog: LIMIT_CATALOG } })));
+  r.post('/plans', asyncHandler(async (req, res) => {
+    const out = await plans(req).create(req.body || {}, actor(req));
+    await ((req as any).ctx as AppContext).audit({ actor: actor(req), kind: 'platform.plan.created', data: { plan: out.key, status: out.status } });
+    res.status(201).json({ success: true, data: out });
+  }));
   r.put('/plans/:key', asyncHandler(async (req, res) => {
     const out = await plans(req).update(req.params.key, req.body || {}, actor(req));
-    await ((req as any).ctx as AppContext).audit({ actor: actor(req), kind: 'platform.plan.updated', data: { plan: req.params.key, changed: Object.keys(req.body?.limits || {}) } });
+    await ((req as any).ctx as AppContext).audit({ actor: actor(req), kind: 'platform.plan.updated', data: { plan: req.params.key, changed: Object.keys(req.body || {}) } });
     res.json({ success: true, data: out });
+  }));
+  r.delete('/plans/:key', asyncHandler(async (req, res) => {
+    await plans(req).remove(req.params.key, actor(req));
+    await ((req as any).ctx as AppContext).audit({ actor: actor(req), kind: 'platform.plan.deleted', data: { plan: req.params.key } });
+    res.status(204).end();
   }));
   // put a workspace on a plan / extend a trial: { plan, planExpiresAt? | extendDays? }
   r.put('/workspaces/:id/plan', asyncHandler(async (req, res) => {

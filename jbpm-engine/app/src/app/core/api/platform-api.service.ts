@@ -25,7 +25,17 @@ export interface PlatformUsage {
   workspaces: PlatformUsageRow[];
 }
 
-export interface PlanRow { key: string; name: string; description: string; public: boolean; stored: boolean; limits: Record<string, number>; }
+export type PlanStatus = 'active' | 'disabled' | 'upcoming' | 'hidden';
+export interface PlanContact { type: 'email' | 'url'; value: string; label?: string; }
+export interface PlanRow {
+  key: string; name: string; description: string; stored: boolean; status: PlanStatus; isDefault: boolean; isCustom: boolean;
+  trialDays: number | null; contactConfig: PlanContact | null; features: string[]; sortOrder: number; workspaces: number; limits: Record<string, number>;
+}
+/** what the editor sends: every field optional on update; `key` only on create */
+export interface PlanInput {
+  key?: string; name?: string; description?: string; status?: PlanStatus; isDefault?: boolean; isCustom?: boolean; trialDays?: number | null;
+  contactConfig?: PlanContact | null; features?: string[]; sortOrder?: number; limits?: Record<string, number>;
+}
 export interface LimitInfo { label: string; unit: string; description: string; }
 
 @Injectable({ providedIn: 'root' })
@@ -36,6 +46,8 @@ export class PlatformApiService extends ApiBase {
   getWorkspace(id: string): Observable<{ override: WorkspaceLimitOverride }> { return this.http.get<{ data: any }>(`${this.base}/platform/workspaces/${id}/limits`).pipe(map((r) => r.data)); }
   putWorkspace(id: string, patch: Record<string, unknown>): Observable<{ override: WorkspaceLimitOverride }> { return this.http.put<{ data: any }>(`${this.base}/platform/workspaces/${id}/limits`, patch).pipe(map((r) => r.data)); }
   plans(): Observable<{ plans: PlanRow[]; catalog: Record<string, LimitInfo> }> { return this.http.get<{ data: any }>(`${this.base}/platform/plans`).pipe(map((r) => r.data)); }
-  updatePlan(key: string, limits: Record<string, number>): Observable<PlanRow> { return this.http.put<{ data: PlanRow }>(`${this.base}/platform/plans/${key}`, { limits }).pipe(map((r) => r.data)); }
+  createPlan(body: PlanInput): Observable<PlanRow> { return this.http.post<{ data: PlanRow }>(`${this.base}/platform/plans`, body).pipe(map((r) => r.data)); }
+  updatePlan(key: string, patch: PlanInput): Observable<PlanRow> { return this.http.put<{ data: PlanRow }>(`${this.base}/platform/plans/${key}`, patch).pipe(map((r) => r.data)); }
+  deletePlan(key: string): Observable<void> { return this.http.delete<void>(`${this.base}/platform/plans/${key}`); }
   assignPlan(id: string, body: { plan: string; planExpiresAt?: string | null; extendDays?: number }): Observable<{ id: string; plan: string; planExpiresAt: string | null }> { return this.http.put<{ data: any }>(`${this.base}/platform/workspaces/${id}/plan`, body).pipe(map((r) => r.data)); }
 }

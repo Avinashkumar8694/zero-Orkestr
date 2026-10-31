@@ -1,5 +1,6 @@
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { PlansAdminComponent } from './plans-admin.component';
 import { PlatformApiService, type LimitInfo, type PlanRow, type PlatformLimits, type PlatformUsage, type PlatformUsageRow, type WorkspaceLimitOverride } from '../../core/api/platform-api.service';
 import { ToastService } from '../../shared/toast.service';
 import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
@@ -21,7 +22,7 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
 @Component({
   selector: 'app-platform-limits',
   standalone: true,
-  imports: [FormsModule, BreadcrumbComponent],
+  imports: [FormsModule, BreadcrumbComponent, PlansAdminComponent],
   template: `
     <div class="page">
       <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Platform limits' }]" /></div>
@@ -33,25 +34,7 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
         <button [class.active]="tab() === 'plans'" (click)="tab.set('plans')">Plans</button>
         <button [class.active]="tab() === 'global'" (click)="tab.set('global')">Global caps</button>
       </nav>
-      @if (tab() === 'plans') {
-        <section class="card">
-          <h3>Plan limits</h3>
-          <p class="hint">What each plan allows, per workspace. <b>-1 = unlimited</b>. A plan can only tighten the platform-wide caps, never lift them. Saved plans apply to every workspace on them within a couple of seconds.</p>
-          @if (plans().length) {
-            <div class="tablewrap"><table data-keep>
-              <thead><tr><th>Limit</th>@for (p of plans(); track p.key) { <th>{{ p.name }}<div class="muted small">{{ p.key }}</div></th> }</tr></thead>
-              <tbody>
-                @for (k of limitKeys(); track k) {
-                  <tr><td><b>{{ catalog()[k].label || k }}</b><div class="muted small">{{ catalog()[k].unit }}</div></td>
-                    @for (p of plans(); track p.key) { <td><input type="number" min="-1" step="1" [ngModel]="planDraft()[p.key][k]" (ngModelChange)="setPlan(p.key, k, $event)" style="width:90px;" /></td> }
-                  </tr>
-                }
-              </tbody>
-              <tfoot><tr><td></td>@for (p of plans(); track p.key) { <td><button class="btn primary" [disabled]="!planDirty(p.key)" (click)="savePlan(p)">Save {{ p.name }}</button></td> }</tr></tfoot>
-            </table></div>
-          } @else { <p class="muted">Loading plans…</p> }
-        </section>
-      }
+      @if (tab() === 'plans') { <app-plans-admin /> }
       @if (tab() === 'global' && g(); as limits) {
         <section class="card">
           <h3>Global defaults & caps</h3>

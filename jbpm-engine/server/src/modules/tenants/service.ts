@@ -11,7 +11,7 @@ import {
 import { conflict, forbidden, notFound, validation } from '../../infra/errors.ts';
 import { config } from '../../infra/config.ts';
 import { DEFAULT_PLAN_LIMITS, TRIAL_DAYS } from '../plans/plan-limits.ts';
-import { PlanService } from '../plans/plans.ts';
+import { PlanService, statusOf } from '../plans/plans.ts';
 import { DEFAULT_ROLES } from '../iam/service.ts';
 import { sendMail } from '../../infra/mailer.ts';
 import { templates } from '../../infra/mail-templates.ts';
@@ -134,8 +134,7 @@ export class TenantService {
       name,
       slug,
       status: 'active',
-      plan: 'trial',
-      planExpiresAt: new Date(Date.parse(now) + TRIAL_DAYS * 24 * 3600 * 1000).toISOString(),
+      ...(await new PlanService(this.ctx.store).startingPlan(Date.parse(now))),
       settings: {
         timezone: 'UTC',
         dateFormat: 'YYYY-MM-DD',
@@ -358,8 +357,10 @@ export class TenantService {
   }
 
   async listPublicPlans(): Promise<Plan[]> {
-    const plans = (await this.planRepo().query(() => true)).filter((p) => !p.hidden);
-    if (plans.length > 0) return plans;
+    const plans = (await this.planRepo().query(() => true))
+      .filter((p) => !(p as unknown as { deleted?: boolean }).deleted && statusOf(p) !== 'hidden')        // hidden plans are never listed
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    if (plans.length > 0) return plans.map((p) => ({ ...p, status: statusOf(p) }));
 
     return [
       {
