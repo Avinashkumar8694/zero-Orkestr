@@ -124,18 +124,18 @@ import type { Instance, Summary, Task, Workflow } from '../../core/models';
   styles: [`
     .page { padding: 28px 32px 32px; display: flex; flex-direction: column; gap: 22px; }
     .head { display: flex; align-items: flex-start; gap: 16px; }
-    h1 { font-size: var(--text-2xl); letter-spacing: -.02em; }
+    h1 { font-size: var(--text-xl); letter-spacing: -.03em; font-weight: 650; }
     .sub { margin-top: 4px; color: var(--text-secondary); }
     .spacer { flex: 1; }
 
     .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
     /* Tinted top edge: the one place the brand gradient appears on an otherwise calm surface, so the
        numbers read as the page's focal point without shouting. */
-    .kpi { position: relative; overflow: hidden; padding: 18px 20px; display: flex; flex-direction: column; gap: 2px; }
-    .kpi::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--grad-brand); }
-    .kpi .n { font-size: var(--text-2xl); font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .kpi { position: relative; overflow: hidden; padding: 18px 20px 16px; display: flex; flex-direction: column-reverse; gap: 6px; }
+    .kpi:hover { border-color: var(--border-strong); }
+    .kpi .n { font-size: var(--text-2xl); line-height: 1.1; font-weight: 650; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
     .kpi .n.amber { color: var(--amber); } .kpi .n.red { color: var(--red); }
-    .kpi .l { font-size: var(--text-xs); color: var(--muted); }
+    .kpi .l { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
 
     .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; align-items: start; }
     .panel { padding: 18px 20px; }

@@ -69,45 +69,40 @@ interface NavItem { label: string; icon: string; link: string; }
     </nav>
   `,
   styles: [`
-    /* Borderless white rail — separation comes from the content pane's tint, not a divider line. */
-    .sidenav { width: var(--sidenav-w); background: var(--surface); height: 100%; display: flex; flex-direction: column; transition: width .15s; padding: 6px 0; }
+    .sidenav { width: var(--sidenav-w); background: var(--surface); border-right: 1px solid var(--border); height: 100%; display: flex; flex-direction: column; transition: width .15s; padding: 0; }
     .sidenav.collapsed { width: 68px; }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: var(--header-h); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+    .sidenav.collapsed .brand { flex-direction: column; justify-content: center; height: auto; padding: 14px 6px 12px; gap: 8px; }
+    .sidenav.collapsed .theme-toggle, .sidenav.collapsed .collapse { margin-left: 0; }
+    .logo { width: 28px; height: 28px; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 8px; box-shadow: 0 1px 2px rgba(35, 42, 110, .35), 0 1px 0 rgba(255,255,255,.2) inset; }
+    .brand-name { font-weight: 650; letter-spacing: -.02em; font-size: 15px; }
+    .theme-toggle { margin-left: auto; border: none; background: transparent; border-radius: var(--radius-xs); width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer; color: var(--muted); }
+    .theme-toggle:hover { background: var(--surface-3); color: var(--text); }
+    .collapse { border: none; background: transparent; cursor: pointer; color: var(--muted); width: 28px; height: 28px; border-radius: var(--radius-xs); display: grid; place-items: center; }
+    .collapse:hover { background: var(--surface-3); color: var(--text); }
+    .glabel { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; padding: 18px 22px 6px; }
     .backdrop { display: none; }
-    /* Phones and small tablets: the menu is a drawer over the page instead of a column beside it. */
+    .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 0 8px; }
+    ul { list-style: none; margin: 0; padding: 0 12px; display: flex; flex-direction: column; gap: 1px; }
+    /* Quiet rows; the active one gets a tonal fill and an accent bar, not a coloured block. */
+    a { position: relative; display: flex; align-items: center; gap: 11px; padding: 7px 10px; color: var(--text-secondary); border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500; letter-spacing: -.005em; transition: background-color .12s ease, color .12s ease; }
+    a:hover { background: var(--surface-3); color: var(--text); }
+    a.active { color: var(--text); background: var(--surface-3); font-weight: 600; }
+    a.active::before { content: ''; position: absolute; left: -12px; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--primary); }
+    .ic { opacity: .75; } a.active .ic { opacity: 1; color: var(--primary); } a:hover .ic { opacity: 1; }
+    .spacer { flex: 0 0 0; }
+    .account { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 14px; border-top: 1px solid var(--border); flex: 0 0 auto; }
+    .avatar { flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--primary-50); color: var(--primary); border: 1px solid var(--primary-100); display: grid; place-items: center; font-size: 12px; font-weight: 650; }
+    .who { min-width: 0; flex: 1; }
+    .uname { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .roles { font-size: 12px; text-transform: capitalize; color: var(--muted); }
+    .logout { flex-shrink: 0; padding: 4px 8px; }
     @media (max-width: 900px) {
-      .backdrop { display: block; position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 299; }
-      .sidenav, .sidenav.collapsed { position: fixed; z-index: 300; top: 0; bottom: 0; left: 0; width: min(290px, 86vw); transform: translateX(-102%); transition: transform .2s ease; box-shadow: 0 0 40px rgba(0, 0, 0, .5); }
+      .backdrop { display: block; position: fixed; inset: 0; background: rgba(8, 10, 16, .55); backdrop-filter: blur(2px); z-index: 299; }
+      .sidenav, .sidenav.collapsed { position: fixed; z-index: 300; top: 0; bottom: 0; left: 0; width: min(300px, 86vw); transform: translateX(-102%); transition: transform .2s ease; box-shadow: var(--shadow-pop); }
       .sidenav.open { transform: none; }
       .collapse { display: none; }
     }
-    .brand { display: flex; align-items: center; gap: 10px; padding: 14px 18px 16px; }
-    /* Collapsed: no brand-name to fill the row, so the logo + toggle + collapse button (the toggle's
-       margin-left:auto especially) would otherwise overflow/overlap a 68px rail — stack them instead. */
-    .sidenav.collapsed .brand { flex-direction: column; padding: 14px 6px 12px; gap: 8px; }
-    .sidenav.collapsed .theme-toggle, .sidenav.collapsed .collapse { margin-left: 0; }
-    .logo { width: 30px; height: 30px; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 10px; font-weight: 800; box-shadow: 0 6px 14px -6px rgba(139, 92, 246, .9); }
-    .brand-name { font-weight: 700; letter-spacing: -.02em; }
-    .theme-toggle { margin-left: auto; border: none; background: transparent; border-radius: var(--radius-xs); width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer; color: var(--muted); font-size: 13px; }
-    .theme-toggle:hover { background: var(--surface-3); color: var(--text); }
-    .collapse { border: none; background: transparent; cursor: pointer; color: var(--muted); font-size: 16px; }
-    .glabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 14px 22px 4px; }
-    /* Both lists scroll together (a thin visible scrollbar tells people there is more) — before, only the first list scrolled and the last items were silently clipped on short screens. */
-    .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
-    ul { list-style: none; margin: 4px 0; padding: 0 10px; display: flex; flex-direction: column; gap: 2px; }
-    /* Active state is a soft tinted pill, not a hard left border — matches the airy direction. */
-    a { display: flex; align-items: center; gap: 11px; padding: 7px 12px; color: var(--text-secondary); border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500; transition: background-color .14s ease, color .14s ease; }
-    a:hover { background: var(--surface-3); color: var(--text); }
-    a.active { color: var(--primary); background: var(--primary-50); font-weight: 650; }
-    a.active .ic { opacity: 1; }
-    .ic { opacity: .7; }
-    a.active .ic, a:hover .ic { opacity: 1; }
-    .spacer { flex: 0 0 0; }
-    .account { display: flex; align-items: center; gap: 10px; margin: 6px 10px 4px; padding: 10px 12px; border-top: 1px solid var(--border); border-radius: var(--radius-sm); }
-    .avatar { flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--grad-brand); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
-    .who { min-width: 0; flex: 1; }
-    .uname { font-size: 13px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .roles { font-size: 12px; text-transform: capitalize; color: var(--muted); }
-    .logout { flex-shrink: 0; padding: 4px 8px; font-size: 14px; }
   `],
 })
 export class SideNavComponent {

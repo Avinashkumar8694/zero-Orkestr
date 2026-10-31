@@ -35,16 +35,10 @@ const isStandalone = (url: string) => { const u = url.split('?')[0].split('#')[0
   `,
   styles: [`
     :host { display: flex; flex-direction: column; height: 100vh; padding: 0; }
-    .layout {
-      flex: 1; display: flex; min-height: 0;
-      margin: 12px; border-radius: var(--radius-shell);
-      background: var(--surface); box-shadow: var(--shadow-shell);
-      overflow: hidden; border: 1px solid var(--border);
-    }
-    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface-2); position: relative; }
+    /* Full-bleed workspace: sidebar and content meet the window edges, separated by hairlines rather than a floating rounded card. */
+    .layout { flex: 1; display: flex; min-height: 0; background: var(--surface); }
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--grad-page), var(--bg); position: relative; }
     .page-content { flex: 1; min-height: 0; overflow: auto; position: relative; }
-    @media (min-width: 1600px) { .layout { margin: 20px 24px; } }
-    @media (max-width: 900px) { .layout { margin: 0; border-radius: 0; border: none; } }
   `],
 })
 export class AppComponent {

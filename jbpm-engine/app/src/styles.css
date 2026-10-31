@@ -1,99 +1,94 @@
-/* ============================================================================
-   Design tokens — "Aurora" light theme.
+@import '@fontsource-variable/inter';
 
-   Direction: light, airy and colourful rather than dense enterprise grey. The page sits on a
-   soft mesh-gradient backdrop; the app itself is a floating rounded surface. Colour is vibrant
-   and multi-hue (violet → pink → mint → blue) and is used generously in data visualisation,
-   while chrome stays near-white so the data is what carries the colour.
+/* ============================================================================
+   Design tokens — "Obsidian".
+
+   Direction: calm, precise, premium. A cool near-neutral canvas with hairline borders, ONE confident
+   indigo accent, and colour reserved for meaning (status, charts, the primary action). No mesh
+   backgrounds, no violet-to-pink gradients, no floating rounded shell: the app is a full-bleed
+   workspace, and depth comes from tone and 1px borders rather than heavy shadows.
 
    Every component references these by name, so values are tuned here rather than renamed.
    ============================================================================ */
 :root {
-  /* Brand — violet with a pink-leaning gradient partner */
-  --primary: #7c3aed;
-  --primary-600: #6d28d9;
-  --primary-50: #f4f0ff;
-  --primary-100: #e9e2ff;
-  --accent-pink: #ec4899;
-  --accent-mint: #10b981;
-  --accent-blue: #3b82f6;
-  --accent-cyan: #06b6d4;
+  /* Brand — indigo */
+  --primary: #5e6ad2;
+  --primary-600: #4b57bd;
+  --primary-50: #f1f2fd;
+  --primary-100: #e1e4fa;
+  --accent-pink: #d6489a;
+  --accent-mint: #12a672;
+  --accent-blue: #3b7cf0;
+  --accent-cyan: #0aa5c0;
 
-  /* Signature gradients — used on charts, primary buttons, brand marks */
-  --grad-brand: linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%);
-  --grad-cool: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
-  --grad-warm: linear-gradient(135deg, #d946ef 0%, #f472b6 100%);
-  --grad-fresh: linear-gradient(135deg, #10b981 0%, #34d399 100%);
-  --grad-page: radial-gradient(1200px 600px at 8% -5%, #e9dcff 0%, transparent 55%),
-               radial-gradient(1000px 520px at 98% 4%, #ffe0f2 0%, transparent 52%),
-               radial-gradient(900px 500px at 88% 96%, #ddfbef 0%, transparent 50%),
-               radial-gradient(800px 460px at 4% 92%, #e6f0ff 0%, transparent 50%);
+  /* Gradients are deliberately quiet: a few % of tonal shift, never a rainbow. */
+  --grad-brand: linear-gradient(180deg, #6773d8 0%, #5460cc 100%);
+  --grad-cool: linear-gradient(135deg, #5e6ad2 0%, #3b7cf0 100%);
+  --grad-warm: linear-gradient(135deg, #d6489a 0%, #e8743b 100%);
+  --grad-fresh: linear-gradient(135deg, #12a672 0%, #34c590 100%);
+  --grad-page: none;
 
-  /* Surfaces — near-white, low-contrast separation */
-  --bg: #f7f6fb;
+  /* Surfaces */
+  --bg: #f5f6f8;
   --surface: #ffffff;
-  --surface-2: #fbfaff;
-  --surface-3: #f5f3fb;
-  --border: #eeecf5;
-  --border-strong: #ddd9ea;
+  --surface-2: #fafbfc;
+  --surface-3: #f0f2f5;
+  --border: #e5e8ed;
+  --border-strong: #d0d5de;
 
   /* Text */
-  --text: #1a1730;
-  --text-secondary: #4a4763;
-  --muted: #8b88a3;
+  --text: #0f1421;
+  --text-secondary: #424b5e;
+  --muted: #667085;
 
-  /* Semantic status — brighter than the old enterprise set, tinted backgrounds */
-  --green: #059669;    --green-bg: #e7f9f1;
-  --blue: #2563eb;     --blue-bg: #e8f0ff;
-  --purple: #7c3aed;   --purple-bg: #f2ecff;
-  --orange: #ea580c;   --orange-bg: #fff0e6;
-  --amber: #d97706;    --amber-bg: #fff5e5;
-  --red: #e11d48;      --red-bg: #ffe9ee;
-  --pink: #db2777;     --pink-bg: #fdeaf5;
+  /* Status */
+  --green: #067a55;    --green-bg: #e4f6ee;
+  --blue: #1f5fd6;     --blue-bg: #e7efff;
+  --purple: #5e6ad2;   --purple-bg: #eff0fc;
+  --orange: #c2410c;   --orange-bg: #fdeee3;
+  --amber: #b45309;    --amber-bg: #fdf3dc;
+  --red: #cc1f45;      --red-bg: #fde9ed;
+  --pink: #be2a7e;     --pink-bg: #fbe9f3;
 
-  /* Shape — noticeably rounder than before */
-  --radius-shell: 26px;
-  --radius: 16px;
-  --radius-sm: 10px;
-  --radius-xs: 7px;
+  /* Shape — tighter, more architectural */
+  --radius-shell: 0px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
   --radius-pill: 999px;
 
-  /* Elevation — soft and violet-tinted, never grey/heavy */
-  --shadow-xs: 0 1px 2px rgba(76, 58, 122, .05);
-  --shadow-card: 0 1px 2px rgba(76, 58, 122, .04), 0 4px 16px -6px rgba(76, 58, 122, .10);
-  --shadow-pop: 0 8px 24px -8px rgba(76, 58, 122, .18), 0 24px 48px -16px rgba(76, 58, 122, .20);
-  --shadow-shell: 0 24px 70px -24px rgba(76, 58, 122, .28);
-  --shadow-focus: 0 0 0 3px rgba(124, 58, 237, .18);
+  /* Elevation — hairline + a whisper of shadow */
+  --shadow-xs: 0 1px 1px rgba(16, 24, 40, .04);
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, .04);
+  --shadow-pop: 0 4px 12px -2px rgba(16, 24, 40, .10), 0 16px 40px -12px rgba(16, 24, 40, .18);
+  --shadow-shell: none;
+  --shadow-focus: 0 0 0 3px rgba(94, 106, 210, .22);
 
   /* Layout */
-  --header-h: 64px;
+  --header-h: 60px;
   --footer-h: 32px;
-  --sidenav-w: 232px;
+  --sidenav-w: 248px;
   --panel-w: 320px;
   --panel-w-lg: 420px;
 
-  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
 
-  /* Type scale — six steps only. Deliberately capped: dense consoles that adopt a generic 13-step
-     scale end up with half-pixel sizes nobody chose. 12px is a hard floor (Carbon/Atlassian/Ant all
-     hold this line). Density comes from padding, never from shrinking text below the floor. */
-  --text-xs: 12px;    --lh-xs: 16px;   /* metadata, timestamps, table headers */
-  --text-sm: 14px;    --lh-sm: 20px;   /* body, table cells, labels — the workhorse */
-  --text-base: 16px;  --lh-base: 24px; /* form inputs, emphasised body */
-  --text-lg: 18px;    --lh-lg: 28px;   /* section headers */
-  --text-xl: 22px;    --lh-xl: 28px;   /* page titles */
-  --text-2xl: 28px;   --lh-2xl: 36px;  /* dashboard hero numbers only */
+  /* Type scale — six steps only; 12px is the hard floor. Density comes from padding, never smaller text. */
+  --text-xs: 12px;    --lh-xs: 16px;
+  --text-sm: 14px;    --lh-sm: 20px;
+  --text-base: 16px;  --lh-base: 24px;
+  --text-lg: 18px;    --lh-lg: 28px;
+  --text-xl: 24px;    --lh-xl: 30px;
+  --text-2xl: 32px;   --lh-2xl: 38px;
 
-  /* Table density — font-size is FIXED across all three; only padding and row height move. */
-  --row-h: 44px;      --cell-pad: 10px 16px;   /* comfortable (default) */
+  --row-h: 48px;      --cell-pad: 12px 16px;
 
-  --canvas-bg: #fbfaff;
-  --canvas-dot: #e4e0f0;
+  --canvas-bg: #fafbfc;
+  --canvas-dot: #dde1e8;
   color-scheme: light;
 
-  /* Status aliases — named by meaning so a palette change doesn't touch components */
   --status-running: var(--blue);      --status-running-bg: var(--blue-bg);
   --status-waiting: var(--amber);     --status-waiting-bg: var(--amber-bg);
   --status-completed: var(--green);   --status-completed-bg: var(--green-bg);
@@ -108,156 +103,137 @@
   --token-error: var(--red);
 }
 
-/* Dark theme — same names, deep violet-black rather than neutral charcoal, so the brand
-   identity survives the switch. Status colours brighten; tinted fills replace pastel fills. */
+/* Dark — graphite with a faint blue cast, never pure black; the indigo lifts to stay legible. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --primary: #a78bfa;
-  --primary-600: #c4b5fd;
-  --primary-50: rgba(167, 139, 250, .14);
-  --primary-100: rgba(167, 139, 250, .22);
-  --grad-page: radial-gradient(1200px 600px at 8% -5%, rgba(124,58,237,.20) 0%, transparent 55%),
-               radial-gradient(1000px 520px at 98% 4%, rgba(217,70,239,.15) 0%, transparent 52%),
-               radial-gradient(900px 500px at 88% 96%, rgba(16,185,129,.12) 0%, transparent 50%);
-  --bg: #0e0b18;
-  --surface: #171327;
-  --surface-2: #1c1730;
-  --surface-3: #221c39;
-  --border: #2a2340;
-  --border-strong: #3d3357;
-  --text: #f0edfa;
-  --text-secondary: #bdb7d1;
-  --muted: #8e88a8;
-  --green: #34d399;   --green-bg: rgba(52, 211, 153, .14);
-  --blue: #60a5fa;    --blue-bg: rgba(96, 165, 250, .14);
-  --purple: #a78bfa;  --purple-bg: rgba(167, 139, 250, .16);
-  --orange: #fb923c;  --orange-bg: rgba(251, 146, 60, .14);
-  --amber: #fbbf24;   --amber-bg: rgba(251, 191, 36, .14);
-  --red: #fb7185;     --red-bg: rgba(251, 113, 133, .14);
-  --pink: #f472b6;    --pink-bg: rgba(244, 114, 182, .14);
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .4);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px -6px rgba(0, 0, 0, .5);
-  --shadow-pop: 0 8px 24px -8px rgba(0, 0, 0, .6), 0 24px 48px -16px rgba(0, 0, 0, .7);
-  --shadow-shell: 0 24px 70px -24px rgba(0, 0, 0, .7);
-  --shadow-focus: 0 0 0 3px rgba(167, 139, 250, .3);
-  --canvas-bg: #14101f;
-  --canvas-dot: #2a2340;
+  --primary: #8f99f2;
+  --primary-600: #b3baf7;
+  --primary-50: rgba(143, 153, 242, .11);
+  --primary-100: rgba(143, 153, 242, .20);
+  --grad-brand: linear-gradient(180deg, #6f7be0 0%, #5a66d0 100%);
+  /* a faint pool of accent light at the top keeps big dark surfaces from reading as flat */
+  --grad-page: radial-gradient(900px 320px at 50% -120px, rgba(143, 153, 242, .10), transparent 70%);
+  --bg: #0a0c11;
+  --surface: #11141b;
+  --surface-2: #151922;
+  --surface-3: #1b202b;
+  --border: #212737;
+  --border-strong: #2f3748;
+  --text: #e9ebf1;
+  --text-secondary: #aab2c3;
+  --muted: #7f899d;
+  --green: #3ddc9b;   --green-bg: rgba(61, 220, 155, .12);
+  --blue: #6ea8ff;    --blue-bg: rgba(110, 168, 255, .12);
+  --purple: #a3acf5;  --purple-bg: rgba(143, 153, 242, .13);
+  --orange: #ff9a5c;  --orange-bg: rgba(255, 154, 92, .12);
+  --amber: #f5c04a;   --amber-bg: rgba(245, 192, 74, .12);
+  --red: #ff7a93;     --red-bg: rgba(255, 122, 147, .12);
+  --pink: #f48bc4;    --pink-bg: rgba(244, 139, 196, .12);
+  --shadow-xs: none;
+  --shadow-card: none;
+  --shadow-pop: 0 8px 24px -6px rgba(0, 0, 0, .6), 0 24px 56px -16px rgba(0, 0, 0, .7);
+  --shadow-focus: 0 0 0 3px rgba(143, 153, 242, .32);
+  --canvas-bg: #0d1017;
+  --canvas-dot: #1f2533;
 }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
   font-family: var(--font); color: var(--text); font-size: 14px; line-height: 1.55;
-  background: var(--grad-page), var(--bg);
-  background-attachment: fixed;
-  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  background: var(--bg);
+  font-feature-settings: "cv11", "ss01", "tnum" 0;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility;
 }
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; }
-h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -.015em; color: var(--text); }
-h1 { font-size: 22px; } h2 { font-size: 17px; } h3 { font-size: 14px; }
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.02em; color: var(--text); }
+h1 { font-size: var(--text-xl); line-height: var(--lh-xl); letter-spacing: -.03em; } h2 { font-size: 17px; } h3 { font-size: 14px; }
 p { line-height: 1.6; margin: 0; }
 code, pre { font-family: var(--font-mono); }
+::selection { background: var(--primary-100); }
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
-/* Focus is always visible, styled once, never suppressed. A real 2px outline with an offset rather
-   than a box-shadow ring: WCAG 2.2 SC 2.4.13 wants a ≥2px perimeter at ≥3:1 against every surface,
-   and an outline (unlike a shadow) is never clipped by an ancestor's overflow. */
-:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius-sm); }
 
-/* Density: font-size never changes, only padding and row height (Carbon's rule). Set
-   data-density="compact" on <html> to switch. */
-:root[data-density="compact"]  { --row-h: 32px; --cell-pad: 6px 12px; }
-:root[data-density="spacious"] { --row-h: 56px; --cell-pad: 14px 16px; }
+:root[data-density="compact"]  { --row-h: 36px; --cell-pad: 7px 12px; }
+:root[data-density="spacious"] { --row-h: 58px; --cell-pad: 15px 18px; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: .001ms !important; animation-iteration-count: 1 !important;
-    transition-duration: .001ms !important;
-  }
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* ---------------------------------------------------------------- Page rhythm */
+.pagehead { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.pagehead h1 { font-weight: 650; }
+.sub, .pagehead + p.muted { font-size: 14px; max-width: 70ch; }
 
 /* ---------------------------------------------------------------- Buttons */
 .btn {
-  border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px; font-weight: 550; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px; box-shadow: var(--shadow-xs);
-  transition: background-color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .08s ease;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+  border-radius: var(--radius-sm); padding: 7px 13px; font-size: 13px; font-weight: 550; letter-spacing: -.005em; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-shadow: var(--shadow-xs); line-height: 1.4;
+  transition: background-color .14s ease, border-color .14s ease, box-shadow .14s ease, color .14s ease;
 }
-.btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
-.btn:active { transform: translateY(.5px); }
+.btn:hover { background: var(--surface-3); }
+.btn:active { background: var(--border); }
 .btn.primary {
-  background: var(--grad-brand); border-color: transparent; color: #fff;
-  box-shadow: 0 1px 0 rgba(255,255,255,.2) inset, 0 6px 18px -8px rgba(139, 92, 246, .8);
+  background: var(--grad-brand); border-color: var(--primary-600); color: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 1px 2px rgba(35, 42, 110, .35);
 }
-.btn.primary:hover { filter: brightness(1.06); }
-.btn.ghost { border-color: transparent; background: transparent; box-shadow: none; }
-.btn.ghost:hover { background: var(--surface-3); }
-.btn.danger { color: var(--red); border-color: var(--red-bg); background: var(--red-bg); box-shadow: none; }
-.btn.danger:hover { filter: brightness(.97); }
-.btn.sm { padding: 5px 10px; font-size: 12.5px; border-radius: var(--radius-xs); }
-.btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; transform: none; }
+.btn.primary:hover { filter: brightness(1.07); background: var(--grad-brand); }
+.btn.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--text-secondary); }
+.btn.ghost:hover { background: var(--surface-3); color: var(--text); }
+.btn.danger { color: var(--red); border-color: transparent; background: var(--red-bg); box-shadow: none; }
+.btn.danger:hover { filter: brightness(.96); background: var(--red-bg); }
+.btn.sm { padding: 4px 10px; font-size: 12.5px; border-radius: var(--radius-xs); }
+.btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; filter: none; }
 
-/* ---------------------------------------------------------------- Badges */
+/* ---------------------------------------------------------------- Badges — a status dot + tinted pill */
 .badge {
-  font-size: 11.5px; font-weight: 600; letter-spacing: .005em; padding: 3px 9px;
+  font-size: 12px; font-weight: 550; letter-spacing: 0; padding: 2px 9px;
   border-radius: var(--radius-pill); background: var(--surface-3); color: var(--text-secondary);
-  border: 1px solid transparent; display: inline-flex; align-items: center; gap: 4px;
-  line-height: 1.45; white-space: nowrap;
+  border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 5px;
+  line-height: 1.5; white-space: nowrap;
 }
-.badge.active, .badge.completed { background: var(--green-bg); color: var(--green); }
+.badge.active, .badge.completed { background: var(--green-bg); color: var(--green); border-color: transparent; }
 .badge.inactive { background: var(--surface-3); color: var(--muted); }
-.badge.archived, .badge.failed { background: var(--red-bg); color: var(--red); }
-.badge.running { background: var(--blue-bg); color: var(--blue); }
-.badge.waiting { background: var(--amber-bg); color: var(--amber); }
+.badge.archived, .badge.failed { background: var(--red-bg); color: var(--red); border-color: transparent; }
+.badge.running { background: var(--blue-bg); color: var(--blue); border-color: transparent; }
+.badge.waiting { background: var(--amber-bg); color: var(--amber); border-color: transparent; }
 .badge.aborted { background: var(--surface-3); color: var(--muted); }
-.badge.suspended { background: var(--purple-bg); color: var(--purple); }
+.badge.suspended { background: var(--purple-bg); color: var(--purple); border-color: transparent; }
 
 /* ---------------------------------------------------------------- Cards */
-.card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow-card);
-}
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-card); }
 .card.flat { box-shadow: none; }
-.card.clickable, a.card { transition: box-shadow .16s ease, transform .12s ease, border-color .16s ease; }
-.card.clickable:hover, a.card:hover {
-  box-shadow: var(--shadow-pop); border-color: var(--primary-100); transform: translateY(-2px);
-}
+.card.clickable, a.card { transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease; }
+.card.clickable:hover, a.card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-pop); }
 
 /* ---------------------------------------------------------------- Tables */
 table { width: 100%; border-collapse: collapse; background: transparent; }
-th, td {
-  text-align: left; padding: var(--cell-pad); border-bottom: 1px solid var(--border);
-  font-size: var(--text-sm); line-height: var(--lh-sm); height: var(--row-h);
-}
+th, td { text-align: left; padding: var(--cell-pad); border-bottom: 1px solid var(--border); font-size: var(--text-sm); line-height: var(--lh-sm); height: var(--row-h); }
 th {
-  color: var(--muted); font-weight: 600; font-size: var(--text-xs); text-transform: uppercase;
-  letter-spacing: .05em; background: transparent; white-space: nowrap; height: auto;
+  color: var(--muted); font-weight: 550; font-size: var(--text-xs); text-transform: none;
+  letter-spacing: .01em; background: transparent; white-space: nowrap; height: auto; padding-top: 10px; padding-bottom: 10px;
 }
-/* Sticky header must sit on <th>, not <thead>/<tr> — the latter don't establish a sticky context. */
-thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); }
-/* Counts, durations and money align only with tabular figures. */
+thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); border-bottom: 1px solid var(--border-strong); }
 td.num, .tnum { font-variant-numeric: tabular-nums; }
 tbody tr:last-child td { border-bottom: none; }
-tbody tr { transition: background-color .12s ease; }
+tbody tr { transition: background-color .1s ease; }
 tbody tr:hover td { background: var(--surface-2); }
 tr.selected td { background: var(--primary-50); }
 
 /* ---------------------------------------------------------------- Inputs */
 input:not([type=checkbox]):not([type=radio]), select, textarea {
-  font-family: inherit; font-size: 13px; color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 11px;
-  background: var(--surface-2);
-  transition: border-color .14s ease, box-shadow .14s ease, background-color .14s ease;
+  font-family: inherit; font-size: 13.5px; color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 11px;
+  background: var(--surface);
+  transition: border-color .14s ease, box-shadow .14s ease;
 }
-input:hover, select:hover, textarea:hover { border-color: var(--border-strong); }
-input:focus, select:focus, textarea:focus {
-  outline: none; border-color: var(--primary); background: var(--surface); box-shadow: var(--shadow-focus);
-}
-input::placeholder, textarea::placeholder { color: var(--muted); }
+input:hover, select:hover, textarea:hover { border-color: var(--muted); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: var(--shadow-focus); }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 15px; height: 15px; }
 
 /* ---------------------------------------------------------------- Utility */
@@ -265,41 +241,29 @@ input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 1
 .row { display: flex; gap: 8px; align-items: center; }
 .spacer { flex: 1; }
 .mono { font-family: var(--font-mono); }
-
-/* Identity values (PIID, keys) — monospace, brand-coloured, click-to-copy affordance. */
-.ident { font-family: var(--font-mono); font-weight: 600; color: var(--primary); font-size: 12.5px; }
+.ident { font-family: var(--font-mono); font-weight: 550; color: var(--primary); font-size: 12.5px; }
 
 /* ---------------------------------------------------------------- Empty & loading */
-.empty-state {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  text-align: center; padding: 56px 24px; gap: 6px;
-}
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 64px 24px; gap: 6px; }
 .empty-state .es-icon {
-  width: 60px; height: 60px; display: grid; place-items: center;
-  background: var(--grad-brand); color: #fff; border-radius: 20px; font-size: 24px;
-  margin-bottom: 10px; box-shadow: 0 10px 24px -10px rgba(139, 92, 246, .8);
+  width: 52px; height: 52px; display: grid; place-items: center;
+  background: var(--primary-50); color: var(--primary); border: 1px solid var(--primary-100); border-radius: 14px; font-size: 22px;
+  margin-bottom: 12px; box-shadow: none;
 }
-.empty-state h3 { margin: 0; font-size: 15px; font-weight: 650; }
-.empty-state p { margin: 0; font-size: 13px; color: var(--muted); max-width: 380px; }
-.empty-state .btn { margin-top: 12px; }
+.empty-state h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.empty-state p { margin: 0; font-size: 13.5px; color: var(--muted); max-width: 400px; }
+.empty-state .btn { margin-top: 14px; }
 
-.skeleton {
-  position: relative; overflow: hidden; background: var(--surface-3);
-  border-radius: var(--radius-sm);
-}
-.skeleton::after {
-  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .7), transparent);
-  animation: skeleton-shimmer 1.4s infinite;
-}
+.skeleton { position: relative; overflow: hidden; background: var(--surface-3); border-radius: var(--radius-sm); }
+.skeleton::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 7%, transparent), transparent); animation: skeleton-shimmer 1.4s infinite; }
 @keyframes skeleton-shimmer { 100% { transform: translateX(100%); } }
 .skeleton-line { height: 12px; margin: 6px 0; }
 .skeleton-card { height: 96px; border-radius: var(--radius); }
 
 /* ---- auth screens (login / register / forgot / reset / verify) — one shared card, rendered from /api/auth/config ---- */
-.auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: transparent; }
-.auth-card { width: 100%; max-width: 400px; padding: 32px 30px 26px; display: flex; flex-direction: column; gap: 14px; border-radius: var(--radius-shell); box-shadow: var(--shadow-pop); }
-.auth-logo { width: 44px; height: 44px; margin: 0 auto; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 13px; box-shadow: 0 8px 20px -8px rgba(139, 92, 246, .9); }
+.auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: radial-gradient(900px 480px at 50% -10%, var(--primary-50), transparent 70%), var(--bg); }
+.auth-card { width: 100%; max-width: 400px; padding: 32px 30px 26px; display: flex; flex-direction: column; gap: 14px; border-radius: 16px; box-shadow: var(--shadow-pop); }
+.auth-logo { width: 44px; height: 44px; margin: 0 auto; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 12px; box-shadow: 0 1px 2px rgba(35, 42, 110, .35); }
 .auth-title { margin: 4px 0 0; text-align: center; font-size: var(--text-xl); letter-spacing: -.02em; }
 .auth-sub { margin: -6px 0 4px; text-align: center; color: var(--muted); font-size: 13px; }
 .auth-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }

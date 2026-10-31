@@ -68,12 +68,13 @@ function roleLabel(role?: string | null): string {
     }
     .header-badge {
       display: inline-block;
-      padding: 4px 10px;
-      border-radius: var(--radius-xs);
-      background: var(--surface-3);
+      padding: 3px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      background: var(--surface-2);
       color: var(--text-secondary);
       font-size: 12px;
-      font-weight: 650;
+      font-weight: 550;
       text-transform: capitalize;
     }
     .header-breadcrumb-separator {
@@ -107,13 +108,13 @@ function roleLabel(role?: string | null): string {
       width: 32px;
       height: 32px;
       border-radius: 50%;
-      background: var(--grad-brand);
-      color: #fff;
+      background: var(--primary-50);
+      color: var(--primary);
+      border: 1px solid var(--primary-100);
       display: grid;
       place-items: center;
       font-size: 12.5px;
-      font-weight: 700;
-      box-shadow: 0 4px 10px -2px rgba(124, 58, 237, .4);
+      font-weight: 650;
     }
     .header-user-text {
       line-height: 1.25;
