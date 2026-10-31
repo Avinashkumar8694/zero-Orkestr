@@ -22,6 +22,8 @@ RUN npm run build --workspace app && ls app/dist/app/browser/index.html
 FROM nginx:1.27-alpine
 RUN apk add --no-cache curl
 COPY --from=build /build/app/dist/app/browser /srv/app
+# pre-compress the static files once at build time (served by gzip_static: no CPU per request)
+RUN find /srv/app -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg' -o -name '*.json' -o -name '*.txt' \) -exec gzip -9 -k -f {} +
 COPY jbpm-engine/deploy/nginx.conf.template /etc/nginx/templates/orkestr.conf.template
 RUN rm -f /etc/nginx/conf.d/default.conf
 ENV UPSTREAM=engine:4000
