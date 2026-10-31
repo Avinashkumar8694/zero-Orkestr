@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, isDevMode } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AuthService } from '../core/auth/auth.service';
 import { TenantService } from '../core/tenant/tenant.service';
@@ -27,7 +27,7 @@ function roleLabel(role?: string | null): string {
       </div>
 
       <div class="header-actions">
-        <span class="header-dev-badge" title="Development build">DEV</span>
+        @if (devBuild) { <span class="header-dev-badge" title="Development build">DEV</span> }
         <app-notifications-bell />
         @if (auth.user(); as u) {
           <div class="header-user" [title]="u.username">
@@ -36,7 +36,7 @@ function roleLabel(role?: string | null): string {
             </div>
             <div class="header-user-text">
               <div class="header-user-name">{{ u.username }}</div>
-              <div class="header-user-email">{{ u.roles.join(', ') || 'Member' }}</div>
+              <div class="header-user-email">{{ tenant.role() ? roleLabel(tenant.role()) : (u.roles.join(', ') || 'Member') }}</div>
             </div>
           </div>
         }
@@ -130,4 +130,6 @@ export class HeaderComponent {
   tenant = inject(TenantService);
 
   roleLabel = roleLabel;
+  /** the DEV badge belongs to development builds only (ng serve), never to the production bundle */
+  devBuild = isDevMode();
 }
