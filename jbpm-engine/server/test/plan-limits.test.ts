@@ -23,7 +23,10 @@ test.beforeEach(() => { resetPlanGates(); resetRateLimits(); });
 
 const UNL = Object.fromEntries(PLAN_LIMIT_KEYS.map((k) => [k, -1]));
 /** a throw-away plan where only the given limits apply */
-const mkPlan = (key: string, limits: Record<string, number>) => plans.update(key, { limits: { ...UNL, ...limits } }, 'test');
+const mkPlan = async (key: string, limits: Record<string, number>) => {   // create the plan if it does not exist yet, else update it
+  try { return await plans.create({ key, name: key, limits: { ...UNL, ...limits } }, 'test'); }
+  catch { return plans.update(key, { limits: { ...UNL, ...limits } }, 'test'); }
+};
 const wsOn = (slug: string, plan: string, roles: readonly string[] = ['viewer', 'operator', 'developer']) => h.workspace(slug, roles, plan);
 const S = { id: 's', type: 'start' }, E = { id: 'e', type: 'end' };
 let n = 0;
@@ -292,6 +295,7 @@ test('PLAN-50 GET /plan/usage: every member can read it; non-members cannot; num
 });
 
 test('PLAN-60 plan administration validates input: unknown limit, non-integer, below -1, unknown plan; updates apply immediately', async () => {
+  await mkPlan('qa-val', {});
   await assert.rejects(() => plans.update('qa-val', { limits: { nonsense: 1 } }, 't'), /unknown plan limit/);
   await assert.rejects(() => plans.update('qa-val', { limits: { maxWorkflows: 1.5 } }, 't'), /integer/);
   await assert.rejects(() => plans.update('qa-val', { limits: { maxWorkflows: -2 } }, 't'), /≥ -1/);

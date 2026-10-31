@@ -14,7 +14,7 @@ import type { Store } from '../../store/repository.ts';
 import type { AppContext } from '../../context.ts';
 import { Collections, type Deployment, type Instance, type Plan, type Tenant, type TenantMember, type Usage, type Workflow } from '../../domain.ts';
 import { coordinator } from '../../infra/coordinator.ts';
-import { notFound, planExpired, quotaExceeded, validation } from '../../infra/errors.ts';
+import { conflict, notFound, planExpired, quotaExceeded, validation } from '../../infra/errors.ts';
 import { DEFAULT_PLAN_LIMITS, LIMIT_CATALOG, PLAN_LIMIT_KEYS, TRIAL_DAYS, UNLIMITED, cap, type PlanLimitKey, type PlanLimits } from './plan-limits.ts';
 
 export interface ResolvedPlan {
@@ -188,6 +188,30 @@ export async function planUsageFor(ctx: AppContext) {
 }
 
 // ---------------------------------------------------------------------------------------------- platform administration
+export const PLAN_STATUSES = ['active', 'disabled', 'upcoming', 'hidden'] as const;
+export type PlanStatus = (typeof PLAN_STATUSES)[number];
+/** a stored plan's status; the legacy `hidden` flag still means hidden, and built-in plans that were never stored are hidden (assignable only) */
+export const statusOf = (row: Plan | undefined): PlanStatus => row ? (row.status ?? (row.hidden ? 'hidden' : 'active')) : 'hidden';
+
+const KEY_RE = /^[a-z][a-z0-9_-]{1,31}$/;
+const DAY_MS = 86_400_000;
+
+/** the editable fields of a plan, validated once for create and update */
+export interface PlanInput {
+  name?: string; description?: string; status?: string; isDefault?: boolean; isCustom?: boolean; trialDays?: number | null;
+  contactConfig?: { type?: string; value?: string; label?: string } | null; features?: unknown; sortOrder?: number; limits?: Record<string, unknown>;
+  /** legacy: public === (status is not hidden) */
+  public?: boolean;
+}
+
+const safeLine = (v: unknown, field: string, min: number, max: number): string => {
+  if (typeof v !== 'string') throw validation(`${field} must be text`);
+  const t = v.trim();
+  if (t.length < min || t.length > max) throw validation(`${field} must be ${min}–${max} characters`);
+  if (/[\u0000-\u001f<>]/.test(t)) throw validation(`${field} may not contain control characters or < >`);
+  return t;
+};
+
 export class PlanService {
   constructor(private store: Store) {}
   private plans() { return this.store.repo<Plan>(Collections.plans); }
@@ -213,44 +237,193 @@ export class PlanService {
     invalidatePlanCache(this.store);
   }
 
-  async list() {
-    const rows = await this.plans().query(() => true);
-    const keys = [...new Set([...Object.keys(DEFAULT_PLAN_LIMITS), ...rows.map((r) => r.key)])];
-    return keys.map((key) => {
-      const row = rows.find((r) => r.key === key);
-      return { key, name: row?.name ?? key, description: row?.description ?? '', public: row ? !row.hidden : false, stored: !!row,
-        limits: { ...(DEFAULT_PLAN_LIMITS[key] ?? DEFAULT_PLAN_LIMITS.enterprise), ...knownLimits(row?.limits) } };
-    });
+  private shape(key: string, row: Plan | undefined, workspaces: number) {
+    return {
+      key, name: row?.name ?? key, description: row?.description ?? '', stored: !!row,
+      status: statusOf(row), public: statusOf(row) !== 'hidden',            // `public` kept for older clients
+      isDefault: !!row?.isDefault, isCustom: !!row?.isCustom, trialDays: row?.trialDays ?? null,
+      contactConfig: row?.contactConfig ?? null, features: row?.features ?? [], sortOrder: row?.sortOrder ?? 0,
+      workspaces,
+      limits: { ...(DEFAULT_PLAN_LIMITS[key] ?? DEFAULT_PLAN_LIMITS.enterprise), ...knownLimits(row?.limits) },
+    };
   }
 
-  async update(key: string, patch: { limits?: Record<string, unknown>; name?: string; description?: string; public?: boolean }, actor: string) {
-    if (!/^[a-z][a-z0-9_-]{1,31}$/.test(key)) throw validation('plan key must be 2–32 chars: lowercase letters, digits, - or _');
+  async list() {
+    const all = await this.plans().query(() => true);
+    const gone = new Set(all.filter((r) => (r as unknown as { deleted?: boolean }).deleted).map((r) => r.key));   // deleted built-in plans
+    const rows = all.filter((r) => !gone.has(r.key));
+    const tenants = await this.tenants().query(() => true);
+    const keys = [...new Set([...Object.keys(DEFAULT_PLAN_LIMITS).filter((k) => !gone.has(k)), ...rows.map((r) => r.key)])];
+    return keys.map((key) => this.shape(key, rows.find((r) => r.key === key), tenants.filter((t) => (t.plan || 'enterprise') === key).length))
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  }
+
+  private async one(key: string) {
+    const found = (await this.list()).find((p) => p.key === key);
+    if (!found) throw notFound('Plan');
+    return found;
+  }
+
+  /** Cross-field rules: the default plan is active, selectable by anyone and has no "contact us" flow. */
+  private assertCoherent(p: { status: PlanStatus; isDefault: boolean; isCustom: boolean; trialDays: number | null }): void {
+    if (p.isDefault && p.status !== 'active') throw validation('The default plan must be Active: new workspaces start on it');
+    if (p.isDefault && p.isCustom) throw validation('A "contact us" plan cannot be the default plan');
+    if (p.isCustom && p.trialDays) throw validation('A "contact us" plan has no trial: an administrator assigns it');
+  }
+
+  private cleanLimits(raw: Record<string, unknown> | undefined): Partial<PlanLimits> {
     const limits: Partial<PlanLimits> = {};
-    for (const [k, v] of Object.entries(patch.limits ?? {})) {
+    for (const [k, v] of Object.entries(raw ?? {})) {
       if (!(k in LIMIT_CATALOG)) throw validation(`unknown plan limit "${k}" (known: ${PLAN_LIMIT_KEYS.join(', ')})`);
       if (typeof v !== 'number' || !Number.isInteger(v) || v < UNLIMITED) throw validation(`${k} must be an integer ≥ -1 (-1 = unlimited)`);
       limits[k as PlanLimitKey] = v;
     }
-    const existing = (await this.plans().query((p) => p.key === key))[0];
-    const now = new Date().toISOString();
-    const row: Plan = existing
-      ? { ...existing, limits: { ...(existing.limits ?? {}), ...limits } }
-      : { id: `plan_${key}`, tenantId: 'system', key, name: patch.name?.trim() || key, description: '', isDefault: false, isCustom: false, trialDays: key === 'trial' ? TRIAL_DAYS : null, contactConfig: null, hidden: patch.public !== true,
-          limits: { ...(DEFAULT_PLAN_LIMITS[key] ?? DEFAULT_PLAN_LIMITS.enterprise), ...limits }, features: [] };
-    if (existing && typeof patch.name === 'string' && patch.name.trim()) row.name = patch.name.trim().slice(0, 80);
-    if (typeof patch.description === 'string') row.description = patch.description.slice(0, 500);
-    if (typeof patch.public === 'boolean') row.hidden = !patch.public;
-    await this.plans().put(row);
-    invalidatePlanCache(this.store);
-    void now; void actor;
-    return (await this.list()).find((p) => p.key === key)!;
+    return limits;
   }
 
-  /** Put a workspace on a plan; a trial gets its window (TRIAL_DAYS from now unless a date is given), other plans none unless given. */
+  private cleanContact(raw: PlanInput['contactConfig']): Plan['contactConfig'] {
+    if (raw === null || raw === undefined) return null;
+    if (raw.type !== 'email' && raw.type !== 'url') throw validation("contact type must be 'email' or 'url'");
+    const value = String(raw.value ?? '').trim().slice(0, 255);
+    if (value) {
+      const ok = raw.type === 'email' ? /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value) : /^https?:\/\/[^\s<>]+$/i.test(value);
+      if (!ok) throw validation(raw.type === 'email' ? 'contact value must be an e-mail address' : 'contact value must be an http(s) URL');
+    }
+    return { type: raw.type, value, ...(raw.label ? { label: safeLine(raw.label, 'contact button text', 1, 60) } : {}) };
+  }
+
+  private cleanFeatures(raw: unknown): string[] {
+    if (!Array.isArray(raw)) throw validation('features must be a list of short labels');
+    if (raw.length > 30) throw validation('at most 30 feature labels');
+    return raw.map((f) => safeLine(f, 'feature label', 1, 60));
+  }
+
+  private cleanStatus(v: unknown): PlanStatus {
+    if (!PLAN_STATUSES.includes(v as PlanStatus)) throw validation(`status must be one of: ${PLAN_STATUSES.join(', ')}`);
+    return v as PlanStatus;
+  }
+
+  private cleanTrial(v: unknown): number | null {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 365) throw validation('trialDays must be a whole number of days between 1 and 365 (empty = no trial)');
+    return v;
+  }
+
+  /** Create a plan. It starts Hidden — nobody sees or can select it — until the administrator publishes it (sets it Active / Coming soon / Disabled). */
+  async create(input: PlanInput & { key?: string }, actor: string) {
+    const key = String(input.key ?? '').trim();
+    if (!KEY_RE.test(key)) throw validation('plan key must be 2–32 chars: lowercase letters, digits, - or _, starting with a letter');
+    const prior = (await this.plans().query((p) => p.key === key))[0];
+    if ((prior && !(prior as unknown as { deleted?: boolean }).deleted) || (DEFAULT_PLAN_LIMITS[key] && !prior)) throw conflict(`a plan with the key "${key}" already exists`);
+    const name = safeLine(input.name ?? key, 'name', 2, 100);
+    const status = input.status === undefined ? 'hidden' : this.cleanStatus(input.status);
+    const isDefault = input.isDefault === true, isCustom = input.isCustom === true;
+    const trialDays = this.cleanTrial(input.trialDays);
+    this.assertCoherent({ status, isDefault, isCustom, trialDays });
+    const row: Plan = {
+      id: `plan_${key}`, tenantId: 'system', key, name,
+      description: input.description === undefined || input.description === null ? '' : safeLine(input.description, 'description', 0, 500),
+      isDefault, isCustom, trialDays, contactConfig: isCustom ? this.cleanContact(input.contactConfig) : null,
+      limits: { ...DEFAULT_PLAN_LIMITS.starter, ...this.cleanLimits(input.limits) } as Record<string, unknown>,
+      features: input.features === undefined ? [] : this.cleanFeatures(input.features), status, sortOrder: Number.isInteger(input.sortOrder) ? input.sortOrder : 0,
+    };
+    if (isDefault) await this.clearDefault(key);
+    await this.plans().put(row);
+    invalidatePlanCache(this.store); void actor;
+    return this.one(key);
+  }
+
+  private async clearDefault(exceptKey: string) {
+    for (const p of await this.plans().query((x) => x.isDefault && x.key !== exceptKey)) await this.plans().put({ ...p, isDefault: false });
+  }
+
+  async update(key: string, patch: PlanInput, actor: string) {
+    if (!KEY_RE.test(key)) throw validation('plan key must be 2–32 chars: lowercase letters, digits, - or _, starting with a letter');
+    const existing = (await this.plans().query((p) => p.key === key))[0];
+    if (!existing && !DEFAULT_PLAN_LIMITS[key]) throw notFound('Plan');
+    const base: Plan = existing ?? {
+      id: `plan_${key}`, tenantId: 'system', key, name: key, description: '', isDefault: false, isCustom: false, trialDays: null, contactConfig: null,
+      limits: { ...DEFAULT_PLAN_LIMITS[key] }, features: [], status: 'hidden', sortOrder: 0,
+    };
+    // legacy `public` flag from the first Plans screen
+    const wantedStatus = patch.status !== undefined ? this.cleanStatus(patch.status) : patch.public !== undefined ? (patch.public ? 'active' : 'hidden') : statusOf(base);
+    const next: Plan = {
+      ...base,
+      name: patch.name !== undefined ? safeLine(patch.name, 'name', 2, 100) : base.name,
+      description: patch.description !== undefined ? (patch.description === null ? '' : safeLine(patch.description, 'description', 0, 500)) : base.description,
+      status: wantedStatus,
+      isDefault: patch.isDefault ?? base.isDefault,
+      isCustom: patch.isCustom ?? base.isCustom,
+      trialDays: patch.trialDays !== undefined ? this.cleanTrial(patch.trialDays) : base.trialDays,
+      features: patch.features !== undefined ? this.cleanFeatures(patch.features) : base.features,
+      sortOrder: patch.sortOrder !== undefined ? (Number.isInteger(patch.sortOrder) && Math.abs(patch.sortOrder) <= 1000 ? patch.sortOrder : (() => { throw validation('sortOrder must be a whole number between -1000 and 1000'); })()) : base.sortOrder,
+      limits: patch.limits ? { ...(base.limits ?? {}), ...this.cleanLimits(patch.limits) } : base.limits,
+    };
+    delete (next as Partial<Plan>).hidden;
+    next.contactConfig = next.isCustom ? (patch.contactConfig !== undefined ? this.cleanContact(patch.contactConfig) : base.contactConfig ?? null) : null;
+    this.assertCoherent({ status: statusOf(next), isDefault: !!next.isDefault, isCustom: !!next.isCustom, trialDays: next.trialDays ?? null });
+    if (base.isDefault && patch.isDefault === false) throw validation('Make another plan the default instead: new workspaces need a plan to start on');
+    if (next.isDefault && !base.isDefault) await this.clearDefault(key);
+    await this.plans().put(next);
+    invalidatePlanCache(this.store); void actor;
+    return this.one(key);
+  }
+
+  /** Delete a plan nobody is on. The default plan cannot be deleted; a plan in use is retired by setting it Hidden. */
+  async remove(key: string, actor: string): Promise<void> {
+    const existing = (await this.plans().query((p) => p.key === key))[0];
+    if (!existing && !DEFAULT_PLAN_LIMITS[key]) throw notFound('Plan');
+    if (existing?.isDefault) throw conflict('The default plan cannot be deleted: make another plan the default first');
+    const using = (await this.tenants().query((t) => (t.plan || 'enterprise') === key)).length;
+    if (using > 0) throw conflict(`${using} workspace(s) are on this plan — move them to another plan, or set the plan's status to Hidden to retire it`);
+    if (existing && !DEFAULT_PLAN_LIMITS[key]) await this.plans().delete(existing.id);
+    else await this.plans().put({ id: existing?.id ?? `plan_${key}`, tenantId: 'system', key, name: key, description: '', isDefault: false, isCustom: false, trialDays: null, limits: {}, features: [], status: 'hidden', sortOrder: 0, deleted: true } as unknown as Plan);   // a built-in plan leaves a marker row so the seed never brings it back
+    invalidatePlanCache(this.store); void actor;
+  }
+
+  /** The plan new workspaces start on (the default plan, else the built-in trial) and when its trial ends. */
+  async startingPlan(nowMs = Date.now()): Promise<{ plan: string; planExpiresAt: string | null }> {
+    const row = (await this.plans().query((p) => p.isDefault && statusOf(p) === 'active'))[0];
+    const key = row?.key ?? 'trial';
+    const days = row ? row.trialDays : TRIAL_DAYS;
+    return { plan: key, planExpiresAt: days ? new Date(nowMs + days * DAY_MS).toISOString() : null };
+  }
+
+  /** What a visitor / workspace is shown: hidden plans are not listed; disabled and coming-soon ones are, but cannot be picked. */
+  async catalogue(currentKey?: string) {
+    const all = await this.list();
+    return all
+      .filter((p) => p.stored && (p.status !== 'hidden' || p.key === currentKey))
+      .map((p) => ({
+        key: p.key, name: p.name, description: p.description, status: p.status, trialDays: p.trialDays, isCustom: p.isCustom,
+        contactConfig: p.contactConfig, features: p.features, limits: p.limits, isDefault: p.isDefault,
+        current: p.key === currentKey, selectable: p.status === 'active' && !p.isCustom && p.key !== currentKey,
+      }));
+  }
+
+  /** A workspace switches itself to a plan it is offered (active, not "contact us"); refused while it is over the new plan's limits. */
+  async select(tenantId: string, planKey: string, used: Record<string, number>): Promise<Tenant> {
+    const t = await this.tenants().get(tenantId);
+    if (!t) throw notFound('Workspace');
+    const row = (await this.plans().query((p) => p.key === planKey))[0];
+    if (!row || statusOf(row) === 'hidden') throw notFound('Plan');
+    if (statusOf(row) === 'upcoming') throw conflict(`"${row.name}" is coming soon and cannot be selected yet`);
+    if (statusOf(row) === 'disabled') throw conflict(`"${row.name}" is not available right now`);
+    if (row.isCustom) throw conflict(`"${row.name}" is a custom plan: contact us and an administrator will assign it`);
+    if ((t.plan || '') === planKey) throw conflict('Your workspace is already on this plan');
+    const limits = { ...(DEFAULT_PLAN_LIMITS[planKey] ?? DEFAULT_PLAN_LIMITS.enterprise), ...knownLimits(row.limits) } as Required<PlanLimits>;
+    const over = Object.entries(used).filter(([k, n]) => { const c = cap(limits[k as PlanLimitKey]); return c !== undefined && n > c; })
+      .map(([k, n]) => `${LIMIT_CATALOG[k as PlanLimitKey]?.label ?? k}: you have ${n}, "${row.name}" allows ${cap(limits[k as PlanLimitKey])}`);
+    if (over.length) throw conflict(`Your workspace is over the limits of "${row.name}" — reduce first: ${over.join('; ')}`);
+    return this.assign(tenantId, planKey, {});
+  }
+
+  /** Put a workspace on a plan; a plan with a trial gets its window (the plan's trialDays from now unless a date is given), other plans none unless given. */
   async assign(tenantId: string, plan: string, opts: { planExpiresAt?: string | null; extendDays?: number }): Promise<Tenant> {
     const t = await this.tenants().get(tenantId);
     if (!t) throw notFound('Workspace');
-    const known = (await this.list()).some((p) => p.key === plan);
+    const all = await this.list();
+    const known = all.find((p) => p.key === plan);
     if (!known) throw validation(`unknown plan "${plan}"`);
     let expires: string | null;
     if (opts.planExpiresAt !== undefined) {
@@ -259,9 +432,10 @@ export class PlanService {
     } else if (typeof opts.extendDays === 'number') {
       if (!Number.isFinite(opts.extendDays) || opts.extendDays < 0 || opts.extendDays > 3650) throw validation('extendDays must be between 0 and 3650');
       const base = Math.max(Date.now(), t.planExpiresAt ? Date.parse(t.planExpiresAt) : 0);
-      expires = new Date(base + opts.extendDays * DAY).toISOString();
+      expires = new Date(base + opts.extendDays * DAY_MS).toISOString();
     } else {
-      expires = plan === 'trial' ? new Date(Date.now() + TRIAL_DAYS * DAY).toISOString() : null;
+      const days = known.stored ? known.trialDays : (plan === 'trial' ? TRIAL_DAYS : null);
+      expires = days ? new Date(Date.now() + days * DAY_MS).toISOString() : null;
     }
     const next: Tenant = { ...t, plan, planExpiresAt: expires, updatedAt: new Date().toISOString() };
     await this.tenants().put(next);

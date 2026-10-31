@@ -54,6 +54,7 @@ test('PLIM-1 every platform route is 403 for every workspace role (owner/admin i
     ['GET', '/plans'], ['PUT', '/plans/qa-plan', { limits: { maxWorkflows: 5 } }], ['PUT', `/workspaces/${ws.id}/plan`, { plan: 'enterprise' }],
   ];
   const local = (await h.call('POST', '/auth/login', { body: { username: 'admin', password: 'bootstrap-pw-123' } })).body.token;
+  await h.call('POST', '/platform/plans', { token: ROOT, body: { key: 'qa-plan', name: 'QA plan' } });   // PUT updates an existing plan; creating is POST
   for (const [m, p, b] of routes) {
     assert.strictEqual((await h.call(m, `/platform${p}`, { body: b })).status, 401, `${m} ${p} anonymous`);
     for (const role of ['owner', ...ROLE_NAMES]) assert.strictEqual((await h.call(m, `/platform${p}`, { token: ws.tokens[role], tenant: ws.id, body: b })).status, 403, `${m} ${p} as ${role}`);

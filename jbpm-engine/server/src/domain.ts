@@ -406,8 +406,13 @@ export interface Plan extends Entity {
   contactConfig?: PublicPlanContactConfig | null;
   limits?: Record<string, unknown>;
   features: string[];
-  /** not listed on the public pricing page (internal / assignable-only plans) */
+  /** not listed on the public pricing page (legacy flag; `status: 'hidden'` is the real thing) */
   hidden?: boolean;
+  /** active: workspaces can select it · disabled: listed, cannot be selected · upcoming: listed as coming soon ·
+   *  hidden: not listed, an administrator assigns it. Absent = active (or hidden when the legacy `hidden` flag is set). */
+  status?: 'active' | 'disabled' | 'upcoming' | 'hidden';
+  /** display order (ascending) */
+  sortOrder?: number;
 }
 
 export const Collections = {

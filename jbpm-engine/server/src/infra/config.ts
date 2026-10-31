@@ -59,6 +59,8 @@ export interface Config {
   localLogin: boolean;
   /** the ONE platform administrator (system_admin everywhere). Fixed in code, deliberately not configurable. */
   platformAdminEmail: string;
+  /** DEV ONLY: a local-login account holding the bootstrap `system_admin` seat may act as platform administrator (never in production) */
+  platformAdminAllowLocal: boolean;
   /** cross-replica coordination (see infra/coordinator.ts). No REDIS_URL = this process coordinates only itself. */
   cluster: { redisUrl?: string; keyPrefix: string; replicaId: string; leaseTtlMs: number; heartbeatMs: number };
 }
@@ -176,6 +178,7 @@ export const config: Config = {
     capture: env.MAIL_CAPTURE === 'true',
   },
   platformAdminEmail: PLATFORM_ADMIN_EMAIL,
+  platformAdminAllowLocal: env.NODE_ENV !== 'production' && env.PLATFORM_ADMIN_ALLOW_LOCAL !== 'false',
   cluster: {
     redisUrl: env.REDIS_URL?.trim() || undefined,
     keyPrefix: env.REDIS_KEY_PREFIX || 'orkestr:',

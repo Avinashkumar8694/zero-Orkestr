@@ -11,7 +11,7 @@ import {
 import { conflict, forbidden, notFound, validation } from '../../infra/errors.ts';
 import { config } from '../../infra/config.ts';
 import { DEFAULT_PLAN_LIMITS, TRIAL_DAYS } from '../plans/plan-limits.ts';
-import { PlanService } from '../plans/plans.ts';
+import { PlanService, statusOf } from '../plans/plans.ts';
 import { DEFAULT_ROLES } from '../iam/service.ts';
 import { sendMail } from '../../infra/mailer.ts';
 import { templates } from '../../infra/mail-templates.ts';
@@ -44,6 +44,8 @@ export interface InactiveMembership {
 }
 
 export interface MyProfileResult {
+  /** the server's own verdict: may this caller manage the platform (plans, limits, every workspace)? */
+  platformAdmin: boolean;
   userId: string;
   email: string;
   member?: {
@@ -132,8 +134,7 @@ export class TenantService {
       name,
       slug,
       status: 'active',
-      plan: 'trial',
-      planExpiresAt: new Date(Date.parse(now) + TRIAL_DAYS * 24 * 3600 * 1000).toISOString(),
+      ...(await new PlanService(this.ctx.store).startingPlan(Date.parse(now))),
       settings: {
         timezone: 'UTC',
         dateFormat: 'YYYY-MM-DD',
@@ -264,6 +265,7 @@ export class TenantService {
 
     if (tenantId === 'all' && isSystemAdmin) {
       return {
+        platformAdmin: isSystemAdmin,
         userId,
         email: email || `${id.username || userId}@platform.local`,
         member: {
@@ -289,6 +291,7 @@ export class TenantService {
     const permissions = membership?.permissions ?? await this.permissionsForRole(tenantId, role);
 
     return {
+      platformAdmin: isSystemAdmin,
       userId,
       email: membership?.email || email || `${id.username || userId}@local`,
       member: {
@@ -354,9 +357,15 @@ export class TenantService {
   }
 
   async listPublicPlans(): Promise<Plan[]> {
-    const plans = (await this.planRepo().query(() => true)).filter((p) => !p.hidden);
-    if (plans.length > 0) return plans;
+    const plans = (await this.planRepo().query(() => true))
+      .filter((p) => !(p as unknown as { deleted?: boolean }).deleted && statusOf(p) !== 'hidden')        // hidden plans are never listed
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    if (plans.length > 0) return plans.map((p) => ({ ...p, status: statusOf(p) }));
+    return this.builtinPlans();
+  }
 
+  /** The plans every deployment starts with: a 7-day trial (the default) and a contact-us custom plan. */
+  builtinPlans(): Plan[] {
     return [
       {
         id: 'plan_trial',
@@ -370,6 +379,7 @@ export class TenantService {
         contactConfig: null,
         limits: { ...DEFAULT_PLAN_LIMITS.trial },
         features: ['Visual Workflow Designer', 'Process Execution', 'Task Inbox', 'Decision Tables', 'Versioned Deployments'],
+        status: 'active', sortOrder: 0,
       },
       {
         id: 'plan_custom',
@@ -383,6 +393,7 @@ export class TenantService {
         contactConfig: { type: 'email', value: `sales@${config.domain}`, label: 'Contact us' },
         limits: { ...DEFAULT_PLAN_LIMITS.custom },
         features: ['Unlimited Workflows & Instances', 'Dedicated Execution Sidecar', 'Custom hitPolicies & Rules', 'High-availability clustering', 'Dedicated 24/7 SLA Support'],
+        status: 'active', sortOrder: 10,
       },
     ];
   }
@@ -431,13 +442,23 @@ export class TenantService {
     // The one platform administrator (config.platformAdminEmail) is always seeded as system_admin
     await ensurePlatformAdmin(this.ctx.store, this.ctx.clock(), () => this.ctx.newId());
 
-    // Seed public plans
-    const plans = await this.planRepo().query(() => true);
-    if (plans.length === 0) {
-      const defaultPlans = await this.listPublicPlans();
-      for (const p of defaultPlans) {
-        await this.planRepo().put(p);
-      }
+    // Seed the built-in plans by key: a fresh deployment gets the 7-day trial (default) and the custom plan; an existing one
+    // only gets what is missing, and a plan an administrator deleted (its marker row has the same id) is never brought back.
+    const stored = await this.planRepo().query(() => true);
+    for (const p of this.builtinPlans()) {
+      if (!stored.some((x) => x.id === p.id || x.key === p.key)) await this.planRepo().put(p);
+    }
+    // every other built-in plan is seeded Hidden: never listed or selectable, only an administrator can assign it (or publish it)
+    for (const [i, key] of ['starter', 'pro', 'enterprise'].entries()) {
+      if (stored.some((x) => x.id === `plan_${key}` || x.key === key)) continue;
+      await this.planRepo().put({
+        id: `plan_${key}`, tenantId: 'system', key, name: key[0]!.toUpperCase() + key.slice(1), description: '', isDefault: false, isCustom: false,
+        trialDays: null, contactConfig: null, limits: { ...DEFAULT_PLAN_LIMITS[key] }, features: [], status: 'hidden', sortOrder: 20 + i,
+      } as Plan);
+    }
+    if (!(await this.planRepo().query((x) => !!x.isDefault && !(x as { deleted?: boolean }).deleted)).length) {
+      const t = await this.planRepo().get('plan_trial');       // never leave the platform without a default plan
+      if (t && !(t as { deleted?: boolean }).deleted) await this.planRepo().put({ ...t, isDefault: true, status: 'active' });
     }
     // bring plans stored by an older version up to date: add the limit keys they lack, move the old 14-day trial to 7
     await new PlanService(this.ctx.store).ensureDefaults();
