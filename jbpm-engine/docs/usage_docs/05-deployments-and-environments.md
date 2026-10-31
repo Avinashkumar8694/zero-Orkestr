@@ -40,11 +40,22 @@ deployment for that environment. Running instances already on the deployment you
 - **Archive**: a stronger, typically final state — the deployment can no longer be started against at
   all, even by explicit `deploymentId`.
 
+## Project-Level Deployments
+
+Deployments in this system are executed at the **Project level**, rather than process-by-process:
+- Triggered directly from the **Project Shell Header** (`Deploy Project` button).
+- Packaging bundles the whole project (all processes, sub-processes, DRL rules, DMN models, forms, and variables) into an immutable multi-process snapshot.
+- Avoids version drift across interdependent processes (such as parent processes invoking child processes via `call` activities).
+- The deployment modal prompts for:
+  - **Environment**: e.g. `dev`, `sit`, `uat`, `prod`.
+  - **Tags**: Descriptive release labels (e.g. `release-2026.1`, `hotfix-claim-calc`).
+  - **Auto-Activate**: Whether to immediately make this deployment the active target for the chosen environment.
+
 ## Multiple processes per project
 
 A project (and therefore a Version, and therefore a Deployment) can contain more than one process.
 When starting an instance, pass `processId` to pick which one — omitted, the engine picks the version's
-first process.
+first process. Both Process instances and Case instances explicitly track which process within the project is being executed.
 
 ## Export
 

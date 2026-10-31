@@ -28,9 +28,9 @@ export const handler: NodeHandler = async (c): Promise<HandlerResult> => {
   const condCtx = { ...kcontextInfoOf(c), ...(await scriptLimitsOf(c)), onAction: onActionOf(c) };
 
   if (converging && (node.mode === 'parallel' || node.mode === 'inclusive')) {
-    // join: wait until a token has arrived via each incoming flow
+    // join: wait until a token has arrived via each incoming flow (supports cyclic looping paths via modulo)
     const arrived = c.inst.history.filter((h) => h.nodeId === node.id).length;
-    if (arrived < ins.length) return { consume: true, outcome: `join ${arrived}/${ins.length}` };
+    if (arrived % ins.length !== 0) return { consume: true, outcome: `join ${arrived % ins.length}/${ins.length}` };
     c.joins[node.id] = new Set();
     return { next: outs.map((f) => f.to), outcome: 'join-complete' };
   }

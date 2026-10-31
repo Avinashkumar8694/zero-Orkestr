@@ -15,7 +15,13 @@ interface Access { platformAdmin: boolean; member?: TenantMember }
 
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   const header = req.header('authorization') || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : undefined;
+  // A bearer header is the only credential the REST API accepts. The one exception is the API documentation pages
+  // (/api/docs, /api/openapi*.json): a browser cannot send headers when navigating, so `?token=` is honoured THERE ONLY —
+  // elsewhere a token in a URL would end up in logs, history and referrers.
+  const docsPath = /^\/api\/(docs|openapi[\w.-]*)\/?$/.test((req.originalUrl || '').split('?')[0]);
+  const token = header.startsWith('Bearer ')
+    ? header.slice(7)
+    : (docsPath && typeof req.query?.token === 'string' ? req.query.token : undefined);
   if (!token) return next(authRequired());
   try {
     const claims = await verifyBearer(token);
@@ -44,10 +50,10 @@ async function permissionsForMemberRole(ctx: AppContext, tenantId: string, role:
 }
 
 /** Must run after requireAuth (needs req.user) and the ctx-attaching middleware (needs req.ctx).
- *  Grants when the caller is a platform administrator, or holds the permission through their membership of
+ *  Grants when the caller is a platform administrator, or holds ANY of the listed permissions through their membership of
  *  THIS workspace (explicit member.permissions, else the permissions of member.role), or — local IAM users —
  *  through the Role rows named in their token. */
-export function requirePermission(action: string) {
+export function requirePermission(...actions: string[]) {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
       const user = (req as any).user as JwtClaims | undefined;
@@ -65,11 +71,12 @@ export function requirePermission(action: string) {
       const member = access.member;
       if (member) {
         const granted = member.permissions ?? await permissionsForMemberRole(ctx, ctx.tenantId, member.role);
-        if (permissionGrants(granted, action)) return next();
+        if (actions.some((action) => permissionGrants(granted, action))) return next();
       }
 
       const roles = await ctx.store.repo<Role>(Collections.roles).query((r) => r.tenantId === ctx.tenantId && (user.roles || []).includes(r.name));
-      if (!permissionGrants(roles.flatMap((r) => r.permissions), action)) throw forbidden(`missing permission: ${action}`);
+      const perms = roles.flatMap((r) => r.permissions);
+      if (!actions.some((action) => permissionGrants(perms, action))) throw forbidden(`missing permission: ${actions.join(' or ')}`);
       next();
     } catch (e) { next(e); }
   };

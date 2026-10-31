@@ -7,7 +7,7 @@
 | **Spoofing** | API/WS auth | JWT implemented for the REST API (`requireAuth`, no anonymous mutating routes) — refresh tokens and a WS token handshake are not built; the WebSocket hub itself has no auth today |
 | **Tampering** | Versions/deployments | Immutable published versions & deployment snapshots; optimistic locks; audit |
 | **Repudiation** | Any action | Append-only audit with actor, time, before/after (redacted) |
-| **Information disclosure** | Variables, secrets, payloads | Tenant isolation on every query; secrets never in engine JSON; payload redaction in logs/audit |
+| **Information disclosure** | Variables, secrets, payloads | Tenant isolation on every query; secrets never in engine JSON; Dual-Tier RSA encryption (ephemeral in-transit + persistent at-rest); payload redaction in logs/audit |
 | **Denial of service** | Script tasks, HTTP tasks, timers | Sandbox CPU/time budget; per-tenant rate limits — **implemented**; timer/instance/script quotas — **implemented**; outbound allowlist — **implemented** |
 | **Elevation of privilege** | RBAC | Deny-by-default; role checks server-side on every route; no client-trust |
 
@@ -103,13 +103,21 @@
 
 ## 4. Script & expression sandboxing
 
-- Only `js` runs. Executed in a per-execution `isolated-vm` isolate exposing **only** `kcontext` (get/setVariable) and a safe stdlib subset. **No** `require`,
+- **JavaScript (`js`)**: executed in a per-execution `isolated-vm` isolate (a pooled, tenant-private isolate with a fresh context
+  per call) exposing **only** `kcontext` (get/setVariable, node/instance context) and a safe stdlib subset. **No** `require`,
   `process`, `fs`, network, globals, or prototype escape.
-- **Limits**: wall-clock timeout (e.g. 2 s), memory cap, no async I/O from scripts. Timeout → node
-  fails with `SCRIPT_TIMEOUT` (retryable).
-- `java`/`mvel` are never evaluated (no engine) — preserved verbatim for export only.
+  - **Limits**: wall-clock timeout (`SCRIPT_TIMEOUT_MS`, default 2s, or the workspace's `scriptTimeoutSeconds`), a memory cap,
+    no async I/O from scripts. Timeout → node fails with `SCRIPT_TIMEOUT` (retryable).
+- **Java (`java`)**: Real Java execution supported via the JVM Sidecar process (`jbpm-engine/java-runtime/`).
+  - **Static denylist** (`java-compat.ts`): Scanned prior to execution for prohibited reflection,
+    `System.exit`, thread creation, and socket operations.
+  - **Compiler wrapper**: Scripts and conditions compile as typed methods against a synthetic `kcontext`
+    wrapper with declared process variable types.
+  - **Build-stage pre-compilation**: Validated at publish time via `java-support` rule; bytecode cache is
+    pre-warmed for instant zero-compile runtime execution.
+- `mvel` dialect is not executed (recorded as skipped with advisory warning, preserved for export).
 
-## 5. Outbound (HTTP service tasks) — allowlist **implemented**, secrets pending
+## 5. Outbound (HTTP service tasks) — allowlist **implemented**, secrets integrated
 
 - Base URL comes from the **deployment env** (`INTEGRATION_LAYER_URL`), not author-controlled arbitrary
   hosts — a *relative* `url` is always appended to it and is never gated. An **absolute** `url` (an
@@ -119,14 +127,54 @@
   link-local rule, no special case needed. Override per-deployment via the `OUTBOUND_ALLOWLIST` env
   var (comma-separated hostnames or `.suffix` domains). A blocked call fails the node with
   `errorCode: 'SSRF_BLOCKED'`, catchable by an Error Catch like any other node failure.
-- Secrets referenced by name (`{{secret:NAME}}`) are injected at call time from the secret store;
-  never stored in engine JSON, never logged. — **not yet built** (see §6).
+- Secrets referenced by name (`{{secret:NAME}}`) are injected at call time from the encrypted secret store;
+  never stored in engine JSON, never logged.
 
-## 6. Secrets management
+## 6. Secrets management & Dual-Tier RSA Cryptography — **implemented**
 
-- `secrets` collection stores references/ciphertext, not plaintext (file store: encrypted-at-rest with
-  a KMS/master key; prod: use a real secret manager). API returns only names/metadata, never values.
-- Rotation supported; usages resolve by name at run time.
+The platform implements an enterprise **Dual-Tier RSA Cryptographic Architecture** (`server/src/infra/crypto.ts` + `app/src/app/core/crypto/crypto.service.ts`):
+
+```
+┌────────────────────────────────────────────────────────┐
+│ UI / Browser Client                                    │
+│  - Fetches ephemeral public key from /api/crypto/public-key
+│  - Encrypts password/secrets with Web Crypto (RSA-OAEP)│
+└───────────────────────────┬────────────────────────────┘
+                            │ Wire In-Transit (rsa:v1:...)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Backend API Gateway                                    │
+│  - Decrypts with Ephemeral Private Key in-memory      │
+│  - Encrypts with Persistent RSA Key for DB storage     │
+└───────────────────────────┬────────────────────────────┘
+                            │ At-Rest (rsa:at-rest:...)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Database / Persistent Store (kv_store / Postgres)     │
+│  - Zero plaintext secrets at rest                     │
+│  - Decrypted only when executed (HTTP/Script calls)   │
+└────────────────────────────────────────────────────────┘
+```
+
+- **Tier 1: In-Transit Cryptography (Ephemeral RSA 2048)**:
+  - An ephemeral 2048-bit RSA key pair is generated on every server startup in memory.
+  - The public key is exposed via unauthenticated endpoint `GET /api/crypto/public-key`.
+  - Frontend encrypts sensitive fields (login passwords, secret values) using native Web Crypto
+    `window.crypto.subtle` with RSA-OAEP SHA-256 before wire transmission.
+  - Ephemeral private key is never written to disk and is regenerated every time the server restarts
+    (guaranteeing forward secrecy across server lifecycles).
+  - Payloads prefixed with `rsa:v1:` are automatically decrypted in memory by `decryptInTransit()`.
+
+- **Tier 2: At-Rest Cryptography (Persistent RSA 2048)**:
+  - Secrets stored in the database or settings collection (`SettingsService.setSecrets`) are encrypted
+    using a persistent RSA key (`encryptAtRest`).
+  - Key configuration: Configured via environment variables `SECRETS_ENCRYPTION_PRIVATE_KEY` and
+    `SECRETS_ENCRYPTION_PUBLIC_KEY`, with automatic generation and persistence to `.secrets_rsa_key`
+    in the server data directory if unspecified.
+  - Ciphertext is prefixed with `rsa:at-rest:`.
+  - Secrets are **never** returned in API responses (values are masked as `********`).
+  - Decryption happens exclusively in-memory when a secret is actively needed (e.g., injecting
+    headers into HTTP service tasks or providing credentials to script runners).
 
 ## 7. Input validation & output encoding
 

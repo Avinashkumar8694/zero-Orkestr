@@ -1,10 +1,44 @@
 // Domain entities — see docs/04-data-model.md. Persisted via Repository<T>.
 import type { EngineProject, EngineVar } from './sdk/index.ts';
 import type { Entity } from './store/repository.ts';
+import type { Problem } from './modules/validation/rules.ts';
 
 export interface Audited { createdAt: string; createdBy: string; updatedAt: string; updatedBy: string; }
 
 export interface WorkflowPermission { role: string; actions: ('view' | 'edit' | 'deploy' | 'run' | 'admin')[]; }
+
+export interface GlobalErrorHandlerRule {
+  id: string;
+  /** Error type/code: 'SERVICE_ERROR' | 'SCRIPT_ERROR' | 'RULE_ERROR' | 'TASK_ERROR' | '*' | custom code */
+  errorType: string;
+  /** Process ID in this project that executes to handle this error type */
+  processId: string;
+  /** Resolution strategy when error occurs */
+  strategy: 'spawn' | 'repair-and-resume' | 'compensate-and-abort';
+  /** Mapping from error process output variable to original instance variable */
+  outputMappings?: Record<string, string>;
+  /** Whether unhandled errors inside the error handler process rethrow to system log */
+  rethrowOnFailure?: boolean;
+}
+
+export interface GlobalErrorHandlerConfig {
+  enabled: boolean;
+  /** Configured error handler rules by error type */
+  rules?: GlobalErrorHandlerRule[];
+  /** Legacy single-process fallback (kept for backward compatibility) */
+  processId?: string;
+  strategy?: 'spawn' | 'repair-and-resume' | 'compensate-and-abort';
+  outputMappings?: Record<string, string>;
+  filter?: string[];
+  rethrowOnFailure?: boolean;
+}
+
+export interface WorkflowValidationSummary {
+  hasErrors: boolean;
+  errorCount: number;
+  warningCount: number;
+  problems?: Problem[];
+}
 
 export interface Workflow extends Entity, Audited {
   id: string; tenantId: string;
@@ -15,6 +49,14 @@ export interface Workflow extends Entity, Audited {
   archived?: boolean;
   /** Project-organizing folder (see Folder below); undefined/null means "root", no folder. */
   folderId?: string | null;
+  /** Instance creation mode allowed for this project ('both' | 'case-only' | 'process-only') */
+  instanceCreationMode?: 'both' | 'case-only' | 'process-only';
+  /** Arbitrary project-level environment variables deployed to all environments */
+  env?: Record<string, string>;
+  /** Project-level Global Error Handler configuration */
+  globalErrorHandler?: GlobalErrorHandlerConfig;
+  /** Cached validation summary for project head draft */
+  validationSummary?: WorkflowValidationSummary;
 }
 
 /** Organizes Workflows into a tree for the Projects page — purely presentational, no effect on
@@ -49,12 +91,19 @@ export interface Deployment extends Entity {
   id: string; tenantId: string; workflowId: string; versionId: string; branchId: string;
   engine: EngineProject;
   env: Record<string, string>;
+  globalErrorHandler?: GlobalErrorHandlerConfig;
   tags: string[];
   status: DeploymentStatus;
   environment: string;
   versionNumber?: number; versionLabel?: string;   // shown as "Version" in the instance list
   deployedAt: string; deployedBy: string;
   undeployedAt?: string; archivedAt?: string;
+  snapshot?: {
+    frozenAt: string;
+    versionNumber?: number;
+    versionLabel?: string;
+    frozen: boolean;
+  };
 }
 
 export type InstanceStatus = 'running' | 'waiting' | 'completed' | 'aborted' | 'failed' | 'suspended';
@@ -85,6 +134,10 @@ export interface Instance extends Entity {
   // Compensation stack: activities completed successfully that have a compensation handler attached,
   // in completion order. A compensate throw runs the matching entries in reverse (LIFO).
   compensations?: Array<{ host: string; handler: string }>;
+  /** Set if this instance is running as a Global Error Handler (prevents recursion loops) */
+  isErrorHandler?: boolean;
+  /** ID of the failed instance this error handler instance is processing */
+  handlingInstanceId?: string;
   startedAt: string; startedBy: string; endedAt?: string;
 }
 
@@ -93,7 +146,7 @@ export interface Instance extends Entity {
 // via a terminate/other branch, aborted, or failed) while this task was still open. Distinct from
 // 'skipped' (an explicit human/API action on the task itself) and 'error' (the task's OWN execution
 // failed) — 'exited' is something that happened to the PROCESS, not to the task.
-export type TaskStatus = 'created' | 'reserved' | 'inprogress' | 'completed' | 'skipped' | 'error' | 'exited';
+export type TaskStatus = 'created' | 'reserved' | 'inprogress' | 'completed' | 'skipped' | 'error' | 'exited' | 'failed' | 'suspended';
 export interface Task extends Entity {
   id: string; tenantId: string; instanceId: string; tokenId: string; nodeId: string;
   name: string; formName?: string; group?: string; assignee?: string;
@@ -106,7 +159,7 @@ export interface Task extends Entity {
   priority?: number;
   status: TaskStatus;
   inputs: Record<string, unknown>; outputs?: Record<string, unknown>;
-  createdAt: string; dueAt?: string; completedAt?: string; completedBy?: string;
+  createdAt: string; claimedAt?: string; dueAt?: string; completedAt?: string; completedBy?: string;
 }
 
 export interface TimerJob extends Entity {
@@ -154,6 +207,13 @@ export interface TaskComment extends Entity {
   author: string; body: string; at: string;
 }
 
+/** An attachment / file evidence associated with a task (e.g. proof of death, medical records, ID). */
+export interface TaskAttachment extends Entity {
+  id: string; tenantId: string; taskId: string;
+  name: string; mimeType?: string; url?: string; sizeBytes?: number;
+  author: string; at: string;
+}
+
 /** In-app notification. Persisted so the bell survives a reload and "mark read" is real state. */
 export interface Notification extends Entity {
   id: string; tenantId: string; userId: string;
@@ -174,11 +234,23 @@ export interface SystemSettings extends Entity {
   auditRetentionDays: number;
   allowRunningVariableEdits: boolean;
   executorIntervalSeconds: number;
+  timerBatchSize?: number;                 // max due timers claimed & processed per batch (default: 50)
   defaultJobRetries: number;
+  jobRetryBackoffMultiplier?: number;      // backoff multiplier for retryable jobs (default: 2, min: 1)
+  scriptTimeoutSeconds?: number;           // max runtime for script execution in seconds (default: 5, min: 1)
   slaWarnThresholdPct: number;             // e.g. 80 → amber at 80% of time-to-due elapsed
+  defaultTaskSlaHours?: number;            // fallback task SLA deadline in hours if not set in node (default: 48, min: 1)
+  autoReleaseClaimedTaskHours?: number;    // auto-release idle claimed tasks after X hours back to group pool (0 = disabled)
+  httpTimeoutSeconds?: number;             // outbound REST / service task HTTP timeout in seconds (default: 10, min: 1)
+  outboundAllowlist?: string;              // comma-separated hostnames or .domain suffixes allowed for outbound HTTP
+  historyAuditLevel?: 'full' | 'activity' | 'minimal'; // audit trail verbosity (default: 'full')
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';       // system log level (default: 'info')
   sessionTimeoutHours: number;
   emailEnabled: boolean;
   emailFrom?: string; smtpHost?: string; smtpPort?: number;
+  smtpUser?: string; smtpPassword?: string; smtpPasswordConfigured?: boolean;
+  /** System-wide instance creation mode allowed ('both' | 'case-only' | 'process-only') */
+  instanceCreationMode?: 'both' | 'case-only' | 'process-only';
   /** per-tenant resource quotas — undefined/0 means unlimited (default, so existing tenants are
    *  unaffected until an admin opts in). Enforced at the point of creation, not retroactively. */
   maxActiveInstances?: number;   // top-level (root) instances concurrently running/waiting
@@ -345,4 +417,5 @@ export const Collections = {
   tenants: 'tenants', tenantMembers: 'tenantMembers', plans: 'plans',
   errors: 'errors', comments: 'comments', notifications: 'notifications', settings: 'settings',
   pendingRegistrations: 'pendingRegistrations', usage: 'usage',
+  taskAttachments: 'task_attachments',
 } as const;

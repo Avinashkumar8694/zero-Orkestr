@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 
 export interface ConfirmOptions { title?: string; message: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean; }
-export interface PromptOptions { title?: string; message?: string; initialValue?: string; placeholder?: string; confirmLabel?: string; }
+export interface PromptOptions { title?: string; message?: string; initialValue?: string; placeholder?: string; confirmLabel?: string; options?: string[]; }
 type ModalState =
   | ({ kind: 'confirm' } & ConfirmOptions)
   | ({ kind: 'prompt'; value: string } & PromptOptions);

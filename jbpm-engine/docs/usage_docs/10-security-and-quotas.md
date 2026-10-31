@@ -70,8 +70,19 @@ Swagger UI, is exempted so its CDN assets still load). TLS termination, HSTS, an
 to your real app origin are the deploying operator's responsibility — not built into this repo, since
 they belong at the proxy/infra layer.
 
-## Secrets
+## Secrets Management & Dual-Tier RSA Cryptography
 
-Not yet built as a dedicated store (`{{secret:NAME}}` references are documented in the security spec
-but there's no secret-management module wired up yet) — don't put real credentials directly in engine
-JSON or deployment `env` today; treat those as visible to anyone with `workflow:view`/`workflow:deploy`.
+The engine provides an enterprise-grade **Dual-Tier RSA Cryptographic Architecture** protecting secrets and credentials both on the wire and in persistent storage:
+
+1. **In-Transit Protection (Ephemeral RSA 2048)**:
+   - On server startup, an ephemeral 2048-bit RSA key pair is generated in-memory.
+   - The public key is retrieved by the frontend via `GET /api/crypto/public-key`.
+   - Before passwords (`/auth/login`) or secrets (`Settings → System → Secrets`) are sent across the network, the browser encrypts them using native Web Crypto (`crypto.subtle`) with **RSA-OAEP SHA-256**.
+   - Wire payloads appear prefixed with `rsa:v1:...`. The backend decrypts them in-memory; private keys are never written to disk and regenerate on each reboot.
+
+2. **At-Rest Protection (Persistent RSA 2048)**:
+   - Secret key-value pairs configured in System Settings are encrypted using a persistent RSA key (`encryptAtRest`) before persistence into the database.
+   - The key is configured via `SECRETS_ENCRYPTION_PRIVATE_KEY` / `SECRETS_ENCRYPTION_PUBLIC_KEY` environment variables, or automatically persisted to `.secrets_rsa_key` in the data directory.
+   - In the database, secret values are stored exclusively as `rsa:at-rest:...` ciphertext.
+   - API endpoints (`GET /api/settings/secrets`) return only masked values (`********`).
+   - Decryption occurs in-memory only at the moment a secret is injected into an HTTP service task or script runner.

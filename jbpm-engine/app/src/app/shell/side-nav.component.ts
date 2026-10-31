@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, computed, inject, signal } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { filter, map } from 'rxjs/operators';
 import { NavDrawerService } from './nav-drawer.service';
@@ -126,8 +126,14 @@ export class SideNavComponent {
     // once back on a list page. The manual toggle button still works, but the next navigation resets it.
     this.router.events.pipe(
       filter((e): e is NavigationEnd => e instanceof NavigationEnd),
-      map((e) => isDetailRoute(e.urlAfterRedirects)),
-    ).subscribe((detail) => this.collapsed.set(detail));
+    ).subscribe((e) => {
+      this.collapsed.set(isDetailRoute(e.urlAfterRedirects));
+    });
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape() {
+    if (this.drawer.open()) this.drawer.close();
   }
 
   // Order mirrors the ux_design sidenav (instances-list.html): Home, Projects, Deployments,
@@ -144,10 +150,8 @@ export class SideNavComponent {
       base.push({ label: 'Jobs & Timers', icon: 'timer', link: '/jobs' });
     }
     if (this.auth.hasPermission('task:manage')) base.push({ label: 'Tasks', icon: 'tasks', link: '/tasks' });
-    if (this.auth.hasPermission('workflowInstance:manage')) base.push({ label: 'Workflow Instances', icon: 'inbox', link: '/workflow-instances' });
     if (this.auth.hasPermission('query:read')) {
-      base.push({ label: 'Reports & Analytics', icon: 'chart', link: '/reports' });
-      base.push({ label: 'Workflow Analytics', icon: 'chart', link: '/workflow-analytics' });
+      base.push({ label: 'Reports & Exports', icon: 'file', link: '/reports' });
     }
     if (this.tenant.isSystemAdmin()) base.push({ label: 'Platform limits', icon: 'settings', link: '/platform-limits' });
     return base;
@@ -160,8 +164,9 @@ export class SideNavComponent {
       g.push({ label: 'Admin', icon: 'admin', link: '/admin' });
       g.push({ label: 'Audit Log', icon: 'list', link: '/audit' });
     }
-    if (this.auth.hasPermission('workflowInstance:admin')) g.push({ label: 'Workflow Management', icon: 'puzzle', link: '/workflow-management' });
+    if (this.auth.hasPermission('workflowInstance:admin')) g.push({ label: 'Workflow Definitions', icon: 'puzzle', link: '/workflow-management' });
     if (this.auth.hasPermission('team:read')) { g.push({ label: 'Team', icon: 'admin', link: '/team' }); g.push({ label: 'Plan & usage', icon: 'chart', link: '/plan' }); }
+    g.push({ label: 'Integration Guide', icon: 'terminal', link: '/integration-guide' });
     g.push({ label: 'Settings', icon: 'settings', link: '/settings' });
     return g;
   });

@@ -41,11 +41,39 @@ export interface PaletteEntry {
  *  A node has an input port when maxIn !== 0, and an output port when maxOut !== 0. */
 export interface Ports { maxIn?: number; maxOut?: number; }
 
+export interface NodeScenarioDoc {
+  title: string;
+  description: string;
+  whenToUse: string;
+  exampleJson: Record<string, unknown>;
+}
+
+export interface NodeFieldDoc {
+  key: string;
+  label: string;
+  type: string;
+  options?: string[];
+  default?: string | number | boolean;
+  required?: boolean;
+  description: string;
+}
+
+export interface NodeDocs {
+  summary: string;
+  purpose: string;
+  whenToUse: string[];
+  whenNotToUse: string[];
+  scenarios: NodeScenarioDoc[];
+  fields: NodeFieldDoc[];
+  gotchas: string[];
+}
+
 export interface NodeDef {
   engineType: string;      // the EngineNode.type this folder implements
   palette: PaletteEntry[]; // one or more palette tiles that create this node type
   ports: Ports;            // which connection points this node has (drives UI ports + validation)
   schema: UiSection[];     // the properties panel form
+  docs?: NodeDocs;         // rich in-app documentation, scenarios, fields & examples
   /** How this engine type renders on a live diagram (process canvas, instance diagram) — one look per
    *  engine type, even though a type can have several palette tiles with their own distinct colors
    *  (e.g. boundary's error-catch/timer/compensation tiles): the diagram can't tell which tile an

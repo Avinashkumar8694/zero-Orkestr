@@ -51,4 +51,5 @@ export class OpsApiService extends ApiBase {
     return this.http.get<{ items: AuditEvent[]; total: number }>(`${this.base}/audit`, { params: this.cleanParams(filter) });
   }
   auditFacets(): Observable<{ kinds: string[]; actors: string[] }> { return this.http.get<{ kinds: string[]; actors: string[] }>(`${this.base}/audit/facets`); }
+  getAuditEvent(id: string): Observable<AuditEvent> { return this.http.get<AuditEvent>(`${this.base}/audit/${id}`); }
 }

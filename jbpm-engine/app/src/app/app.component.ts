@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs/operators';
+import { AuthService } from './core/auth/auth.service';
 import { SideNavComponent } from './shell/side-nav.component';
 import { HeaderComponent } from './shell/header.component';
 import { ToastComponent } from './shared/toast.component';
@@ -45,6 +46,7 @@ const isStandalone = (url: string) => { const u = url.split('?')[0].split('#')[0
   `],
 })
 export class AppComponent {
+  auth = inject(AuthService);
   private router = inject(Router);
   private theme = inject(ThemeService);
   constructor() { installResponsiveTables(); }

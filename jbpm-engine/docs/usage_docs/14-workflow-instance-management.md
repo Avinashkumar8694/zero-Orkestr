@@ -53,18 +53,15 @@ active.
 
 ## Workflow Management — create/repoint a definition
 
-**Workflow Management** in the sidebar (`workflowInstance:admin`). **Create Workflow Schema** opens a
-two-tab modal:
+**Workflow Management** in the sidebar (`workflowInstance:admin`). **Create Workflow Definition** opens a modal featuring a structured project-and-process binding workflow:
 
-- **Deployment tab** — a `workflowName` (never changes after creation) and a card grid of every
-  deployment across every project, each card showing project, version, environment, status,
-  `workflowId`, `deploymentId`. Picking a card sets `deploymentId`.
-- **Schema tab** — a recursive field-builder: each row is a name + type (`string`/`number`/`boolean`/
-  `array`/`object`) + required flag. An `object` row (or an `array` of `object`) grows its own nested
-  row list — the builder supports **arbitrarily nested JSON Schema**, not just flat top-level
-  properties (nested objects, arrays of primitives, arrays of objects, at any depth). A
-  **schema validation** toggle controls whether `workflowData` is enforced on case create/update or
-  accepted as-is.
+- **Deployment & Process Binding tab**:
+  - `workflowName`: Stable identifier (e.g. `claim-assessment-flow`), immutable after creation.
+  - **Two-Step Project & Process Hierarchy**: The modal first lists all available Projects. When a project is selected, all constituent processes of that project are displayed. Selecting the target process binds both the `deploymentId` and the specific `processId` to this workflow definition.
+- **Schema tab**:
+  - A recursive field-builder: each row is a name + type (`string`/`number`/`boolean`/`array`/`object`) + required flag.
+  - Supports arbitrarily nested JSON Schema (objects with nested properties, arrays of objects).
+  - **Schema Validation Toggle**: Enforces AJV schema validation on incoming `workflowData` during case creation and mutation.
 
 Editing an existing definition round-trips a hand-authored or previously builder-authored `dataSchema`
 back into the field-builder tree exactly, at every depth.
@@ -75,6 +72,7 @@ curl -s -X POST http://localhost:4000/api/workflow-definitions \
   -d '{
     "name": "claim-review-v1",
     "deploymentId": "'"$DEP_ID"'",
+    "processId": "claim-assessment-process",
     "schemaValidationEnabled": true,
     "dataSchema": {
       "type": "object",
@@ -92,11 +90,36 @@ Response (`201`):
 ```json
 {
   "id": "WFDEF_ID", "name": "claim-review-v1", "deploymentId": "DEP_ID",
+  "processId": "claim-assessment-process",
   "schemaValidationEnabled": true,
   "dataSchema": { "type": "object", "properties": { "...": "..." }, "required": ["claimAmount"] },
   "createdAt": "2026-08-09T10:00:00.000Z", "createdBy": "admin"
 }
 ```
+
+## Unified Instance Management (Processes + Cases)
+
+Rather than keeping process instances and case instances fragmented across disconnected screens, the **Instances** view integrates both into a single pane:
+
+1. **Combined Listing & Case Binding**:
+   - The instance table displays both BPM Process Instances and Case Instances.
+   - When a case instance initiates an underlying process instance, the process instance record is bound to the `caseInstanceId`.
+   - Table columns display Instance ID, Case ID (if bound), Process/Workflow Name, Environment, Status, Started By, and Timestamps.
+   - Comprehensive filtering supports filtering by Mode (All, Process Only, Case Only), Status, Date Range, and Search terms.
+
+2. **Project-Level Instance Creation Configuration**:
+   - Projects can be configured with system-level policies governing how instances are spawned:
+     - `Both` (default): Authors and operators can trigger standalone Process instances or structured Case instances.
+     - `Case Only`: Enforces all work to originate as a governed Case instance with business schema validation.
+     - `Process Only`: Operates strictly as a traditional BPM process engine.
+
+3. **Instance Details: Parent / Child Rail & Hierarchy**:
+   - The Instance Details view features a dedicated **280px left navigation rail** displaying the complete hierarchical execution tree:
+     - Root / Parent Process Instance card showing status, duration, and metadata.
+     - Tree-branching list of Child Process Instances (spawned via `call` activities or multi-instance `forEach` tasks).
+     - Visual pulse indicator highlighting the actively executing node.
+     - One-click navigation between parent and child execution timelines.
+   - **Strict On-Demand Lazy-Loading**: Detail tabs (Variables, Tasks, Node History, Sub-processes, Audit) only trigger API calls when actively clicked, eliminating background network overhead.
 
 **Repointing after a redeploy** — the only thing that changes; `name` stays fixed, every existing case
 still resolves to the correct history (each case denormalizes its own `deploymentId` at creation time,

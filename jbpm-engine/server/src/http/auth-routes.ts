@@ -15,6 +15,7 @@ import { makeContext } from '../context.ts';
 import { logger } from '../infra/logger.ts';
 import { oidc, openTx, readCookie, sealTx, TX_COOKIE, TX_COOKIE_PATH } from '../infra/oidc.ts';
 import { forbidden, notFound } from '../infra/errors.ts';
+import { decryptInTransit } from '../infra/crypto.ts';
 
 const ctxOf = (req: Request): AppContext => (req as any).ctx;
 // Accounts live in the default workspace's IAM; a caller-supplied x-tenant-id must never pick where an account is
@@ -152,7 +153,8 @@ export function buildAuthRoutes(): Router {
   r.post('/login', loginLimiter, asyncHandler(async (req, res) => {
     if (!config.localLogin) throw notFound('Local login');
     const { username, password } = req.body || {};
-    res.json(await new IamService(accountCtx(req)).login(String(username || ''), String(password || '')));
+    const decryptedPassword = decryptInTransit(password);
+    res.json(await new IamService(accountCtx(req)).login(String(username || ''), String(decryptedPassword || '')));
   }));
   // "what can I actually do" — lets the frontend resolve real permissions (including custom roles
   // created later via the admin UI) instead of hardcoding a mirror of DEFAULT_ROLES.
@@ -166,7 +168,9 @@ export function buildAuthRoutes(): Router {
   r.post('/me/password', requireAuth, asyncHandler(async (req, res) => {
     const claims = (req as any).user as JwtClaims;
     if (claims.source === 'oidc') throw forbidden('Your password is managed by the identity provider');
-    await new IamService(ctxOf(req)).changeOwnPassword(claims.sub, req.body?.currentPassword, req.body?.newPassword);
+    const currentPassword = decryptInTransit(req.body?.currentPassword) ?? '';
+    const newPassword = decryptInTransit(req.body?.newPassword) ?? '';
+    await new IamService(ctxOf(req)).changeOwnPassword(claims.sub, currentPassword, newPassword);
     res.status(204).end();
   }));
   return r;

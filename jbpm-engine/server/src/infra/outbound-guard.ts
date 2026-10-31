@@ -21,17 +21,21 @@ function isBlockedIp(ip: string): boolean {
   return false;
 }
 
-function isAllowlisted(hostname: string): boolean {
-  return config.outboundAllowlist.some((h) => h === hostname || hostname.endsWith(`.${h}`));
+function isAllowlisted(hostname: string, extraAllowlist: string[] = []): boolean {
+  const combined = [...config.outboundAllowlist, ...extraAllowlist];
+  return combined.some((h) => h === hostname || hostname.endsWith(`.${h}`));
 }
 
 /** Throws if `absoluteUrl`'s host is (or resolves to) a private/link-local/loopback/metadata address
- *  and isn't explicitly allowlisted (OUTBOUND_ALLOWLIST env — comma-separated hostnames or ".suffix"
- *  domains). Blocks the classic cloud-metadata SSRF target (169.254.169.254) by the same private/
- *  link-local rule, no special-case needed. */
-export async function assertOutboundAllowed(absoluteUrl: string): Promise<void> {
+ *  and isn't explicitly allowlisted (OUTBOUND_ALLOWLIST env or system setting — comma-separated
+ *  hostnames or ".suffix" domains). Blocks the classic cloud-metadata SSRF target (169.254.169.254)
+ *  by the same private/link-local rule, no special-case needed. */
+export async function assertOutboundAllowed(absoluteUrl: string, dynamicAllowlist?: string[] | string): Promise<void> {
   const { hostname } = new URL(absoluteUrl);
-  if (isAllowlisted(hostname)) return;
+  const extra = Array.isArray(dynamicAllowlist)
+    ? dynamicAllowlist
+    : (dynamicAllowlist ? dynamicAllowlist.split(',').map((s) => s.trim()).filter(Boolean) : []);
+  if (isAllowlisted(hostname, extra)) return;
   const literalIp = net.isIP(hostname) !== 0;
   // an unresolvable hostname isn't an SSRF concern (fetch() will fail with its own, clearer network
   // error) — only a hostname that DOES resolve, to a blocked range, is what this guard is for.

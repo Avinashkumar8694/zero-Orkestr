@@ -2,6 +2,8 @@
 // unchanged when backed by PgStore instead of MemoryStore/FileStore — same Repository<T> contract,
 // zero call-site changes. Needs docker-compose's postgres up (`npm run docker:up`); opt-in via
 // `npm run test:pg`, not part of the default suite.
+import 'reflect-metadata';
+import 'pg';
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { PgStore } from '../../src/store/pg-store.ts';

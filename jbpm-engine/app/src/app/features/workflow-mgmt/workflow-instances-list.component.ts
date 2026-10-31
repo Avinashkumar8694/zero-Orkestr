@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, HostListener, computed, inject, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { SlicePipe } from '@angular/common';
@@ -27,8 +27,8 @@ import type { WorkflowInstance } from '../../core/models';
       </header>
 
       <div class="toolbar">
-        <input class="search" placeholder="Filter by workflow name…" [(ngModel)]="workflowName" (keyup.enter)="load()" />
-        <input class="search" placeholder="Filter by status…" [(ngModel)]="status" (keyup.enter)="load()" />
+        <input class="search" placeholder="Filter by workflow name…" [(ngModel)]="workflowName" (ngModelChange)="onSearch()" />
+        <input class="search" placeholder="Filter by status…" [(ngModel)]="status" (ngModelChange)="onSearch()" />
         <button class="btn sm" (click)="load()">Apply</button>
       </div>
 
@@ -45,7 +45,7 @@ import type { WorkflowInstance } from '../../core/models';
           <table>
             <thead><tr><th>Workflow</th><th>Status</th><th>piid</th><th>Created</th><th></th></tr></thead>
             <tbody>
-              @for (w of rows(); track w.id) {
+              @for (w of pagedRows(); track w.id) {
                 <tr (click)="open(w)">
                   <td class="mono">{{ w.workflowName }}</td>
                   <td><span class="badge" [class.active]="w.status !== 'failed'" [class.inactive]="w.status === 'failed'">{{ w.status }}</span></td>
@@ -56,6 +56,16 @@ import type { WorkflowInstance } from '../../core/models';
               }
             </tbody>
           </table>
+
+          @if (rows().length > 0) {
+            <div class="infinite-bar">
+              @if (pagedRows().length < rows().length) {
+                <span class="muted">Showing {{ pagedRows().length }} of {{ rows().length }} instances (scrolls to load more)</span>
+              } @else {
+                <span class="muted">Showing all {{ rows().length }} instances</span>
+              }
+            </div>
+          }
         </div>
       }
     </div>
@@ -113,8 +123,28 @@ export class WorkflowInstancesListComponent {
 
   loading = signal(true);
   rows = signal<WorkflowInstance[]>([]);
+  displayedCount = signal(25);
+  pagedRows = computed(() => this.rows().slice(0, this.displayedCount()));
   workflowName = '';
   status = '';
+  private searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  @HostListener('window:scroll') onWindowScroll() {
+    const threshold = 250;
+    const pos = window.innerHeight + window.scrollY;
+    const max = document.documentElement.scrollHeight;
+    if (pos >= max - threshold && this.pagedRows().length < this.rows().length) {
+      this.displayedCount.update((c) => Math.min(c + 25, this.rows().length));
+    }
+  }
+
+  onSearch() {
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => {
+      this.displayedCount.set(25);
+      this.load();
+    }, 300);
+  }
 
   starting = signal<{ workflowName: string; variables: string; workflowData: string } | null>(null);
   startError = signal('');
@@ -123,6 +153,7 @@ export class WorkflowInstancesListComponent {
 
   load() {
     this.loading.set(true);
+    this.displayedCount.set(25);
     this.api.list({ workflowName: this.workflowName || undefined, status: this.status || undefined }).subscribe({
       next: (r) => { this.rows.set(r); this.loading.set(false); },
       error: (e) => { this.loading.set(false); this.toast.error(e?.error?.error?.message || 'Could not load workflow instances'); },

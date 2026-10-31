@@ -60,14 +60,17 @@ and a **footer**. Plus operations views: deployments, instances (with live execu
 ## 2. Feature views (routes)
 
 | Route | View | Key content |
-|-------|------|-------------|
+|---|---|---|
+| `/home` | **Home (Analytics Hub)** | KPI summary tiles, interactive status donuts, throughput charts, duration percentiles, heatmaps, time window date scoping, strict lazy-loaded tabs |
+| `/reports` | **Reports Center** | Tabular operational logs (Executions, SLA breaches, Cases, Audit trail), ad-hoc query engine, one-click CSV and JSON exports |
 | `/workflows` | Applications list | cards/table, create, open |
-| `/workflows/:id/builder` | **Builder** | the chrome above |
+| `/workflows/:id/builder` | **Builder** | canvas, palette, properties panel, validation problems strip, and header |
 | `/workflows/:id/deployments` | **Deployments** | table of deployments: version/branch, tags, environment, **active** badge, counts, actions (activate/promote/rollback/undeploy/export) |
-| `/workflows/:id/instances` | **Instances** | filterable list; row → detail |
-| `/instances/:id` | **Instance detail** | left: diagram with live highlight; right: variables, node history (timeline), current tokens, errors, audit; actions: signal/retry/suspend/abort |
+| `/workflows/:id/instances` | **Instances** | unified list of Process Instances and Case Instances, case ID binding, mode filters (All/Process/Case), status/date filters |
+| `/instances/:id` | **Instance detail** | left: 280px parent/child hierarchy rail with execution tree; center: diagram with live highlight; right: variables, node history (timeline), current tokens, errors, audit; actions: signal/retry/suspend/abort; strict on-demand tab lazy loading |
+| `/workflows-mgmt` | **Workflow Definitions** | create/repoint definitions, two-step project -> process selection modal, recursive JSON schema builder, AJV validation toggle |
 | `/tasks` | **Task inbox** | my tasks / group tasks; open → form; claim/complete |
-| `/admin` | Admin | users, roles, tenants, secrets, endpoints, audit |
+| `/admin` | Admin | users, roles, tenants, secrets (Dual-Tier RSA encrypted), endpoints, audit |
 | `/forms` | Form list/designer | create/edit forms (SDK form model) |
 
 ## 3. State & data

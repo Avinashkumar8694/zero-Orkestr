@@ -225,7 +225,27 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
       isFalse: function (a) { if (typeof a === 'boolean') return !a; if (typeof a === 'string') return a.trim().toLowerCase() === 'false' || a.trim() === '0'; return !a; },
       isNull: function (a) { return a == null; },
       notNull: function (a) { return a != null; },
-      isEmpty: function (a) { return a == null || String(a).trim() === ''; }
+      isEmpty: function (a) {
+        if (a == null) return true;
+        if (typeof a === 'string') return a.trim() === '';
+        if (Array.isArray(a)) return a.length === 0;
+        if (typeof a === 'object') return Object.keys(a).length === 0;
+        return false;
+      },
+      contains: function (container, value) {
+        if (container == null) return false;
+        if (Array.isArray(container)) return container.indexOf(value) >= 0;
+        if (typeof container.contains === 'function') return container.contains(value);
+        if (typeof container === 'string') return container.indexOf(String(value)) >= 0;
+        return false;
+      },
+      startsWith: function (str, prefix) { if (str == null || prefix == null) return false; return String(str).indexOf(String(prefix)) === 0; },
+      endsWith: function (str, suffix) { if (str == null || suffix == null) return false; var x = String(str), y = String(suffix); return x.length >= y.length && x.lastIndexOf(y) === x.length - y.length; },
+      greaterThan: function (a, b) { return Number(a) > Number(b); },
+      greaterOrEqualThan: function (a, b) { return Number(a) >= Number(b); },
+      lessThan: function (a, b) { return Number(a) < Number(b); },
+      lessOrEqualThan: function (a, b) { return Number(a) <= Number(b); },
+      between: function (val, min, max) { var n = Number(val); return n >= Number(min) && n <= Number(max); }
     },
     org: { json: {
       JSONObject: function JSONObject(init) { return makeJsonObject(init); },
@@ -310,18 +330,39 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
       id: selfId, processId: info.processId, processName: info.processName, correlationKey: info.correlationKey,
       parentId: info.parentInstanceId, state: info.state || 'running', variables: vars,
       activeNodes: (info.activeNodeInstances || []).map(function (n) { return { id: n.id, nodeId: n.nodeId, name: n.nodeName == null ? '' : n.nodeName }; }),
+      getVariable: function (n) { return vars[n]; },
+      setVariable: function (n, v) { vars[n] = v; },
+      hasVariable: function (n) { return hasOwn.call(vars, n); },
+      getNodeInstances: function () {
+        return (info.activeNodeInstances || []).map(function (n) {
+          var name = n.nodeName == null ? '' : n.nodeName;
+          return { getId: function () { return n.id; }, getNodeId: function () { return n.nodeId; }, getNodeName: function () { return name; }, id: n.id, nodeId: n.nodeId, name: name };
+        });
+      },
       signal: function (type, payload) { actions.push({ kind: 'signal', type: type, payload: payload, targetInstanceId: selfId }); },
       signalOther: function (t, type, payload) { actions.push({ kind: 'signal', type: type, payload: payload, targetInstanceId: t }); },
       broadcast: function (type, payload) { actions.push({ kind: 'signal', type: type, payload: payload }); },
       abort: function () { actions.push({ kind: 'abort', targetInstanceId: selfId }); },
       abortOther: function (t) { actions.push({ kind: 'abort', targetInstanceId: t }); }
     };
-    var node = { id: info.nodeInstanceId || '', nodeId: info.nodeId || '', name: info.nodeName || '' };
+    var node = {
+      id: info.nodeInstanceId || '', nodeId: info.nodeId || '', name: info.nodeName || '',
+      getId: function () { return info.nodeInstanceId || ''; },
+      getNodeId: function () { return info.nodeId || ''; },
+      getNodeName: function () { return info.nodeName || ''; }
+    };
     var env = Object.assign({}, input.env || {});
 
     // fixed globals first; bare-name process variables bind only where nothing already owns the name
     // (so kcontext/vars/console/Object/… can never be shadowed by a same-named variable).
-    var fixed = { kcontext: kcontext, vars: vars, instance: instance, node: node, env: env };
+    var fixed = {
+      kcontext: kcontext, vars: vars, instance: instance, node: node, env: env,
+      getVariable: function (n) { return vars[n]; },
+      setVariable: function (n, v) { vars[n] = v; },
+      instanceId: selfId, processId: info.processId == null ? '' : info.processId, processName: info.processName == null ? '' : info.processName,
+      correlationKey: info.correlationKey == null ? '' : info.correlationKey, parentInstanceId: info.parentInstanceId == null ? '' : info.parentInstanceId,
+      currentNodeId: info.nodeId || '', currentNodeName: info.nodeName || ''
+    };
     Object.keys(fixed).forEach(function (k) { defHidden(G, k, fixed[k]); });
     var bound = {};
     Object.keys(vars).forEach(function (k) {

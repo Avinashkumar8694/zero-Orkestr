@@ -24,7 +24,7 @@ import { permissionGrants, signToken } from '../src/infra/auth.ts';
 import { PlanService } from '../src/modules/plans/plans.ts';
 import { Collections, type TenantMember } from '../src/domain.ts';
 
-interface RouteSpec { method: string; path: string; perm?: string }
+interface RouteSpec { method: string; path: string; perm?: string[] }   // perm = any ONE of these grants access
 
 function readRoutes(): RouteSpec[] {
   const out: RouteSpec[] = [];
@@ -32,8 +32,8 @@ function readRoutes(): RouteSpec[] {
   for (const f of ['../src/http/routes.ts', '../src/http/routes/workflow-instances.ts', '../src/http/team-routes.ts']) {
     const src = fs.readFileSync(path.resolve(here, f), 'utf8');
     for (const m of src.matchAll(/^\s*r\.(get|post|put|patch|delete)\(\s*'([^']+)'(.{0,240})/gm)) {
-      const p = /(?:perm|requirePermission)\('([^']+)'\)/.exec(m[3]);
-      out.push({ method: m[1].toUpperCase(), path: m[2], perm: p?.[1] });
+      const p = /(?:perm|requirePermission)\(((?:'[^']+'\s*,?\s*)+)\)/.exec(m[3]);
+      out.push({ method: m[1].toUpperCase(), path: m[2], perm: p ? [...p[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : undefined });
     }
   }
   return out;
@@ -41,6 +41,8 @@ function readRoutes(): RouteSpec[] {
 
 // Routes that are intentionally reachable by ANY member of the workspace (still behind sign-in + membership).
 const ANY_MEMBER = new Set(['GET /openapi.json', 'GET /docs', 'GET /catalog/nodes', 'GET /catalog/nodes/:engineType', 'POST /validate',
+  // static reference documentation (no tenant data)
+  'GET /catalog/cheat-sheet', 'GET /catalog/assets/readmes', 'GET /catalog/assets/:kind/readme',
   'GET /notifications', 'POST /notifications/read-all', 'POST /notifications/:id/read', 'GET /settings/system']);
 const ROLES = ['viewer', 'worker', 'operator', 'developer', 'author', 'release', 'admin'] as const;
 
@@ -96,7 +98,7 @@ test('route table parsed; every route declares a permission or is on the any-mem
   assert.ok(routes.length > 120, `parsed ${routes.length} routes`);
   const unguarded = routes.filter((r) => !r.perm && !ANY_MEMBER.has(`${r.method} ${r.path}`)).map((r) => `${r.method} ${r.path}`);
   assert.deepStrictEqual(unguarded, [], 'routes with no permission guard that are not on the reviewed any-member list');
-  for (const r of routes) if (r.perm) assert.ok(Object.values(DEFAULT_ROLES).some((p) => permissionGrants(p, r.perm!)) || true);
+  for (const r of routes) if (r.perm) assert.ok(Object.values(DEFAULT_ROLES).some((p) => r.perm!.some((x) => permissionGrants(p, x))) || true);
 });
 
 test('no token / garbage token → 401 on every route', async () => {
@@ -108,12 +110,13 @@ test('no token / garbage token → 401 on every route', async () => {
 test('role × route: denied roles get exactly 403, allowed roles get through (never 401/403/5xx)', async () => {
   const bad: string[] = [];
   let denied = 0, granted = 0;
-  for (const r of routes) {
+  // /audit*: workflow:view holders get in only for a NAMED workflow (scoped inside the handler; covered by the audit tests)
+  for (const r of routes.filter((x) => !x.path.startsWith('/audit'))) {
     for (const role of ROLES) {
-      const allowed = !r.perm || permissionGrants(DEFAULT_ROLES[role], r.perm);
+      const allowed = !r.perm || r.perm.some((x) => permissionGrants(DEFAULT_ROLES[role], x));
       const s = await call(r, tokens[role], wsA);
       allowed ? granted++ : denied++;
-      if (allowed ? (s === 401 || s === 403 || s >= 500) : s !== 403) bad.push(`${role} ${r.method} ${r.path} [${r.perm ?? 'any-member'}] expected ${allowed ? 'allowed' : '403'} got ${s}`);
+      if (allowed ? (s === 401 || s === 403 || s >= 500) : s !== 403) bad.push(`${role} ${r.method} ${r.path} [${r.perm?.join(' | ') ?? 'any-member'}] expected ${allowed ? 'allowed' : '403'} got ${s}`);
     }
     // the workspace owner holds everything
     const so = await call(r, tokens.owner, wsA);

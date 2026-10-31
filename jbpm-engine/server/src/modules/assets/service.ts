@@ -9,6 +9,7 @@ import type { EngineProject, EngineNode, EngineProcess } from '../../sdk/index.t
 import { WorkflowService } from '../workflows/service.ts';
 import { VersionService } from '../versions/service.ts';
 import { ASSET_KINDS, ASSET_DEFS } from '../../assets/index.ts';
+import { slug } from '../../assets/types.ts';
 import { notFound, validation, conflict } from '../../infra/errors.ts';
 import {
   evaluateDmn, evaluateRules, evaluateDecisionTree, evaluateScorecard,
@@ -136,6 +137,33 @@ export class AssetsService {
     coll.push(seeded);
     await this.ver.saveDraft(branchId, engine, actor);
     await this.ctx.audit({ actor, kind: 'asset.added', workflowId: projectId, data: { kind, name: nm } });
+    return { kind, name: nm };
+  }
+
+  /** Duplicate an existing asset with a new unique name in the same project. */
+  async duplicate(projectId: string, kind: string, name: string, newName: string, actor: string): Promise<{ kind: string; name: string }> {
+    const nm = (newName || '').trim();
+    if (!nm) throw validation('new asset name is required');
+    if (nm === name) throw validation('new asset name must be different from current name');
+    const def = this.def(kind);
+    const { branchId, engine } = await this.head(projectId);
+    const coll = ((engine as any)[kind] ||= []) as any[];
+    const original = this.findRaw(engine, kind, name);
+    if (!original) throw notFound(`asset "${name}"`);
+    if (coll.some((a) => (a[def.nameField] || a.name) === nm)) throw validation(`asset "${nm}" already exists`);
+
+    const cloned = JSON.parse(JSON.stringify(original));
+    cloned[def.nameField] = nm;
+    if (cloned.name && def.nameField !== 'name') cloned.name = nm;
+    if (kind === 'decisions') {
+      cloned.namespace = `https://kie.org/dmn/${slug(nm)}`;
+      if (Array.isArray(cloned.decisions) && cloned.decisions[0]) {
+        cloned.decisions[0].name = nm;
+      }
+    }
+    coll.push(cloned);
+    await this.ver.saveDraft(branchId, engine, actor);
+    await this.ctx.audit({ actor, kind: 'asset.duplicated', workflowId: projectId, data: { kind, source: name, name: nm } });
     return { kind, name: nm };
   }
 

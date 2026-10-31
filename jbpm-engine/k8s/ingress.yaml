@@ -1,0 +1,33 @@
+# Production Kubernetes Ingress for JBPM Engine Multi-Replica Cluster
+# Demonstrates Pillar 4 (Sticky Sessions for WebSockets + Load Balancing)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jbpm-engine-ingress
+  namespace: jbpm
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    # Session Affinity (Sticky Sessions via Cookie) for live WebSockets
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "JBPM_STICKY"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "86400"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "86400"
+    nginx.ingress.kubernetes.io/session-cookie-path: "/"
+    # Extended timeouts for persistent WebSocket streams
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "15"
+    # WebSocket connection upgrades
+    nginx.ingress.kubernetes.io/websocket-services: "jbpm-engine-api"
+spec:
+  rules:
+    - host: bpm.internal.pru.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jbpm-engine-api
+                port:
+                  number: 4000

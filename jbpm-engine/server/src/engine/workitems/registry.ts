@@ -2,6 +2,7 @@
 // the Node equivalent of jBPM WorkItemHandlers. Each returns result data mapped back to variables.
 // External handlers (Email/SMS/DB/Rest) call service URLs or simulate when not configured.
 import { evalExpression } from '../sandbox.ts';
+import { assertOutboundAllowed } from '../../infra/outbound-guard.ts';
 
 export type WorkItemHandler = (params: Record<string, unknown>, env: Record<string, string>, ctx?: { tenantId?: string }) => Promise<Record<string, unknown>>;
 
@@ -34,11 +35,24 @@ export const WORKITEM_HANDLERS: Record<string, WorkItemHandler> = {
     // Dynamically resolve template variables ${VAR} from deployment environment or task params
     let url = rawUrl.replace(/\$\{([^}]+)\}/g, (_, key) => String(env[key] ?? p[key] ?? ''));
 
-    // If relative path, resolve against BASE_URL configured in deployment/project environment
-    const baseUrl = env['BASE_URL'] || '';
-    if (!/^https?:\/\//i.test(url) && baseUrl) {
+    // If relative path or cluster-internal URL (.svc.cluster.local), resolve against BASE_URL or INTEGRATION_LAYER_URL
+    const baseUrl = env['BASE_URL'] || env['INTEGRATION_LAYER_URL'] || '';
+    if (baseUrl) {
       const base = baseUrl.replace(/\/+$/, '');
-      url = url.startsWith('/') ? `${base}${url}` : `${base}/${url}`;
+      if (!/^https?:\/\//i.test(url)) {
+        url = url.startsWith('/') ? `${base}${url}` : `${base}/${url}`;
+      } else if (url.includes('.svc.cluster.local')) {
+        url = url.replace(/^https?:\/\/[^/]+/, base);
+      }
+    }
+
+    // SSRF Guard: prevent calls to private, link-local, loopback, or cloud-metadata endpoints unless allowlisted
+    if (/^https?:\/\//i.test(url)) {
+      const dynamicAllowlist = [
+        ...(env['OUTBOUND_ALLOWLIST'] ? env['OUTBOUND_ALLOWLIST'].split(',').map((s) => s.trim()) : []),
+        ...(baseUrl ? [new URL(baseUrl).hostname] : []),
+      ];
+      await assertOutboundAllowed(url, dynamicAllowlist);
     }
 
     const method = String(p['Method'] || p['method'] || 'POST').toUpperCase();

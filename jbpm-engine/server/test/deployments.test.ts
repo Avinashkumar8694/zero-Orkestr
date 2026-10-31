@@ -51,3 +51,46 @@ test('DeploymentService.list: cross-project by default, filterable by workflowId
   const stillActive = await deployments.list({ status: 'active' });
   assert.deepStrictEqual(stillActive.map((d) => d.id), [depB.id]);
 });
+
+test('DeploymentService: export snapshot, restore to project, and import snapshot', async () => {
+  const ctx = newCtx();
+  const deployments = new DeploymentService(ctx);
+  const versions = new VersionService(ctx);
+  const { wf, dep } = await deployedWorkflow(ctx, 'SnapshotDemo', 'prod');
+
+  assert.strictEqual(dep.snapshot?.frozen, true, 'deployment carries frozen snapshot');
+
+  // 1. Export snapshot
+  const exported = await deployments.exportSnapshot(dep.id);
+  assert.strictEqual(exported.format, 'jbpm-deployment-snapshot');
+  assert.strictEqual(exported.deployment.id, dep.id);
+  assert.strictEqual(exported.engine.processes.length, 1);
+
+  // 2. Modify project draft after deployment
+  const procSvc = new ProcessService(ctx);
+  await procSvc.saveProcess(wf.id, `${wf.key}.process`, {
+    id: `${wf.key}.process`, name: 'Modified Flow', package: 'com.acme', vars: [],
+    nodes: [{ id: 's', type: 'start' }, { id: 'script1', type: 'script' }, { id: 'e', type: 'end' }],
+    flows: [{ id: 'f1', from: 's', to: 'script1' }, { id: 'f2', from: 'script1', to: 'e' }],
+  } as any, 'user1');
+
+  // Verify draft now has 3 nodes
+  const draftsBeforeRestore = await versions.listByBranch(wf.defaultBranchId);
+  const currentHead = draftsBeforeRestore.filter((v) => v.state === 'draft').at(-1)!;
+  assert.strictEqual(currentHead.engine.processes[0].nodes.length, 3);
+
+  // 3. Restore to project from deployment snapshot
+  const restoreRes = await deployments.restore(dep.id, 'admin');
+  assert.strictEqual(restoreRes.ok, true);
+
+  const draftsAfterRestore = await versions.listByBranch(wf.defaultBranchId);
+  const restoredHead = draftsAfterRestore.filter((v) => v.state === 'draft').at(-1)!;
+  assert.strictEqual(restoredHead.engine.processes[0].nodes.length, 2, 'restored to original 2 nodes from snapshot');
+
+  // 4. Import snapshot to a new environment
+  const imported = await deployments.importSnapshot({ snapshot: exported, environment: 'stage' }, 'admin');
+  assert.strictEqual(imported.environment, 'stage');
+  assert.strictEqual(imported.status, 'inactive');
+  assert.strictEqual(imported.snapshot?.frozen, true);
+  assert.strictEqual(imported.engine.processes[0].nodes.length, 2);
+});

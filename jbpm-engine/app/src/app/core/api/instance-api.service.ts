@@ -7,13 +7,35 @@ export interface StartInstanceBody {
   workflowId: string; processId?: string; environment?: string; deploymentId?: string;
   variables?: Record<string, unknown>; correlationKey?: string;
 }
-export interface ListInstancesFilter { workflowId?: string; status?: string; deploymentId?: string; correlationKey?: string; }
+export interface ListInstancesFilter {
+  workflowId?: string;
+  status?: string;
+  deploymentId?: string;
+  correlationKey?: string;
+  type?: string;
+  caseId?: string;
+  search?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+  full?: boolean;
+}
+
+export interface PagedResult<T> {
+  items: T[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class InstanceApiService extends ApiBase {
   startInstance(body: StartInstanceBody): Observable<Instance> { return this.http.post<Instance>(`${this.base}/instances`, body); }
-  // previously hardcoded to {workflowId} only — the backend also supports status/deploymentId/correlationKey
   listInstances(filter: ListInstancesFilter): Observable<Instance[]> { return this.items(this.http.get<ApiList<Instance>>(`${this.base}/instances`, { params: this.cleanParams(filter) })); }
+  listInstancesPaged(filter: ListInstancesFilter): Observable<PagedResult<Instance>> {
+    return this.http.get<PagedResult<Instance>>(`${this.base}/instances`, { params: this.cleanParams(filter) });
+  }
   getInstance(id: string): Observable<Instance> { return this.http.get<Instance>(`${this.base}/instances/${id}`); }
   diagramState(id: string): Observable<any> { return this.http.get(`${this.base}/instances/${id}/diagram-state`); }
   instanceGraph(id: string): Observable<{ nodes: any[]; flows: any[]; diagram: { activeNodeIds: string[]; visitedNodeIds: string[]; status: string }; counts: Record<string, number>; status: string }> { return this.http.get<any>(`${this.base}/instances/${id}/graph`); }

@@ -85,14 +85,28 @@ export class InstanceService {
     return i;
   }
 
-  async list(filter: { workflowId?: string; status?: string; deploymentId?: string; correlationKey?: string }): Promise<Instance[]> {
-    return (await this.repo().query((i) =>
+  async list(filter: { workflowId?: string; status?: string; deploymentId?: string; correlationKey?: string; search?: string; limit?: number; offset?: number; full?: boolean }): Promise<Instance[]> {
+    const q = (filter.search || '').trim().toLowerCase();
+    const all = (await this.repo().query((i) =>
       i.tenantId === this.ctx.tenantId &&
       (!filter.workflowId || i.workflowId === filter.workflowId) &&
       (!filter.status || i.status === filter.status) &&
       (!filter.deploymentId || i.deploymentId === filter.deploymentId) &&
-      (!filter.correlationKey || i.correlationKey === filter.correlationKey)))
+      (!filter.correlationKey || i.correlationKey === filter.correlationKey) &&
+      (!q || i.id.toLowerCase().includes(q) || (i.processId || '').toLowerCase().includes(q) || (i.startedBy || '').toLowerCase().includes(q) || (i.correlationKey || '').toLowerCase().includes(q))))
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+
+    const offset = filter.offset != null ? Number(filter.offset) : 0;
+    const limit = filter.limit != null ? Number(filter.limit) : all.length;
+    const paged = all.slice(offset, offset + limit);
+
+    if (filter.full) return paged;
+    // Strip heavy runtime execution history and token structures for list queries
+    return paged.map((i) => ({
+      ...i,
+      history: [],
+      tokens: [],
+    }));
   }
 
   async diagramState(id: string) {
@@ -107,6 +121,13 @@ export class InstanceService {
     const inst = await this.get(id);
     const dep = await this.deployments.get(inst.deploymentId);
     return this.recordIfFailed(await this.engine.resumeToken(inst, dep, tokenId, vars));
+  }
+
+  /** Fail a waiting token (used by task rejection / failure). */
+  async failToken(id: string, tokenId: string, errorMessage?: string, errorDetails?: Record<string, unknown>): Promise<Instance> {
+    const inst = await this.get(id);
+    const dep = await this.deployments.get(inst.deploymentId);
+    return this.recordIfFailed(await this.engine.failToken(inst, dep, tokenId, errorMessage, errorDetails));
   }
 
   /** Fire a due timer job (catch timer → resume; boundary timer → activate the boundary). */
@@ -149,6 +170,13 @@ export class InstanceService {
     const dep = await this.deployments.get(inst.deploymentId);
     await this.ctx.audit({ actor, kind: 'instance.signaled', workflowId: inst.workflowId, instanceId: id, data: { name } });
     return this.recordIfFailed(await this.engine.signalInstance(inst, dep, name, payload));
+  }
+
+  /** Broadcast a signal/message to all matching running/waiting instances in the tenant and trigger matching signal starts.
+   *  Matches jBPM KIE-Server POST /server/containers/{id}/processes/instances/signal/{signalName}. */
+  async broadcast(name: string, payload: unknown, actor: string, correlationKey?: string): Promise<{ signaled: number }> {
+    await this.ctx.audit({ actor, kind: 'instance.broadcastSignaled', workflowId: '*', data: { name, correlationKey } });
+    return this.engine.broadcastSignal(name, payload, correlationKey);
   }
 
   /** Re-trigger a node (retry a failed node, or replay a node) and continue the flow. Blocked on a
@@ -282,5 +310,63 @@ export class InstanceService {
     const counts: Record<string, number> = {};
     for (const h of inst.history) counts[h.nodeId] = (counts[h.nodeId] || 0) + 1;
     return { nodes: p?.nodes || [], flows: p?.flows || [], diagram: this.engine.diagramState(inst), counts, status: inst.status };
+  }
+
+  /** Detailed list of executed and active node instances (jBPM node instances query). */
+  async nodes(id: string) {
+    const inst = await this.get(id);
+    const dep = await this.deployments.get(inst.deploymentId).catch(() => null);
+    const proc = dep?.engine.processes.find((p) => p.id === inst.processId) || dep?.engine.processes?.[0];
+    const nodeMap = new Map((proc?.nodes || []).map((n) => [n.id, n]));
+    const historyNodes = inst.history.map((h, idx) => ({
+      id: `hist_${idx}_${h.nodeId}`,
+      tokenId: h.tokenId,
+      nodeId: h.nodeId,
+      nodeName: (nodeMap.get(h.nodeId) as any)?.name || h.nodeId,
+      type: h.type || (nodeMap.get(h.nodeId) as any)?.type || 'unknown',
+      state: 'completed' as const,
+      enteredAt: h.enteredAt,
+      exitedAt: h.exitedAt,
+      outcome: h.outcome,
+    }));
+    const activeNodes = inst.tokens.map((t) => ({
+      id: `tok_${t.id}`,
+      tokenId: t.id,
+      nodeId: t.nodeId,
+      nodeName: (nodeMap.get(t.nodeId) as any)?.name || t.nodeId,
+      type: (nodeMap.get(t.nodeId) as any)?.type || 'unknown',
+      state: t.state,
+      enteredAt: t.enteredAt,
+      waitFor: t.waitFor,
+    }));
+    return [...historyNodes, ...activeNodes];
+  }
+
+  /** Bulk abort instances. */
+  async abortMany(ids: string[], actor: string): Promise<Array<{ id: string; ok: boolean; error?: string }>> {
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const id of ids) {
+      try {
+        await this.abort(id, actor);
+        results.push({ id, ok: true });
+      } catch (err) {
+        results.push({ id, ok: false, error: (err as Error).message });
+      }
+    }
+    return results;
+  }
+
+  /** Bulk signal instances. */
+  async signalMany(ids: string[], name: string, payload: unknown, actor: string): Promise<Array<{ id: string; ok: boolean; error?: string }>> {
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const id of ids) {
+      try {
+        await this.signal(id, name, payload, actor);
+        results.push({ id, ok: true });
+      } catch (err) {
+        results.push({ id, ok: false, error: (err as Error).message });
+      }
+    }
+    return results;
   }
 }

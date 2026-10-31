@@ -1,5 +1,6 @@
 import { Component, HostListener, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { AuthService } from '../core/auth/auth.service';
 import { SystemApiService } from '../core/api/system-api.service';
 import { AppNotification } from '../core/models';
 import { IconComponent } from '../shared/icon.component';
@@ -86,10 +87,21 @@ import { IconComponent } from '../shared/icon.component';
     .nbody { font-size: 12px; }
     .nwhen { font-size: 11px; }
     .muted { color: var(--muted); }
+
+    @media (max-width: 900px) {
+      :host { top: 8px; }
+      .bell { right: 12px; width: 32px; height: 32px; }
+      .panel {
+        right: 8px; top: 38px;
+        width: min(340px, calc(100vw - 16px));
+        max-height: calc(100vh - 70px);
+      }
+    }
   `],
 })
 export class NotificationsBellComponent implements OnInit, OnDestroy {
   private api = inject(SystemApiService);
+  private auth = inject(AuthService);
   private router = inject(Router);
 
   open = signal(false);
@@ -106,6 +118,7 @@ export class NotificationsBellComponent implements OnInit, OnDestroy {
   ngOnDestroy() { if (this.timer) clearInterval(this.timer); }
 
   refresh() {
+    if (!this.auth.isAuthenticated()) return;
     this.api.listNotifications({ limit: 30 }).subscribe({
       next: (r) => {
         this.items.set(r.items); this.unread.set(r.unread);

@@ -1,6 +1,6 @@
 // User-task inbox: list/claim/complete. Completing a task resumes the waiting instance token.
 import type { AppContext } from '../../context.ts';
-import { Collections, type AuditEvent, type Deployment, type Task, type TaskComment, type User } from '../../domain.ts';
+import { Collections, type AuditEvent, type Deployment, type Group, type Task, type TaskAttachment, type TaskComment, type User } from '../../domain.ts';
 import { InstanceService } from '../instances/service.ts';
 import { NotificationService } from '../notifications/service.ts';
 import type { EngineEvent } from '../../engine/execution-engine.ts';
@@ -60,16 +60,22 @@ export class TaskService {
     return t;
   }
 
-  async list(filter: { assignee?: string; group?: string; status?: string; overdue?: boolean }): Promise<Task[]> {
+  async list(filter: { assignee?: string; group?: string; status?: string; overdue?: boolean; search?: string; limit?: number; offset?: number }): Promise<Task[]> {
     const now = this.ctx.clock();
-    return (await this.repo().query((t) =>
+    const q = (filter.search || '').trim().toLowerCase();
+    const all = (await this.repo().query((t) =>
       t.tenantId === this.ctx.tenantId &&
       (!filter.assignee || t.assignee === filter.assignee) &&
       (!filter.group || t.group === filter.group) &&
       (!filter.status || t.status === filter.status) &&
-      (!filter.overdue || (!!t.dueAt && t.dueAt < now && t.status !== 'completed' && t.status !== 'skipped'))))
+      (!filter.overdue || (!!t.dueAt && t.dueAt < now && t.status !== 'completed' && t.status !== 'skipped')) &&
+      (!q || t.name.toLowerCase().includes(q) || t.id.toLowerCase().includes(q) || (t.assignee || '').toLowerCase().includes(q) || (t.group || '').toLowerCase().includes(q))))
       // higher priority first (undefined = lowest), then newest first within the same priority
       .sort((a, b) => (b.priority ?? -Infinity) - (a.priority ?? -Infinity) || b.createdAt.localeCompare(a.createdAt));
+
+    const offset = filter.offset != null ? Number(filter.offset) : 0;
+    const limit = filter.limit != null ? Number(filter.limit) : all.length;
+    return all.slice(offset, offset + limit);
   }
 
   async claim(id: string, user: string): Promise<Task> {
@@ -79,7 +85,7 @@ export class TaskService {
     if (t.status !== 'created' && t.status !== 'reserved') throw conflict('task not claimable');
     // a task someone else already holds cannot be taken from them (only released by them, or reassigned by an admin)
     if (t.status === 'reserved' && t.assignee && t.assignee !== user && !this.adminOverride && t.businessAdmin !== user) throw conflict(`task already claimed by ${t.assignee}`);
-    t.assignee = user; t.status = 'reserved';
+    t.assignee = user; t.status = 'reserved'; t.claimedAt = this.ctx.clock();
     await this.repo().put(t);
     await this.ctx.audit({ actor: user, kind: 'task.claimed', instanceId: t.instanceId, taskId: t.id });
     return t;
@@ -89,10 +95,43 @@ export class TaskService {
     const t = await this.get(id);
     this.assertOwnerOrAdmin(t, user);
     await this.assertInstanceActionable(t);
-    t.assignee = undefined; t.status = 'created';
+    if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
+    if (t.status !== 'reserved' && t.status !== 'inprogress') throw conflict(`task is ${t.status}, not releasable`);
+    t.assignee = undefined; t.status = 'created'; t.claimedAt = undefined;
     await this.repo().put(t);
     await this.ctx.audit({ actor: user, kind: 'task.released', instanceId: t.instanceId, taskId: t.id });
     return t;
+  }
+
+  /** Auto-release tasks claimed longer than `maxHours` back to the group pool. */
+  async autoReleaseIdle(maxHours: number): Promise<number> {
+    if (maxHours <= 0) return 0;
+    const nowIso = this.ctx.clock();
+    const nowMs = Date.parse(nowIso);
+    const cutoffMs = nowMs - (maxHours * 3600 * 1000);
+    const claimedTasks = await this.repo().query((t) =>
+      t.tenantId === this.ctx.tenantId &&
+      (t.status === 'reserved' || t.status === 'inprogress') &&
+      Boolean(t.claimedAt) &&
+      Date.parse(t.claimedAt!) <= cutoffMs,
+    );
+    let releasedCount = 0;
+    for (const t of claimedTasks) {
+      const prevAssignee = t.assignee;
+      t.assignee = undefined;
+      t.status = 'created';
+      t.claimedAt = undefined;
+      await this.repo().put(t);
+      await this.ctx.audit({
+        actor: 'system',
+        kind: 'task.released',
+        instanceId: t.instanceId,
+        taskId: t.id,
+        data: { reason: 'auto-release-idle', idleHours: maxHours, previousAssignee: prevAssignee },
+      });
+      releasedCount++;
+    }
+    return releasedCount;
   }
 
   /** userTask.outputs declares processVar ← taskVar (see engine/nodes/user-task/def.ts's schema) —
@@ -113,7 +152,7 @@ export class TaskService {
     const t = await this.get(id);
     await this.assertOwnable(t, user);
     this.assertOwnerOrAdmin(t, user);
-    if (t.status === 'completed') throw conflict('task already completed');
+    if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
     // Refuse before mutating the task if the instance can't accept it (e.g. suspended/aborted), so a
     // failed resume can't leave the task completed but the instance un-advanced.
     await this.assertInstanceActionable(t);
@@ -158,6 +197,21 @@ export class TaskService {
     return t;
   }
 
+  /** Fail / reject a task with error/fault data — real jBPM's TaskService.fail(): transitions the task
+   *  to failed and raises a TASK_FAILED error to be handled by error boundaries or incident handlers. */
+  async fail(id: string, fault: { message?: string; data?: Record<string, unknown> } | undefined, user: string): Promise<Task> {
+    const t = await this.get(id);
+    await this.assertOwnable(t, user);
+    if (t.status === 'completed' || t.status === 'skipped' || t.status === 'failed') throw conflict(`task already ${t.status}`);
+    await this.assertInstanceActionable(t);
+    t.status = 'failed'; t.completedAt = this.ctx.clock(); t.completedBy = user;
+    if (fault?.data) t.outputs = fault.data;
+    await this.repo().put(t);
+    await this.ctx.audit({ actor: user, kind: 'task.failed', instanceId: t.instanceId, taskId: t.id, nodeId: t.nodeId, data: fault });
+    await this.instances.failToken(t.instanceId, t.tokenId, fault?.message, fault?.data);
+    return t;
+  }
+
   /** jBPM Start: reserved → inprogress (the owner begins working; Work tab shows Save/Complete). */
   async start(id: string, user: string): Promise<Task> {
     const t = await this.get(id);
@@ -184,6 +238,33 @@ export class TaskService {
     return t;
   }
 
+  /** jBPM Suspend: pause work on a task (WS-HumanTask suspended state). */
+  async suspend(id: string, user: string): Promise<Task> {
+    const t = await this.get(id);
+    await this.assertOwnable(t, user);
+    await this.assertInstanceActionable(t);
+    if (t.status === 'completed' || t.status === 'skipped' || t.status === 'failed' || t.status === 'exited') {
+      throw conflict(`task already ${t.status}`);
+    }
+    if (t.status === 'suspended') return t;
+    t.status = 'suspended';
+    await this.repo().put(t);
+    await this.ctx.audit({ actor: user, kind: 'task.suspended', instanceId: t.instanceId, taskId: t.id });
+    return t;
+  }
+
+  /** jBPM Resume: unpause a suspended task back to actionable state. */
+  async resume(id: string, user: string): Promise<Task> {
+    const t = await this.get(id);
+    await this.assertOwnable(t, user);
+    await this.assertInstanceActionable(t);
+    if (t.status !== 'suspended') throw conflict(`task is ${t.status}, not suspended`);
+    t.status = t.assignee ? 'reserved' : 'created';
+    await this.repo().put(t);
+    await this.ctx.audit({ actor: user, kind: 'task.resumed', instanceId: t.instanceId, taskId: t.id });
+    return t;
+  }
+
   /** Save partial output data without completing (the Work tab's Save button). */
   async saveOutputs(id: string, outputs: Record<string, unknown>, user: string): Promise<Task> {
     const t = await this.get(id);
@@ -200,17 +281,27 @@ export class TaskService {
   /** jBPM Delegate: hand the task to a specific user (goes to their inbox as reserved). */
   async delegate(id: string, to: string, user: string): Promise<Task> {
     const t = await this.get(id);
-    if (!to?.trim()) throw validation('target user is required');
+    const target = (to || '').trim();
+    if (!target) throw validation('target user is required');
     this.assertOwnerOrAdmin(t, user);
     await this.assertInstanceActionable(t);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
-    if (t.excludedOwners?.includes(to)) throw conflict(`${to} is excluded from this task`);
+    if (t.excludedOwners?.includes(target)) throw conflict(`${target} is excluded from this task`);
+
+    // Ensure user exists in system if users are provisioned
+    const registeredUsers = await this.ctx.store.repo<User>(Collections.users).query((u) => u.tenantId === this.ctx.tenantId);
+    if (registeredUsers.length > 0) {
+      const u = registeredUsers.find((x) => x.username === target);
+      if (!u) throw conflict(`cannot delegate to "${target}": user is not registered in the system`);
+      if (!u.active) throw conflict(`cannot delegate to "${target}": user account is inactive`);
+    }
+
     const from = t.assignee;
-    t.assignee = to; t.status = 'reserved';
+    t.assignee = target; t.status = 'reserved';
     await this.repo().put(t);
-    await this.ctx.audit({ actor: user, kind: 'task.delegated', instanceId: t.instanceId, taskId: t.id, data: { from, to } });
+    await this.ctx.audit({ actor: user, kind: 'task.delegated', instanceId: t.instanceId, taskId: t.id, data: { from, to: target } });
     await new NotificationService(this.ctx).notify({
-      userId: to, kind: 'task-assigned', title: `Task "${t.name}" was delegated to you`,
+      userId: target, kind: 'task-assigned', title: `Task "${t.name}" was delegated to you`,
       body: `by ${user}`, link: `/tasks/${t.id}`, taskId: t.id, instanceId: t.instanceId,
     });
     return t;
@@ -220,18 +311,37 @@ export class TaskService {
    *  claim it (unlike delegate, which reserves it for them directly). */
   async forward(id: string, to: { user?: string; group?: string }, user: string): Promise<Task> {
     const t = await this.get(id);
-    if (!to?.user?.trim() && !to?.group?.trim()) throw validation('a target user or group is required');
+    const targetUser = (to?.user || '').trim();
+    const targetGroup = (to?.group || '').trim();
+    if (!targetUser && !targetGroup) throw validation('a target user or group is required');
     this.assertOwnerOrAdmin(t, user);
     await this.assertInstanceActionable(t);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
+
+    if (targetUser) {
+      const registeredUsers = await this.ctx.store.repo<User>(Collections.users).query((u) => u.tenantId === this.ctx.tenantId);
+      if (registeredUsers.length > 0) {
+        const u = registeredUsers.find((x) => x.username === targetUser);
+        if (!u) throw conflict(`cannot forward to "${targetUser}": user is not registered in the system`);
+        if (!u.active) throw conflict(`cannot forward to "${targetUser}": user account is inactive`);
+      }
+    }
+    if (targetGroup) {
+      const registeredGroups = await this.ctx.store.repo<Group>(Collections.groups).query((g) => g.tenantId === this.ctx.tenantId);
+      if (registeredGroups.length > 0) {
+        const g = registeredGroups.find((x) => x.name === targetGroup);
+        if (!g) throw conflict(`cannot forward to group "${targetGroup}": group does not exist in the system`);
+      }
+    }
+
     const from = t.assignee;
     t.assignee = undefined; t.status = 'created';
-    if (to.group?.trim()) t.group = to.group.trim();
+    if (targetGroup) t.group = targetGroup;
     await this.repo().put(t);
-    await this.ctx.audit({ actor: user, kind: 'task.forwarded', instanceId: t.instanceId, taskId: t.id, data: { from, to } });
-    if (to.user?.trim()) {
+    await this.ctx.audit({ actor: user, kind: 'task.forwarded', instanceId: t.instanceId, taskId: t.id, data: { from, to: { user: targetUser || undefined, group: targetGroup || undefined } } });
+    if (targetUser) {
       await new NotificationService(this.ctx).notify({
-        userId: to.user.trim(), kind: 'task-assigned', title: `Task "${t.name}" was forwarded to you`,
+        userId: targetUser, kind: 'task-assigned', title: `Task "${t.name}" was forwarded to you`,
         body: `by ${user} — claim it to start`, link: `/tasks/${t.id}`, taskId: t.id, instanceId: t.instanceId,
       });
     }
@@ -278,6 +388,8 @@ export class TaskService {
 
   async addComment(taskId: string, body: string, author: string): Promise<TaskComment> {
     const t = await this.get(taskId);
+    await this.assertInstanceActionable(t);
+    if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task is ${t.status}; comments are closed`);
     if (!body?.trim()) throw validation('comment body is required');
     const c: TaskComment = { id: this.ctx.newId(), tenantId: this.ctx.tenantId, taskId, author, body: body.trim(), at: this.ctx.clock() };
     await this.comments().put(c);
@@ -287,6 +399,8 @@ export class TaskService {
 
   async deleteComment(taskId: string, commentId: string, actor: string): Promise<void> {
     const t = await this.get(taskId);
+    await this.assertInstanceActionable(t);
+    if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task is ${t.status}; cannot delete comments`);
     const c = await this.comments().get(commentId);
     if (!c || c.tenantId !== this.ctx.tenantId || c.taskId !== taskId) throw notFound('Comment');
     if (c.author !== actor && t.businessAdmin !== actor) throw forbidden('only the comment author can delete it');
@@ -300,5 +414,82 @@ export class TaskService {
     return (await this.ctx.store.repo<AuditEvent>(Collections.audit)
       .query((e) => e.tenantId === this.ctx.tenantId && e.taskId === taskId))
       .sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  // ---- attachments / documents ----
+  async listAttachments(taskId: string): Promise<TaskAttachment[]> {
+    await this.get(taskId);
+    return (await this.ctx.store.repo<TaskAttachment>(Collections.taskAttachments).query((a) => a.tenantId === this.ctx.tenantId && a.taskId === taskId))
+      .sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  async addAttachment(taskId: string, input: { name: string; mimeType?: string; url?: string; sizeBytes?: number }, author: string): Promise<TaskAttachment> {
+    const t = await this.get(taskId);
+    await this.assertOwnable(t, author);
+    if (!input.name?.trim()) throw validation('attachment name is required');
+    const att: TaskAttachment = {
+      id: this.ctx.newId(),
+      tenantId: this.ctx.tenantId,
+      taskId,
+      name: input.name.trim(),
+      mimeType: input.mimeType,
+      url: input.url,
+      sizeBytes: input.sizeBytes,
+      author,
+      at: this.ctx.clock(),
+    };
+    await this.ctx.store.repo<TaskAttachment>(Collections.taskAttachments).put(att);
+    await this.ctx.audit({ actor: author, kind: 'task.attachment.added', instanceId: t.instanceId, taskId, data: { name: att.name } });
+    return att;
+  }
+
+  async deleteAttachment(taskId: string, attachmentId: string, actor: string): Promise<void> {
+    const t = await this.get(taskId);
+    await this.assertOwnable(t, actor);
+    const repo = this.ctx.store.repo<TaskAttachment>(Collections.taskAttachments);
+    const att = await repo.get(attachmentId);
+    if (!att || att.tenantId !== this.ctx.tenantId || att.taskId !== taskId) throw notFound('Attachment');
+    await repo.delete(attachmentId);
+    await this.ctx.audit({ actor, kind: 'task.attachment.deleted', instanceId: t.instanceId, taskId, data: { name: att.name } });
+  }
+
+  // ---- bulk operations ----
+  async claimMany(taskIds: string[], user: string): Promise<Array<{ id: string; ok: boolean; error?: string }>> {
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const id of taskIds) {
+      try {
+        await this.claim(id, user);
+        results.push({ id, ok: true });
+      } catch (err) {
+        results.push({ id, ok: false, error: (err as Error).message });
+      }
+    }
+    return results;
+  }
+
+  async releaseMany(taskIds: string[], user: string): Promise<Array<{ id: string; ok: boolean; error?: string }>> {
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const id of taskIds) {
+      try {
+        await this.release(id, user);
+        results.push({ id, ok: true });
+      } catch (err) {
+        results.push({ id, ok: false, error: (err as Error).message });
+      }
+    }
+    return results;
+  }
+
+  async completeMany(items: Array<{ taskId: string; outputs?: Record<string, unknown> }>, user: string): Promise<Array<{ id: string; ok: boolean; error?: string }>> {
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const item of items) {
+      try {
+        await this.complete(item.taskId, item.outputs || {}, user);
+        results.push({ id: item.taskId, ok: true });
+      } catch (err) {
+        results.push({ id: item.taskId, ok: false, error: (err as Error).message });
+      }
+    }
+    return results;
   }
 }

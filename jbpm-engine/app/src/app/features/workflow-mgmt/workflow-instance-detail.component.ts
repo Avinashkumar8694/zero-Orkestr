@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { JsonPipe, SlicePipe } from '@angular/common';
+import { catchError, finalize, forkJoin, of } from 'rxjs';
 import { WorkflowInstanceApiService } from '../../core/api/workflow-instance-api.service';
 import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
 import { ModalService } from '../../shared/modal.service';
@@ -27,6 +28,14 @@ const TABS: { key: Tab; label: string }[] = [
     <div class="page">
       @if (agg(); as a) {
         <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Workflow Instances', link: ['/workflow-instances'] }, { label: a.workflowInstance.workflowName }]" /></div>
+        
+        @if (isReadOnly()) {
+          <div class="donebanner">
+            <app-icon name="check" [size]="14" />
+            <span>This workflow instance is <strong>{{ a.workflowInstance.status }}</strong>@if (a.bpmInstance?.status) { (process instance is <strong>{{ a.bpmInstance!.status }}</strong>) } — it is finished and read-only. Data, status, and comments cannot be modified.</span>
+          </div>
+        }
+
         <header class="pagehead">
           <div>
             <h1>{{ a.workflowInstance.workflowName }} <span class="badge" [class.active]="a.workflowInstance.status !== 'failed'" [class.inactive]="a.workflowInstance.status === 'failed'">{{ a.workflowInstance.status }}</span></h1>
@@ -34,8 +43,8 @@ const TABS: { key: Tab; label: string }[] = [
             @if (a.workflowInstance.startError) { <p class="err sm">{{ a.workflowInstance.startError }}</p> }
           </div>
           <span class="spacer"></span>
-          <button class="btn sm" (click)="updateStatus()">Update status</button>
-          <button class="btn sm" [disabled]="!a.workflowInstance.piid" (click)="sendSignal()">Send signal</button>
+          <button class="btn sm" [disabled]="isReadOnly()" (click)="updateStatus()">Update status</button>
+          <button class="btn sm" [disabled]="isReadOnly() || !a.workflowInstance.piid" (click)="sendSignal()">Send signal</button>
         </header>
 
         <nav class="tabs">
@@ -45,9 +54,9 @@ const TABS: { key: Tab; label: string }[] = [
         @switch (tab()) {
           @case ('data') {
             <div class="card">
-              <textarea rows="12" [(ngModel)]="dataText"></textarea>
+              <textarea rows="12" [(ngModel)]="dataText" [disabled]="isReadOnly()"></textarea>
               @if (dataError()) { <p class="err">{{ dataError() }}</p> }
-              <button class="btn primary sm" (click)="saveData()">Save data</button>
+              <button class="btn primary sm" [disabled]="isReadOnly()" (click)="saveData()">Save data</button>
             </div>
           }
           @case ('tasks') {
@@ -56,7 +65,7 @@ const TABS: { key: Tab; label: string }[] = [
               <div class="card taskrow">
                 <div class="tr-top"><span class="tname">{{ t.name }}</span><span class="badge">{{ t.status }}</span></div>
                 <p class="muted sm">group {{ t.group || '—' }} · assignee {{ t.assignee || '—' }}</p>
-                @if (t.status !== 'completed' && t.status !== 'skipped') {
+                @if (t.status !== 'completed' && t.status !== 'skipped' && !isReadOnly()) {
                   <div class="row actionrow">
                     <button class="btn sm primary" (click)="decide(t)">Decision</button>
                     <button class="btn sm" (click)="delegate(t)">Delegate</button>
@@ -67,17 +76,23 @@ const TABS: { key: Tab; label: string }[] = [
           }
           @case ('comments') {
             <div class="card">
-              <div class="fieldrow"><input [(ngModel)]="newComment" placeholder="Add a comment…" (keyup.enter)="addComment()" /><button class="btn sm" (click)="addComment()">Post</button></div>
+              @if (!isReadOnly()) {
+                <div class="fieldrow"><input [(ngModel)]="newComment" placeholder="Add a comment…" (keyup.enter)="addComment()" /><button class="btn sm" [disabled]="!newComment.trim()" (click)="addComment()">Post</button></div>
+              } @else {
+                <p class="muted sm" style="margin-bottom: 12px;">Comments are closed for completed workflow instances.</p>
+              }
               @for (c of comments(); track c.id) {
-                <div class="crow"><div class="crow-h"><strong>{{ c.author }}</strong><span class="muted sm">{{ c.at | slice:0:19 }}</span><button class="btn sm danger" (click)="deleteComment(c)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button></div><p>{{ c.body }}</p></div>
+                <div class="crow"><div class="crow-h"><strong>{{ c.author }}</strong><span class="muted sm">{{ c.at | slice:0:19 }}</span>@if (!isReadOnly()) { <button class="btn sm danger" (click)="deleteComment(c)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button> }</div><p>{{ c.body }}</p></div>
               }
             </div>
           }
           @case ('audit') {
             <div class="card">
-              <div class="fieldrow"><input [(ngModel)]="newAuditKind" placeholder="kind, e.g. workflowInstance.note" /><input [(ngModel)]="newAuditData" placeholder="data (JSON, optional)" /><button class="btn sm" (click)="addAudit()">Add</button></div>
+              @if (!isReadOnly()) {
+                <div class="fieldrow"><input [(ngModel)]="newAuditKind" placeholder="kind, e.g. workflowInstance.note" /><input [(ngModel)]="newAuditData" placeholder="data (JSON, optional)" /><button class="btn sm" (click)="addAudit()">Add</button></div>
+              }
               @for (au of audits(); track au.id) {
-                <div class="crow"><div class="crow-h"><strong class="mono">{{ au.kind }}</strong><span class="muted sm">{{ au.actor }} · {{ au.at | slice:0:19 }}</span><button class="btn sm danger" (click)="deleteAudit(au)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button></div>
+                <div class="crow"><div class="crow-h"><strong class="mono">{{ au.kind }}</strong><span class="muted sm">{{ au.actor }} · {{ au.at | slice:0:19 }}</span>@if (!isReadOnly()) { <button class="btn sm danger" (click)="deleteAudit(au)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button> }</div>
                 @if (au.data) { <pre class="mono sm">{{ au.data | json }}</pre> }</div>
               }
             </div>
@@ -121,6 +136,8 @@ const TABS: { key: Tab; label: string }[] = [
     .crow-h .spacer { flex: 1; }
     .badge.active { background: var(--green-bg); color: var(--green); } .badge.inactive { background: var(--red-bg); color: var(--red); }
     .btn.danger { color: var(--red); }
+    .donebanner { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; background: rgba(34, 197, 94, 0.12); color: var(--green); font-size: 13px; font-weight: 600; margin-bottom: 14px; border: 1px solid var(--green); }
+    input:disabled, textarea:disabled, button:disabled { opacity: 0.55; cursor: not-allowed; }
   `],
 })
 export class WorkflowInstanceDetailComponent {
@@ -135,6 +152,16 @@ export class WorkflowInstanceDetailComponent {
   tab = signal<Tab>('data');
   tabDefs = TABS;
 
+  isReadOnly = computed(() => {
+    const a = this.agg();
+    if (!a) return false;
+    const s = (a.workflowInstance.status || '').toLowerCase();
+    const terminal = ['completed', 'closed', 'settled', 'settled_and_closed', 'aborted', 'failed', 'cancelled'];
+    if (terminal.includes(s)) return true;
+    if (a.bpmInstance && (a.bpmInstance.status === 'completed' || a.bpmInstance.status === 'aborted')) return true;
+    return false;
+  });
+
   dataText = '';
   dataError = signal('');
   comments = signal<WorkflowInstanceComment[]>([]);
@@ -147,18 +174,25 @@ export class WorkflowInstanceDetailComponent {
 
   load() {
     this.loading.set(true);
-    this.api.aggregate(this.id).subscribe({
-      next: (a) => {
-        this.agg.set(a); this.loading.set(false);
-        this.dataText = JSON.stringify(a.workflowInstance.data, null, 2);
+    forkJoin({
+      agg: this.api.aggregate(this.id),
+      comments: this.api.listComments(this.id).pipe(catchError(() => of([]))),
+      audits: this.api.listAudits(this.id).pipe(catchError(() => of([]))),
+    }).pipe(
+      finalize(() => this.loading.set(false))
+    ).subscribe({
+      next: ({ agg, comments, audits }) => {
+        this.agg.set(agg);
+        this.dataText = JSON.stringify(agg.workflowInstance.data, null, 2);
+        this.comments.set(comments);
+        this.audits.set(audits);
       },
-      error: (e) => { this.loading.set(false); this.toast.error(e?.error?.error?.message || 'Could not load workflow instance'); },
+      error: (e) => this.toast.error(e?.error?.error?.message || 'Could not load workflow instance'),
     });
-    this.api.listComments(this.id).subscribe((c) => this.comments.set(c));
-    this.api.listAudits(this.id).subscribe((a) => this.audits.set(a));
   }
 
   saveData() {
+    if (this.isReadOnly()) { this.toast.error('Workflow instance is read-only'); return; }
     let data: Record<string, unknown>;
     try { data = JSON.parse(this.dataText); } catch { this.dataError.set('Must be valid JSON'); return; }
     this.dataError.set('');
@@ -169,6 +203,7 @@ export class WorkflowInstanceDetailComponent {
   }
 
   async updateStatus() {
+    if (this.isReadOnly()) { this.toast.error('Workflow instance is read-only'); return; }
     const next = await this.modal.prompt({ title: 'Update status', message: 'New business status for this case', initialValue: this.agg()?.workflowInstance.status || '' });
     if (!next?.trim()) return;
     this.api.updateStatus(this.id, next.trim()).subscribe({
@@ -178,6 +213,7 @@ export class WorkflowInstanceDetailComponent {
   }
 
   async sendSignal() {
+    if (this.isReadOnly()) { this.toast.error('Workflow instance is read-only'); return; }
     const name = await this.modal.prompt({ title: 'Send signal', message: 'Signal name', placeholder: 'DocumentsReceived' });
     if (!name?.trim()) return;
     this.api.signal(this.id, name.trim()).subscribe({
@@ -187,6 +223,7 @@ export class WorkflowInstanceDetailComponent {
   }
 
   async decide(t: Task) {
+    if (this.isReadOnly()) { this.toast.error('Workflow instance is read-only'); return; }
     const raw = await this.modal.prompt({ title: `Decision — ${t.name}`, message: 'Outputs (JSON)', initialValue: '{}' });
     if (raw == null) return;
     let outputs: Record<string, unknown>;
@@ -198,6 +235,7 @@ export class WorkflowInstanceDetailComponent {
   }
 
   async delegate(t: Task) {
+    if (this.isReadOnly()) { this.toast.error('Workflow instance is read-only'); return; }
     const to = await this.modal.prompt({ title: `Delegate — ${t.name}`, message: 'Delegate to user' });
     if (!to?.trim()) return;
     this.api.delegate(this.id, to.trim(), t.id).subscribe({
@@ -207,25 +245,34 @@ export class WorkflowInstanceDetailComponent {
   }
 
   addComment() {
-    if (!this.newComment.trim()) return;
-    this.api.addComment(this.id, this.newComment.trim()).subscribe({
+    if (this.isReadOnly()) { this.toast.error('Workflow instance is read-only'); return; }
+    const body = this.newComment.trim(); if (!body) return;
+    this.api.addComment(this.id, body).subscribe({
       next: () => { this.newComment = ''; this.api.listComments(this.id).subscribe((c) => this.comments.set(c)); },
       error: (e) => this.toast.error(e?.error?.error?.message || 'Comment failed'),
     });
   }
   async deleteComment(c: WorkflowInstanceComment) {
+    if (this.isReadOnly()) return;
     if (!(await this.modal.confirm({ title: 'Delete comment', message: 'Delete this comment?', danger: true, confirmLabel: 'Delete' }))) return;
     this.api.deleteComment(this.id, c.id).subscribe(() => this.api.listComments(this.id).subscribe((cs) => this.comments.set(cs)));
   }
 
   addAudit() {
-    if (!this.newAuditKind.trim()) return;
+    if (this.isReadOnly()) { this.toast.error('Workflow instance is read-only'); return; }
+    const kind = this.newAuditKind.trim(); if (!kind) return;
     let data: Record<string, unknown> | undefined;
     if (this.newAuditData.trim()) { try { data = JSON.parse(this.newAuditData); } catch { this.toast.error('Audit data must be valid JSON'); return; } }
     this.api.addAudit(this.id, this.newAuditKind.trim(), data).subscribe({
       next: () => { this.newAuditKind = ''; this.newAuditData = ''; this.api.listAudits(this.id).subscribe((a) => this.audits.set(a)); },
       error: (e) => this.toast.error(e?.error?.error?.message || 'Audit failed'),
     });
+  }
+
+  async deleteAudit(au: WorkflowInstanceAudit) {
+    if (this.isReadOnly()) return;
+    if (!(await this.modal.confirm({ title: 'Delete audit', message: 'Delete this audit note?', danger: true, confirmLabel: 'Delete' }))) return;
+    this.api.deleteAudit(this.id, au.id).subscribe(() => this.api.listAudits(this.id).subscribe((as) => this.audits.set(as)));
   }
   async deleteAudit(a: WorkflowInstanceAudit) {
     if (!(await this.modal.confirm({ title: 'Delete audit entry', message: 'Delete this audit entry?', danger: true, confirmLabel: 'Delete' }))) return;

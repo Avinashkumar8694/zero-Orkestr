@@ -7,6 +7,7 @@ import type { CallableProcess, Catalog, NodeSpec, Problem } from '../../core/mod
 import { PropertiesPanelComponent } from './properties-panel.component';
 import { ProblemsPanelComponent } from './problems-panel.component';
 import { IconComponent } from '../../shared/icon.component';
+import { MarkdownViewerComponent } from '../../shared/markdown-viewer.component';
 
 // A canvas node is just an engine node with x/y layout coords stored alongside (ignored by the SDK).
 interface CNode { id: string; type: string; name?: string; x: number; y: number; [k: string]: any; }
@@ -31,7 +32,7 @@ const COL_W = NW + 100, ROW_H = NH + 46;
 @Component({
   selector: 'app-process-canvas',
   standalone: true,
-  imports: [IconComponent, FormsModule, PropertiesPanelComponent, ProblemsPanelComponent],
+  imports: [IconComponent, FormsModule, PropertiesPanelComponent, ProblemsPanelComponent, MarkdownViewerComponent],
   template: `
     <div class="builder">
       <div class="body">
@@ -47,6 +48,7 @@ const COL_W = NW + 100, ROW_H = NH + 46;
                        (click)="addFromPalette(n)" [title]="'Drag onto canvas, or click to add: ' + n.label">
                     <span class="pic" [style.background]="visual(n.engineType).color"><app-icon [name]="visual(n.engineType).icon" [size]="13" /></span>
                     <span class="plabel">{{ n.label }}</span>
+                    <button type="button" class="p-info" (pointerdown)="$event.stopPropagation()" (click)="$event.stopPropagation(); openDocsFor(n.engineType, n.label)" title="View documentation and scenarios" aria-label="Documentation"><app-icon name="info" [size]="12" /></button>
                   </div>
                 }
               </div>
@@ -74,7 +76,8 @@ const COL_W = NW + 100, ROW_H = NH + 46;
               @for (n of nodes(); track n.id) {
                 <div class="node" [attr.id]="'node-' + n.id" [class.sel]="selNode()?.id===n.id" [class.linking]="linkFrom()===n.id"
                      [class.droptarget]="linkFrom() && linkFrom()!==n.id && hasIn(n.type)"
-                     [class.has-err]="hasErr(n.id)" [class.has-warn]="!hasErr(n.id) && hasWarn(n.id)"
+                     [class.has-err]="hasErr(n.id) || !isSupported(n.type)" [class.has-warn]="!hasErr(n.id) && isSupported(n.type) && hasWarn(n.id)"
+                     [class.node-unsupported]="!isSupported(n.type)"
                      [class.node-circle]="isCircle(n.type)"
                      [class.node-diamond]="isDiamond(n.type)"
                      [class.node-rectangle]="isRectangle(n.type)"
@@ -86,8 +89,13 @@ const COL_W = NW + 100, ROW_H = NH + 46;
                      [title]="nodeTooltip(n)"
                      (pointerdown)="startDrag($event, n)" (pointerup)="onNodePointerUp($event, n)"
                      (click)="selectNode($event, n)" (dblclick)="$event.stopPropagation(); openNodeEditor(n)">
-                  @if (hasErr(n.id)) { <span class="nmark err" [title]="nodeProblemTooltip(n.id)" (click)="$event.stopPropagation(); openNodeProblems(n.id)">!</span> }
-                  @else if (hasWarn(n.id)) { <span class="nmark warn" [title]="nodeProblemTooltip(n.id)" (click)="$event.stopPropagation(); openNodeProblems(n.id)">!</span> }
+                  @if (!isSupported(n.type)) {
+                    <span class="nmark err" title="Unsupported construct: click to view recommendations" (click)="$event.stopPropagation(); openNodeProblems(n.id)">!</span>
+                  } @else if (hasErr(n.id)) {
+                    <span class="nmark err" [title]="nodeProblemTooltip(n.id)" (click)="$event.stopPropagation(); openNodeProblems(n.id)">!</span>
+                  } @else if (hasWarn(n.id)) {
+                    <span class="nmark warn" [title]="nodeProblemTooltip(n.id)" (click)="$event.stopPropagation(); openNodeProblems(n.id)">!</span>
+                  }
                   @if (hasIn(n.type)) { <span class="port in" title="Incoming"></span> }
 
                   @if (isCircle(n.type)) {
@@ -102,12 +110,21 @@ const COL_W = NW + 100, ROW_H = NH + 46;
                     <div class="ntitle diamond-label">{{ n.name || labelFor(n) }}</div>
                   } @else {
                     <span class="chip" [style.background]="visual(n.type).color"><app-icon [name]="visual(n.type).icon" [size]="13" /></span>
-                    <div class="ntitle">{{ n.name || labelFor(n) }}</div>
+                    <div class="ntitle">
+                      @if (!isSupported(n.type)) { <span class="unsupp-tag">[UNSUPPORTED]</span> }
+                      {{ n.name || labelFor(n) }}
+                    </div>
                     @if (n.type === 'call') { <span class="call-badge" title="Call Activity / Sub-process">[+]</span> }
                   }
 
                   @if (hasOut(n.type)) { <span class="port out" title="Drag to a target node to connect" (pointerdown)="startLink($event, n)" (click)="$event.stopPropagation()"></span> }
                   @if (selNode()?.id===n.id) {
+                    <button class="ninfo" (pointerdown)="$event.stopPropagation()" (click)="$event.stopPropagation(); openDocsFor(n.type, labelFor(n))" title="Documentation & Scenarios" aria-label="View node documentation"><app-icon name="info" [size]="12" /></button>
+                    @if (hasErr(n.id) || !isSupported(n.type)) {
+                      <button class="nreplace" (pointerdown)="$event.stopPropagation()" (click)="replaceNode(n.id)" title="Replace with a fresh node from palette (preserves connections)" aria-label="Replace node"><app-icon name="refresh" [size]="11" /></button>
+                    }
+                    <button class="ndup" (pointerdown)="$event.stopPropagation()" (click)="duplicateNode($event, n)" title="Duplicate node in this project (Ctrl+D / Cmd+D)" aria-label="Duplicate node"><app-icon name="plus" [size]="12" /></button>
+                    <button class="ncopy" (pointerdown)="$event.stopPropagation()" (click)="copyNode($event, n)" title="Copy node (Ctrl+C / Cmd+C)" aria-label="Copy node"><app-icon name="copy" [size]="12" /></button>
                     <button class="ndel" (pointerdown)="$event.stopPropagation()" (click)="del($event, n)" title="Delete" aria-label="Delete node"><app-icon name="trash" [size]="13" /></button>
                   }
                 </div>
@@ -151,6 +168,7 @@ const COL_W = NW + 100, ROW_H = NH + 46;
                         <div class="ptile" (click)="pickAdd(n)" [title]="n.label">
                           <span class="pic" [style.background]="visual(n.engineType).color"><app-icon [name]="visual(n.engineType).icon" [size]="13" /></span>
                           <span class="plabel">{{ n.label }}</span>
+                          <button type="button" class="p-info" (pointerdown)="$event.stopPropagation()" (click)="$event.stopPropagation(); openDocsFor(n.engineType, n.label)" title="View documentation and scenarios" aria-label="Documentation"><app-icon name="info" [size]="12" /></button>
                         </div>
                       }
                     </div>
@@ -172,16 +190,71 @@ const COL_W = NW + 100, ROW_H = NH + 46;
         </main>
       </div>
 
-      <app-problems-panel [problems]="problems()" [errorCount]="errorCount()" [warnCount]="warnCount()" (pick)="pickProblem($event)"></app-problems-panel>
+      <app-problems-panel [problems]="problems()" [errorCount]="errorCount()" [warnCount]="warnCount()" (pick)="pickProblem($event)" (replace)="replaceNode($event)" (clearActions)="clearNodeLifecycleActions($event)"></app-problems-panel>
 
       @if (editingNode(); as n) {
         <div class="modal-bg" (click)="closeNodeEditor()">
-          <div class="modal" (click)="$event.stopPropagation()">
-            <div class="modal-h"><span class="chip sm" [style.background]="visual(n.type).color"><app-icon [name]="visual(n.type).icon" [size]="13" /></span>{{ typeLabel(n) }}<span class="spacer"></span><button class="x" (click)="closeNodeEditor()" aria-label="Close"><app-icon name="close" [size]="15" /></button></div>
-            <div class="modal-body">
-              <label class="fld"><span>Node ID</span><input [value]="n.id" disabled /></label>
-              <app-properties-panel [node]="n" [allNodes]="nodes()" [sections]="schemaFor(n.type)" [assets]="assets" [ownVars]="procVars()" [callableProcesses]="callableProcesses()" (changed)="markDirty()"></app-properties-panel>
-              <button class="btn danger full" (click)="del($event, n); closeNodeEditor()">Delete node</button>
+          <div class="modal" [class.wide]="nodeModalTab() === 'docs'" (click)="$event.stopPropagation()">
+            <div class="modal-h">
+              <span class="chip sm" [style.background]="visual(n.type).color"><app-icon [name]="visual(n.type).icon" [size]="13" /></span>
+              <span>{{ typeLabel(n) }}</span>
+              <span class="spacer"></span>
+              <div class="m-tabs">
+                <button type="button" class="m-tab-btn" [class.active]="nodeModalTab() === 'props'" (click)="nodeModalTab.set('props')">Properties</button>
+                <button type="button" class="m-tab-btn" [class.active]="nodeModalTab() === 'docs'" (click)="nodeModalTab.set('docs')"><app-icon name="info" [size]="12" /> Guide & Docs</button>
+              </div>
+              <button class="x" (click)="closeNodeEditor()" aria-label="Close"><app-icon name="close" [size]="15" /></button>
+            </div>
+            @if (nodeModalTab() === 'props') {
+              <div class="modal-body">
+                @if (hasErr(n.id)) {
+                  <div class="node-err-banner">
+                    <app-icon name="alert-triangle" [size]="18" />
+                    <div class="node-err-body">
+                      <div class="node-err-msg"><strong>Validation Issue:</strong> {{ getErrorForNode(n.id)?.message }}</div>
+                      @if (getErrorForNode(n.id)?.remedy) {
+                        <div class="node-err-remedy"><strong>Recommendation:</strong> {{ getErrorForNode(n.id)?.remedy }}</div>
+                      }
+                    </div>
+                    <div class="node-err-actions">
+                      <button type="button" class="btn sm btn-node-replace" (click)="replaceNode(n.id)" title="Replace with a fresh node from palette, keeping connections">
+                        <app-icon name="refresh" [size]="12" /> Replace Node
+                      </button>
+                      @if (n['onEntry'] || n['onExit']) {
+                        <button type="button" class="btn sm" (click)="clearNodeLifecycleActions(n.id)">Clear Lifecycle Actions</button>
+                      }
+                    </div>
+                  </div>
+                }
+                <label class="fld"><span>Node ID</span><input [value]="n.id" disabled /></label>
+                <app-properties-panel [node]="n" [allNodes]="nodes()" [sections]="schemaFor(n.type)" [assets]="assets" [ownVars]="procVars()" [callableProcesses]="callableProcesses()" [cheatSheetContent]="cheatSheetContent()" [javaReferenceContent]="javaReferenceContent()" (changed)="markDirty()" (openCheatSheet)="openCheatSheet($event)"></app-properties-panel>
+                <div class="node-editor-footer-actions">
+                  <button type="button" class="btn outline" (click)="replaceNode(n.id)" title="Reset or replace this node with a fresh node of the same type">
+                    <app-icon name="refresh" [size]="12" /> Replace with Fresh Node
+                  </button>
+                  <button class="btn danger" (click)="del($event, n); closeNodeEditor()">Delete node</button>
+                </div>
+              </div>
+            } @else {
+              <div class="modal-body docs-scroll-pane">
+                <app-markdown-viewer [content]="readmeFor(n.type)" />
+              </div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (viewingDocs(); as doc) {
+        <div class="modal-bg" (click)="closeDocs()">
+          <div class="modal wide docs-modal" (click)="$event.stopPropagation()">
+            <div class="modal-h">
+              <span class="chip sm" [style.background]="visual(doc.engineType).color"><app-icon [name]="visual(doc.engineType).icon" [size]="13" /></span>
+              <span>{{ doc.label }} — Guide & Scenarios</span>
+              <span class="spacer"></span>
+              <button class="x" (click)="closeDocs()" aria-label="Close"><app-icon name="close" [size]="15" /></button>
+            </div>
+            <div class="modal-body docs-scroll-pane">
+              <app-markdown-viewer [content]="doc.content" />
             </div>
           </div>
         </div>
@@ -196,8 +269,16 @@ const COL_W = NW + 100, ROW_H = NH + 46;
                 <label class="fld"><span>Branch label</span><input [(ngModel)]="e.label" (ngModelChange)="onEdgeChange(e)" placeholder="e.g. Open, Close, Approved…" /></label>
                 <p class="hint">Shown on the canvas above this branch. Leave empty for a plain numbered branch.</p>
               }
-              <label class="fld"><span>Condition (js)</span><input [(ngModel)]="e.when" (ngModelChange)="onEdgeChange(e)" placeholder="e.g. amount > 1000" /></label>
-              <p class="hint">Leave empty for an unconditional / default flow.</p>
+              <label class="fld">
+                <div class="fld-lbl-row">
+                  <span>Condition (js)</span>
+                  <button type="button" class="cheat-pill" (click)="openCheatSheet()" title="View JavaScript & Flow Variables Cheat Sheet">
+                    <app-icon name="code" [size]="12" /> Cheat Sheet
+                  </button>
+                </div>
+                <input [(ngModel)]="e.when" (ngModelChange)="onEdgeChange(e)" placeholder="e.g. amount > 1000 &amp;&amp; riskTier === 'HIGH'" />
+              </label>
+              <p class="hint">Leave empty for an unconditional / default flow. Evaluates bare variables (<code>amount</code>), <code>vars.key</code>, or functional conditions.</p>
               <button class="btn danger full" (click)="delEdge(e.id); closeEdgeEditor()">Delete connection</button>
             </div>
           </div>
@@ -207,9 +288,16 @@ const COL_W = NW + 100, ROW_H = NH + 46;
       @if (showVars()) {
         <div class="modal-bg" (click)="closeVars()">
           <div class="modal" (click)="$event.stopPropagation()">
-            <div class="modal-h"><span>Process Variables</span><span class="spacer"></span><button class="x" (click)="closeVars()" aria-label="Close"><app-icon name="close" [size]="15" /></button></div>
+            <div class="modal-h">
+              <span>Process Variables</span>
+              <span class="spacer"></span>
+              <button type="button" class="cheat-pill mr-2" (click)="openCheatSheet()" title="View JavaScript & Flow Variables Cheat Sheet">
+                <app-icon name="code" [size]="12" /> JS &amp; Variables Cheat Sheet
+              </button>
+              <button class="x" (click)="closeVars()" aria-label="Close"><app-icon name="close" [size]="15" /></button>
+            </div>
             <div class="modal-body">
-              <p class="hint">Typed data this process carries. Referenced from scripts (kcontext), conditions, and data mappings.</p>
+              <p class="hint">Typed data this process carries. Access in scripts via bare names (<code>amount</code>), <code>vars.name</code>, or <code>getVariable('name')</code>.</p>
               @for (v of procVars(); track $index) {
                 <div class="vrow">
                   <input placeholder="name" [(ngModel)]="v.name" (ngModelChange)="markDirty()" />
@@ -221,6 +309,22 @@ const COL_W = NW + 100, ROW_H = NH + 46;
               }
               @if (!procVars().length) { <p class="muted">No variables yet.</p> }
               <button class="add" (click)="addVar()">+ add variable</button>
+            </div>
+          </div>
+        </div>
+      }
+
+      @if (showCheatSheet()) {
+        <div class="modal-bg" (click)="closeCheatSheet()">
+          <div class="modal wide docs-modal" (click)="$event.stopPropagation()">
+            <div class="modal-h">
+              <span class="chip sm" [style.background]="cheatSheetLang() === 'java' ? '#d97706' : '#0891b2'" style="color:#fff;"><app-icon name="code" [size]="13" /></span>
+              <span>{{ cheatSheetTitle() }}</span>
+              <span class="spacer"></span>
+              <button class="x" (click)="closeCheatSheet()" aria-label="Close"><app-icon name="close" [size]="15" /></button>
+            </div>
+            <div class="modal-body docs-scroll-pane">
+              <app-markdown-viewer [content]="cheatSheetContent()" />
             </div>
           </div>
         </div>
@@ -243,7 +347,10 @@ const COL_W = NW + 100, ROW_H = NH + 46;
     .ptile:hover { background: var(--primary-50); }
     .ptile:active { cursor: grabbing; }
     .pic { width: 24px; height: 24px; flex-shrink: 0; display: grid; place-items: center; border-radius: 7px; color: #fff; font-size: 12px; font-weight: 600; }
-    .plabel { font-size: 12.5px; color: var(--text); line-height: 1.3; }
+    .plabel { font-size: 12.5px; color: var(--text); line-height: 1.3; flex: 1; min-width: 0; }
+    .p-info { margin-left: auto; border: none; background: transparent; color: var(--muted); padding: 3px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; opacity: 0; transition: opacity .12s, background-color .12s, color .12s; flex-shrink: 0; }
+    .ptile:hover .p-info { opacity: 0.8; }
+    .p-info:hover { opacity: 1 !important; color: var(--primary, #3b82f6); background: var(--surface-2, rgba(0,0,0,0.06)); }
 
     .canvas { position: relative; flex: 1; overflow: hidden; }
     .scrollArea { position: absolute; inset: 0; overflow: auto; cursor: default;
@@ -270,7 +377,8 @@ const COL_W = NW + 100, ROW_H = NH + 46;
     .node.sel { border-color: var(--primary) !important; box-shadow: 0 0 0 3px rgba(91,61,245,.2), var(--shadow-card); }
     .node.linking { border-color: var(--primary); }
     .node.droptarget { border-color: var(--green) !important; box-shadow: 0 0 0 3px rgba(22,163,74,.22), var(--shadow-card); cursor: alias; }
-    .node.has-err { border-color: #ef4444 !important; }
+    .node.has-err { border-color: #ef4444 !important; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25), var(--shadow-card); }
+    .node.has-err:hover { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.4), var(--shadow-pop); }
     .node.has-warn { border-color: #f59e0b !important; }
 
     /* TASK / ACTIVITY RECTANGLE */
@@ -397,8 +505,29 @@ const COL_W = NW + 100, ROW_H = NH + 46;
       pointer-events: none;
     }
 
+    .node.node-unsupported {
+      border: 2px dashed #ef4444 !important;
+      background: #fff5f5 !important;
+      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+    }
+    .unsupp-tag {
+      font-size: 10px;
+      font-weight: 800;
+      color: #dc2626;
+      background: #fee2e2;
+      padding: 1px 5px;
+      border-radius: 4px;
+      margin-right: 4px;
+      display: inline-block;
+    }
+
     .nmark { position: absolute; top: -9px; left: -9px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #fff; box-shadow: var(--shadow-card); z-index: 6; }
-    .nmark.err { background: var(--red); } .nmark.warn { background: #d97706; }
+    .nmark.err { background: var(--red); cursor: pointer; animation: danger-pulse 2s infinite ease-in-out; }
+    .nmark.warn { background: #d97706; cursor: pointer; }
+    @keyframes danger-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.18); }
+    }
 
     .port { position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border-strong); transform: translateY(-50%); cursor: crosshair; z-index: 5; }
     .port:hover { border-color: var(--primary); background: #eae6ff; transform: translateY(-50%) scale(1.25); }
@@ -446,9 +575,38 @@ const COL_W = NW + 100, ROW_H = NH + 46;
     .modal-bg { position: fixed; inset: 0; background: rgba(16,24,40,.4); display: grid; place-items: center; z-index: 50; }
     .modal { background: var(--surface); border-radius: 14px; width: 480px; max-width: 92vw; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-pop); }
     .modal.narrow { width: 400px; }
+    .modal.wide { width: 880px; max-width: 95vw; height: 85vh; max-height: 85vh; }
+    .m-tabs { display: flex; gap: 4px; background: var(--surface-2, #f1f5f9); padding: 3px; border-radius: 8px; margin-right: 6px; }
+    .m-tab-btn { border: none; background: transparent; font-size: 12px; font-weight: 500; color: var(--muted); padding: 4px 10px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+    .m-tab-btn.active { background: var(--surface); color: var(--text-strong); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .docs-scroll-pane { padding: 18px 24px; overflow-y: auto; flex: 1; background: var(--surface); }
+    .ncopy { position: absolute; top: -12px; right: 22px; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-card); z-index: 6; }
+    .ncopy:hover { background: var(--surface-2); color: var(--primary); border-color: var(--primary); }
+    .ndup { position: absolute; top: -12px; right: 50px; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-card); z-index: 6; }
+    .ndup:hover { background: var(--surface-2); color: var(--primary); border-color: var(--primary); }
+    .ninfo { position: absolute; top: -12px; right: 78px; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--primary, #3b82f6); display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-card); z-index: 6; }
+    .ninfo:hover { background: var(--primary-50, #eff6ff); border-color: var(--primary); }
+    .nreplace { position: absolute; top: -12px; right: 106px; width: 24px; height: 24px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.4); background: #fef2f2; color: #dc2626; display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-card); z-index: 6; }
+    .nreplace:hover { background: #fee2e2; border-color: #dc2626; }
+    .node-err-banner {
+      display: flex; gap: 12px; align-items: flex-start;
+      background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 9px;
+      padding: 12px 14px; margin-bottom: 14px; color: #991b1b;
+    }
+    .node-err-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.45; }
+    .node-err-msg { color: #7f1d1d; }
+    .node-err-remedy { color: #991b1b; }
+    .node-err-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+    .btn-node-replace { background: #dc2626 !important; color: #fff !important; border: none !important; }
+    .btn-node-replace:hover { background: #b91c1c !important; }
+    .node-editor-footer-actions { display: flex; gap: 8px; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
     .modal-h { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--border); font-weight: 700; }
     .modal-h .chip.sm { width: 24px; height: 24px; border-radius: 7px; color: #fff; display: grid; place-items: center; font-size: 12px; }
     .modal-h .x { border: none; background: transparent; font-size: 16px; cursor: pointer; color: var(--muted); }
+    .fld-lbl-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .cheat-pill { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--surface-2, rgba(255,255,255,0.06)); border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; color: var(--primary); cursor: pointer; transition: all 0.15s ease; }
+    .cheat-pill:hover { background: var(--primary-50, rgba(99,102,241,0.15)); border-color: var(--primary); }
+    .mr-2 { margin-right: 8px; }
     .modal-body { padding: 16px 18px; overflow: auto; }
     .vrow { display: flex; gap: 8px; margin-bottom: 8px; }
     .vrow input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
@@ -493,6 +651,56 @@ export class ProcessCanvasComponent implements OnChanges {
   selEdge = signal<string | null>(null);
   editingNode = signal<CNode | null>(null);
   editingEdge = signal<CEdge | null>(null);
+  nodeModalTab = signal<'props' | 'docs'>('props');
+  viewingDocs = signal<{ engineType: string; label: string; content: string } | null>(null);
+
+  private readonly CLIPBOARD_PREFIX = 'pru_bpm_canvas_clipboard_';
+  projectClipboard = signal<CNode | null>(null);
+  clipboardNodeName = computed(() => this.projectClipboard()?.name || this.projectClipboard()?.id);
+  hasClipboard = computed(() => this.projectClipboard() !== null);
+
+  readmeFor(type: string): string {
+    return this.catalog()?.readmes?.[type] || 'No documentation available for this node.';
+  }
+
+  openDocsFor(engineType: string, label?: string) {
+    const content = this.readmeFor(engineType);
+    const displayLabel = label || this.catalog()?.typeLabels?.[engineType] || engineType;
+    this.viewingDocs.set({ engineType, label: displayLabel, content });
+  }
+
+  closeDocs() {
+    this.viewingDocs.set(null);
+  }
+
+  showCheatSheet = signal(false);
+  cheatSheetLang = signal<string>('js');
+
+  openCheatSheet(lang: string = 'js') {
+    this.cheatSheetLang.set(lang);
+    this.showCheatSheet.set(true);
+  }
+
+  closeCheatSheet() {
+    this.showCheatSheet.set(false);
+  }
+
+  cheatSheetTitle(): string {
+    return this.cheatSheetLang() === 'java'
+      ? 'Java & Imported Script Reference'
+      : 'JavaScript & Flow Variables Cheat Sheet';
+  }
+
+  cheatSheetContent(): string {
+    if (this.cheatSheetLang() === 'java') {
+      return this.catalog()?.javaReference || '# Java & Imported Script Reference\n\nNo Java reference content available.';
+    }
+    return this.catalog()?.cheatSheet || '# JavaScript & Flow Variables Cheat Sheet\n\nNo cheat sheet content available.';
+  }
+
+  javaReferenceContent(): string {
+    return this.catalog()?.javaReference || '# Java & Imported Script Reference\n\nNo Java reference content available.';
+  }
   linkFrom = signal<string | null>(null);
   linkError = signal<string>('');
   saveState = signal<'saved' | 'saving' | 'dirty'>('saved');
@@ -643,18 +851,67 @@ export class ProcessCanvasComponent implements OnChanges {
     if (e) { this.selEdge.set(e.id); this.selNode.set(null); }
   }
 
+  getErrorForNode(id: string): Problem | undefined {
+    return this.problems().find((p) => p.nodeId === id && p.severity === 'error') || this.problems().find((p) => p.nodeId === id);
+  }
+
+  replaceNode(nodeId: string) {
+    const current = this.nodes().find((n) => n.id === nodeId);
+    if (!current) return;
+    let targetType = current.type;
+    let spec = this.catalog()?.nodes.find((s) => s.engineType === targetType);
+    if (!spec || !this.isSupported(targetType)) {
+      targetType = 'script';
+      spec = this.catalog()?.nodes.find((s) => s.engineType === 'script');
+    }
+    const defaults = spec?.defaults ? JSON.parse(JSON.stringify(spec.defaults)) : { type: targetType, code: '// Replaced unsupported construct\nkcontext.setVariable("replaced", true);' };
+    const freshNode: CNode = {
+      ...defaults,
+      id: current.id, // Preserves sequence flow connections!
+      type: targetType,
+      name: current.name || spec?.label || targetType,
+      x: current.x,
+      y: current.y,
+    };
+    this.nodes.set(this.nodes().map((n) => (n.id === nodeId ? freshNode : n)));
+    if (this.selNode()?.id === nodeId) this.selNode.set(freshNode);
+    if (this.editingNode()?.id === nodeId) this.editingNode.set(freshNode);
+    this.markDirty();
+    this.toast.success(`Replaced "${current.name || current.type}" with a fresh ${targetType} task.`);
+    this.validate();
+  }
+
+  clearNodeLifecycleActions(nodeId: string) {
+    const current = this.nodes().find((n) => n.id === nodeId);
+    if (!current) return;
+    const updated: CNode = { ...current };
+    delete updated['onEntry'];
+    delete updated['onEntryLang'];
+    delete updated['onExit'];
+    delete updated['onExitLang'];
+    this.nodes.set(this.nodes().map((n) => (n.id === nodeId ? updated : n)));
+    if (this.selNode()?.id === nodeId) this.selNode.set(updated);
+    if (this.editingNode()?.id === nodeId) this.editingNode.set(updated);
+    this.markDirty();
+    this.toast.success(`Cleared lifecycle actions on "${current.name || current.type}".`);
+    this.validate();
+  }
+
   nodeProblemTooltip(id: string): string {
     const probs = this.problems().filter((p) => p.nodeId === id);
     if (!probs.length) return '';
-    return probs.map((p) => `[${p.severity.toUpperCase()}] ${p.rule}: ${p.message}`).join('\n');
+    return probs.map((p) => `[${p.severity.toUpperCase()}] ${p.rule}: ${p.message}${p.remedy ? '\n💡 Fix: ' + p.remedy : ''}`).join('\n\n');
   }
 
   nodeTooltip(n: CNode): string {
+    if (!this.isSupported(n.type)) {
+      return `[UNSUPPORTED CONSTRUCT] "${n.name || n.id}" (${n.type}) is not supported by the execution engine.\n💡 Recommendation: Click the refresh icon to replace this node with a supported task from the palette.`;
+    }
     const base = `${this.typeLabel(n)}${n.name ? ': ' + n.name : ''}`;
     const probs = this.problems().filter((p) => p.nodeId === n.id);
     if (!probs.length) return base;
-    const probSummary = probs.map((p) => `• [${p.severity.toUpperCase()}] ${p.message}`).join('\n');
-    return `${base}\n\nIssues:\n${probSummary}`;
+    const probSummary = probs.map((p) => `• [${p.severity.toUpperCase()}] ${p.message}${p.remedy ? '\n  💡 Fix: ' + p.remedy : ''}`).join('\n');
+    return `${base}\n\nValidation Issues:\n${probSummary}`;
   }
 
   openNodeProblems(id: string) {
@@ -667,6 +924,7 @@ export class ProcessCanvasComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['processId'] || changes['workflowId']) {
+      this.refreshProjectClipboard();
       this.selNode.set(null); this.selEdge.set(null); this.editingNode.set(null); this.editingEdge.set(null);
       this.zoom.set(1); this.panMode.set(false); this.addPopoverFor.set(null);
       if (!this.catalog()) this.api.catalog().subscribe((c) => this.catalog.set(c));
@@ -735,6 +993,10 @@ export class ProcessCanvasComponent implements OnChanges {
     const key = ev.dataTransfer?.getData('text/plain');
     const spec = this.catalog()?.nodes.find((s) => s.key === key);
     if (!spec) return;
+    if (!this.isSupported(spec.engineType)) {
+      this.toast.error(`Node type "${spec.engineType}" is not supported by the execution engine`);
+      return;
+    }
     const { x: px, y: py } = this.toLocal(ev.clientX, ev.clientY);
     const node: CNode = { id: this.newId(spec.engineType), ...(spec.defaults as any), name: (spec.defaults as any).name || spec.label, x: Math.max(10, Math.round(px)), y: Math.max(10, Math.round(py)) };
     this.nodes.set([...this.nodes(), node]);
@@ -745,6 +1007,10 @@ export class ProcessCanvasComponent implements OnChanges {
 
   /** Click-to-add fallback (works even where native HTML5 drag doesn't). */
   addFromPalette(spec: NodeSpec) {
+    if (!this.isSupported(spec.engineType)) {
+      this.toast.error(`Node type "${spec.engineType}" is not supported by the execution engine`);
+      return;
+    }
     const sel = this.selNode();
     const x = sel ? sel.x + 220 : 100 + (this.nodes().length % 4) * 220;
     const y = sel ? sel.y : 100 + Math.floor(this.nodes().length / 4) * 120;
@@ -756,6 +1022,7 @@ export class ProcessCanvasComponent implements OnChanges {
 
   // ---- inline "+" add: append (and connect) a node straight from an existing one ----
   canAddFrom(n: CNode): boolean {
+    if (!this.isSupported(n.type)) return false;
     if (!this.hasOut(n.type)) return false;
     const p = this.portsFor(n.type);
     const outCount = this.edges().filter((e) => e.from === n.id).length;
@@ -838,6 +1105,156 @@ export class ProcessCanvasComponent implements OnChanges {
     if (this.linkFrom() && this.linkMoved) { this.linkFrom.set(null); this.linkMoved = false; }
   }
 
+  // ---- Project-scoped Copy / Paste / Duplicate ----
+  refreshProjectClipboard() {
+    if (!this.workflowId) {
+      this.projectClipboard.set(null);
+      return;
+    }
+    try {
+      const raw = sessionStorage.getItem(this.CLIPBOARD_PREFIX + this.workflowId);
+      if (raw) {
+        const payload = JSON.parse(raw);
+        if (payload && payload.workflowId === this.workflowId && payload.node) {
+          this.projectClipboard.set(payload.node);
+          return;
+        }
+      }
+    } catch {}
+    this.projectClipboard.set(null);
+  }
+
+  copySelected() {
+    const n = this.selNode();
+    if (n) this.copyNode(undefined, n);
+  }
+
+  copyNode(ev?: Event, n?: CNode) {
+    if (ev) ev.stopPropagation();
+    const target = n || this.selNode();
+    if (!target) return;
+    const payload = {
+      workflowId: this.workflowId,
+      sourceProcessId: this.processId,
+      node: JSON.parse(JSON.stringify(target)),
+      copiedAt: new Date().toISOString(),
+    };
+    try {
+      sessionStorage.setItem(this.CLIPBOARD_PREFIX + this.workflowId, JSON.stringify(payload));
+    } catch {}
+    this.projectClipboard.set(payload.node);
+    this.toast.success(`Copied "${target.name || target.id}" to project clipboard`);
+  }
+
+  canPaste(): boolean {
+    return this.hasClipboard();
+  }
+
+  pasteNode() {
+    let payload: { workflowId: string; node: CNode } | null = null;
+    try {
+      const raw = sessionStorage.getItem(this.CLIPBOARD_PREFIX + this.workflowId);
+      if (raw) payload = JSON.parse(raw);
+    } catch {}
+
+    if (!payload || payload.workflowId !== this.workflowId || !payload.node) {
+      this.toast.error('Nothing copied to clipboard for this project. Select a node and press Ctrl+C / Cmd+C first.');
+      return;
+    }
+
+    const base = payload.node;
+    const baseType = base.type || 'task';
+    let newId = `${baseType}_${++this.idc}_${Date.now().toString(36).slice(-3)}`;
+    while (this.nodes().some((x) => x.id === newId)) {
+      newId = `${baseType}_${++this.idc}_${Date.now().toString(36).slice(-3)}`;
+    }
+
+    let newX = (base.x || 100) + 40;
+    let newY = (base.y || 100) + 40;
+    while (this.nodes().some((n) => Math.abs(n.x - newX) < 15 && Math.abs(n.y - newY) < 15)) {
+      newX += 30;
+      newY += 30;
+    }
+
+    const newNode: CNode = {
+      ...JSON.parse(JSON.stringify(base)),
+      id: newId,
+      name: base.name ? `${base.name} (Copy)` : newId,
+      x: newX,
+      y: newY,
+    };
+
+    this.nodes.set([...this.nodes(), newNode]);
+    this.selNode.set(newNode);
+    this.selEdge.set(null);
+    this.markDirty();
+    this.toast.success(`Pasted "${newNode.name}" into canvas`);
+  }
+
+  duplicateNode(ev?: Event, n?: CNode) {
+    if (ev) ev.stopPropagation();
+    const target = n || this.selNode();
+    if (!target) return;
+    this.copyNode(undefined, target);
+    this.pasteNode();
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onKeyDown(ev: KeyboardEvent) {
+    if (this.editingNode() || this.editingEdge() || this.showVars() || this.showCheatSheet() || this.viewingDocs()) {
+      return;
+    }
+
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (activeEl) {
+      const tag = activeEl.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || activeEl.isContentEditable || activeEl.closest('.modal') || activeEl.closest('.modal-bg')) {
+        return;
+      }
+    }
+
+    const isMod = ev.ctrlKey || ev.metaKey;
+
+    // Ctrl+C / Cmd+C -> Copy
+    if (isMod && (ev.key === 'c' || ev.key === 'C')) {
+      if (this.selNode()) {
+        ev.preventDefault();
+        this.copySelected();
+      }
+      return;
+    }
+
+    // Ctrl+V / Cmd+V -> Paste
+    if (isMod && (ev.key === 'v' || ev.key === 'V')) {
+      if (this.canPaste()) {
+        ev.preventDefault();
+        this.pasteNode();
+      }
+      return;
+    }
+
+    // Ctrl+D / Cmd+D -> Duplicate
+    if (isMod && (ev.key === 'd' || ev.key === 'D')) {
+      if (this.selNode()) {
+        ev.preventDefault();
+        this.duplicateNode(undefined, this.selNode()!);
+      }
+      return;
+    }
+
+    // Delete or Backspace -> Delete selected node or edge
+    if (ev.key === 'Delete' || ev.key === 'Backspace') {
+      if (this.selNode()) {
+        ev.preventDefault();
+        this.del(ev, this.selNode()!);
+      } else if (this.selEdge()) {
+        ev.preventDefault();
+        this.delEdge(this.selEdge()!);
+      }
+      return;
+    }
+  }
+
   /** Screen (clientX/Y) → logical canvas coordinates, correcting for the CSS `zoom` on `.zoomlayer`
    *  (zoom rescales rendered/hit-tested size, so raw client-space deltas must be divided back down). */
   private toLocal(clientX: number, clientY: number): { x: number; y: number } {
@@ -851,7 +1268,7 @@ export class ProcessCanvasComponent implements OnChanges {
   selectNode(ev: Event, n: CNode) { ev.stopPropagation(); if (this.linkFrom()) { this.completeLink(n); return; } this.selNode.set(n); this.selEdge.set(null); }
   selectEdge(ev: Event, e: CEdge) { ev.stopPropagation(); this.selEdge.set(e.id); this.selNode.set(null); }
   bgClick() { this.linkFrom.set(null); this.linkMoved = false; this.linkError.set(''); this.selNode.set(null); this.selEdge.set(null); this.addPopoverFor.set(null); }
-  openNodeEditor(n: CNode) { this.selNode.set(n); this.selEdge.set(null); this.editingNode.set(n); }
+  openNodeEditor(n: CNode) { this.selNode.set(n); this.selEdge.set(null); this.editingNode.set(n); this.nodeModalTab.set('props'); }
   closeNodeEditor() { this.editingNode.set(null); }
   openEdgeEditor(e: CEdge) { this.selEdge.set(e.id); this.selNode.set(null); this.editingEdge.set(e); }
   closeEdgeEditor() { this.editingEdge.set(null); }
@@ -896,12 +1313,31 @@ export class ProcessCanvasComponent implements OnChanges {
   }
   // per-node config from the backend catalog (single source of truth for ports + property schema)
   portsFor(type: string) { return this.catalog()?.ports?.[type] || {}; }
-  hasIn(type: string) { return this.portsFor(type).maxIn !== 0; }    // input port unless maxIn is 0
-  hasOut(type: string) { return this.portsFor(type).maxOut !== 0; }  // output port unless maxOut is 0
+  isSupported(type: string): boolean {
+    if (!type) return false;
+    const cat = this.catalog();
+    if (!cat) return true; // loading fallback
+    return Boolean(cat.ports && cat.ports[type]);
+  }
+  hasIn(type: string) {
+    if (!this.isSupported(type)) return false;
+    return this.portsFor(type).maxIn !== 0;
+  }
+  hasOut(type: string) {
+    if (!this.isSupported(type)) return false;
+    return this.portsFor(type).maxOut !== 0;
+  }
   schemaFor(type: string) { return this.catalog()?.schemas?.[type] || []; }
 
   /** Connection validity from each node type's declared ports + cardinality (matches the backend). */
   canConnect(from: CNode, to: CNode): { ok: boolean; reason?: string } {
+    if (from.id === to.id) return { ok: false, reason: 'Self-connecting loop is not permitted on a single node' };
+    if (!this.isSupported(from.type)) {
+      return { ok: false, reason: `Node "${from.name || from.id}" (${from.type}) is an unsupported construct and cannot connect to other nodes. Recommendation: Replace with a supported task from the palette.` };
+    }
+    if (!this.isSupported(to.type)) {
+      return { ok: false, reason: `Node "${to.name || to.id}" (${to.type}) is an unsupported construct and cannot receive incoming connections. Recommendation: Replace with a supported task from the palette.` };
+    }
     const fp = this.portsFor(from.type), tp = this.portsFor(to.type);
     if (fp.maxOut === 0) return { ok: false, reason: `A ${from.type} has no outgoing connection` };
     if (tp.maxIn === 0) return { ok: false, reason: `A ${to.type} has no incoming connection` };
@@ -1124,7 +1560,17 @@ export class ProcessCanvasComponent implements OnChanges {
   validate() {
     this.api.validateProcess(this.buildProcess()).subscribe((r) => {
       this.problems.set(r.problems);
-      this.toast[r.ok ? 'success' : 'error'](r.ok ? 'Process is valid' : `${r.errors.length} error(s) — see the problems panel`);
+      const panel = this.problemsPanel();
+      if (!r.ok && panel) {
+        panel.collapsed.set(false);
+      }
+      if (r.ok) {
+        this.toast.success('Process is valid and ready for build & deployment.');
+      } else {
+        const firstErr = r.errors[0];
+        const remedyText = firstErr?.remedy ? `\n💡 Fix: ${firstErr.remedy}` : '';
+        this.toast.error(`${r.errors.length} validation error(s) found:\n${firstErr?.message}${remedyText}`);
+      }
     });
   }
 

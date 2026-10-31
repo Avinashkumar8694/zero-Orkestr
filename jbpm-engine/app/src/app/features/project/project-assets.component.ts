@@ -1,4 +1,4 @@
-import { Component, HostListener, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ProjectContextService } from './project-context.service';
@@ -6,6 +6,8 @@ import { ToastService } from '../../shared/toast.service';
 import { ModalService } from '../../shared/modal.service';
 import { IconComponent } from '../../shared/icon.component';
 import { AssetFieldsComponent } from './asset-fields.component';
+import { MarkdownViewerComponent } from '../../shared/markdown-viewer.component';
+import { WorkflowApiService } from '../../core/api/workflow-api.service';
 
 interface ExtraField {
   key: string;
@@ -95,9 +97,9 @@ interface AssetRow {
 @Component({
   selector: 'app-project-assets',
   standalone: true,
-  imports: [FormsModule, IconComponent, AssetFieldsComponent],
+  imports: [FormsModule, IconComponent, AssetFieldsComponent, MarkdownViewerComponent],
   template: `
-    <p class="hint">Assets are shared across the project's processes and become real jBPM assets on export. Nodes link to them by name (business rule tasks reference a DRL ruleset's group, forms are picked by name on user tasks, and so on).</p>
+    <p class="hint">Assets are shared across the project's processes and can be exported as standard artifacts. Nodes link to them by name (business rule tasks reference a DRL ruleset's group, forms are picked by name on user tasks, and so on).</p>
 
     <div class="toolbar">
       <input class="search" placeholder="Search assets…" [(ngModel)]="q" />
@@ -112,9 +114,14 @@ interface AssetRow {
           <span>All assets</span><span class="badge">{{ allRows().length }}</span>
         </button>
         @for (k of ctx.assetKinds(); track k.key) {
-          <button class="krow" [class.active]="kindFilter() === k.key" (click)="kindFilter.set(k.key)">
-            <span>{{ k.label }}</span><span class="badge">{{ (ctx.assets()[k.key] || []).length }}</span>
-          </button>
+          <div class="krow-wrap" [class.active]="kindFilter() === k.key">
+            <button class="krow" [class.active]="kindFilter() === k.key" (click)="kindFilter.set(k.key)">
+              <span>{{ k.label }}</span><span class="badge">{{ (ctx.assets()[k.key] || []).length }}</span>
+            </button>
+            <button type="button" class="k-info-btn" (click)="$event.stopPropagation(); openAssetDocs(k.key, k.label)" title="View {{ k.label }} documentation & examples" aria-label="Documentation">
+              <app-icon name="info" [size]="13" />
+            </button>
+          </div>
         }
       </aside>
 
@@ -153,6 +160,7 @@ interface AssetRow {
                         <div class="rowmenu card">
                           <button class="mrow" (click)="openDetail(a); menuFor.set(null)"><app-icon name="file" [size]="13" /> Open</button>
                           <button class="mrow" (click)="rename(a); menuFor.set(null)"><app-icon name="edit" [size]="13" /> Rename</button>
+                          <button class="mrow" (click)="duplicateAsset(a); menuFor.set(null)"><app-icon name="copy" [size]="13" /> Duplicate</button>
                           <button class="mrow danger" [disabled]="a.usedBy > 0" [title]="a.usedBy > 0 ? 'Referenced by ' + a.usedBy + ' node(s)' : ''" (click)="ctx.removeAsset(a.kind, a.name, a.usedBy); menuFor.set(null)"><app-icon name="trash" [size]="13" /> Delete</button>
                         </div>
                       }
@@ -211,6 +219,9 @@ interface AssetRow {
               <button class="subtab-btn" [class.active]="detailTab() === 'test'" (click)="openTestTab(d)">
                 <app-icon name="play" [size]="13" /> Test & Simulate
               </button>
+              <button class="subtab-btn" [class.active]="detailTab() === 'docs'" (click)="detailTab.set('docs')">
+                <app-icon name="info" [size]="13" /> Guide & Docs
+              </button>
             </div>
 
             @if (detailTab() === 'config') {
@@ -243,6 +254,7 @@ interface AssetRow {
               <div class="row actionrow">
                 <button class="btn primary sm" (click)="saveDetail()">Save</button>
                 <button class="btn sm" (click)="rename(d.row)">Rename</button>
+                <button class="btn sm" (click)="duplicateAsset(d.row)"><app-icon name="copy" [size]="12" /> Duplicate</button>
                 <button class="btn sm danger" [disabled]="d.row.usedBy > 0" [title]="d.row.usedBy > 0 ? 'Referenced by ' + d.row.usedBy + ' node(s)' : ''" (click)="deleteFromDetail(d.row)">Delete</button>
               </div>
             } @else {
@@ -298,7 +310,7 @@ interface AssetRow {
                 } @else if (d.row.kind === 'types') {
                   <div class="java-preview-card card">
                     <div class="java-hdr">
-                      <span>Generated jBPM Data Object POJO ({{ d.raw.package || 'com.acme.model' }}.{{ d.raw.name }})</span>
+                      <span>Generated Data Object POJO ({{ d.raw.package || 'com.acme.model' }}.{{ d.raw.name }})</span>
                       <button class="btn sm ghost" (click)="copyJava(generateJavaPojo(d.raw))">
                         {{ copiedJava() ? 'Copied!' : 'Copy .java' }}
                       </button>
@@ -375,6 +387,12 @@ interface AssetRow {
                 }
               </div>
             }
+
+            @if (detailTab() === 'docs') {
+              <div class="docs-scroll-pane">
+                <app-markdown-viewer [content]="assetDocsContent(d.row.kind)" />
+              </div>
+            }
           </div>
         </div>
       </div>
@@ -425,6 +443,22 @@ interface AssetRow {
         </div>
       </div>
     }
+
+    @if (viewingAssetDocs(); as adoc) {
+      <div class="modal-bg" (click)="closeAssetDocs()">
+        <div class="modal wide" (click)="$event.stopPropagation()">
+          <div class="modal-h">
+            <app-icon name="info" [size]="15" />
+            <span>{{ adoc.label }} — Specification & Documentation</span>
+            <span class="spacer"></span>
+            <button class="x" (click)="closeAssetDocs()" aria-label="Close"><app-icon name="close" [size]="15" /></button>
+          </div>
+          <div class="modal-body docs-scroll-pane">
+            <app-markdown-viewer [content]="adoc.content" />
+          </div>
+        </div>
+      </div>
+    }
   `,
   styles: [`
     .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; max-width: 760px; line-height: 1.5; }
@@ -435,6 +469,14 @@ interface AssetRow {
     .rail { padding: 14px; }
     .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; margin: 14px 0 8px; }
     .section-title.first { margin-top: 0; }
+    .krow-wrap { display: flex; align-items: center; border-radius: var(--radius-sm); transition: background-color .12s; margin-bottom: 2px; }
+    .krow-wrap:hover { background: var(--surface-3); }
+    .krow-wrap.active { background: var(--primary-50); }
+    .krow-wrap .krow { flex: 1; margin-bottom: 0; }
+    .k-info-btn { border: none; background: transparent; color: var(--muted); padding: 5px 6px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; opacity: 0; transition: opacity .12s, color .12s; margin-right: 4px; }
+    .krow-wrap:hover .k-info-btn { opacity: 0.8; }
+    .k-info-btn:hover { opacity: 1 !important; color: var(--primary, #3b82f6); background: var(--surface-2); }
+    .docs-scroll-pane { padding: 18px 24px; overflow-y: auto; flex: 1; max-height: 72vh; background: var(--surface); }
     .krow { display: flex; align-items: center; justify-content: space-between; width: 100%; border: none; background: none; padding: 7px 8px; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; color: var(--text-secondary); text-align: left; }
     .krow:hover { background: var(--surface-3); }
     .krow.active { background: var(--primary-50); color: var(--primary); font-weight: 600; }
@@ -542,8 +584,9 @@ interface AssetRow {
     .prow-main { font-size: 13px; font-weight: 500; }
   `],
 })
-export class ProjectAssetsComponent {
+export class ProjectAssetsComponent implements OnInit {
   ctx = inject(ProjectContextService);
+  private api = inject(WorkflowApiService);
   private toast = inject(ToastService);
   private modal = inject(ModalService);
   private router = inject(Router);
@@ -563,9 +606,32 @@ export class ProjectAssetsComponent {
 
   detail = signal<{ row: AssetRow; usedBy: { kind: string; process: string; processId?: string; nodeId?: string; nodeName?: string; via: string }[]; raw: any } | null>(null);
   detailError = signal('');
-  detailTab = signal<'config' | 'test'>('config');
+  detailTab = signal<'config' | 'test' | 'docs'>('config');
 
   usageModalFor = signal<AssetRow | null>(null);
+  assetReadmes = signal<Record<string, string>>({});
+  viewingAssetDocs = signal<{ kind: string; label: string; content: string } | null>(null);
+
+  ngOnInit() {
+    this.api.catalog().subscribe((c) => {
+      if (c?.assetReadmes) {
+        this.assetReadmes.set(c.assetReadmes);
+      }
+    });
+  }
+
+  assetDocsContent(kind: string): string {
+    return this.assetReadmes()[kind] || 'No documentation available for this asset type.';
+  }
+
+  openAssetDocs(kind: string, label: string) {
+    const content = this.assetDocsContent(kind);
+    this.viewingAssetDocs.set({ kind, label, content });
+  }
+
+  closeAssetDocs() {
+    this.viewingAssetDocs.set(null);
+  }
 
   // Test & Simulation State
   testLoading = signal<boolean>(false);
@@ -758,7 +824,7 @@ export class ProjectAssetsComponent {
       case 'decisionTrees': return 'Traverse decision tree conditions and execute leaf node action consequences.';
       case 'scorecards': return 'Calculate baseline and characteristic score weights against input attributes.';
       case 'enumerations': return 'Validate allowed enumeration values and test form/task dropdown integration.';
-      case 'types': return 'Preview generated Java POJO data object definition with getters and setters for jBPM engine compatibility.';
+      case 'types': return 'Preview generated Java POJO data object definition with getters and setters.';
       case 'messages': return 'Validate BPMN 2.0 message contract, correlation property, and payload structure.';
       case 'tests': return 'Execute all test scenario cases against the target asset and verify expected vs actual outcomes.';
       default: return 'Test asset logic and execution.';
@@ -822,7 +888,7 @@ export class ProjectAssetsComponent {
     const className = type?.name || 'DataObject';
     const fields = Array.isArray(type?.fields) ? type.fields : [];
     let code = `package ${pkg};\n\n`;
-    code += `/**\n * jBPM Data Object: ${className}\n */\n`;
+    code += `/**\n * Data Object: ${className}\n */\n`;
     code += `public class ${className} implements java.io.Serializable {\n\n`;
     code += `    private static final long serialVersionUID = 1L;\n\n`;
     for (const f of fields) {
@@ -873,6 +939,23 @@ export class ProjectAssetsComponent {
     this.ctx.updateAsset(row.kind, row.name, { [nameField]: next.trim() }).subscribe({
       next: () => { this.toast.success('Renamed'); this.closeDetail(); this.ctx.loadAssets(); },
       error: (e) => this.toast.error(e?.error?.error?.message || 'Rename failed'),
+    });
+  }
+
+  async duplicateAsset(row: AssetRow) {
+    this.menuFor.set(null);
+    const next = await this.modal.prompt({
+      title: `Duplicate ${row.kindLabel}`,
+      initialValue: `${row.name}_Copy`,
+    });
+    if (!next || !next.trim() || next.trim() === row.name) return;
+    const newName = next.trim();
+    this.ctx.duplicateAsset(row.kind, row.name, newName).subscribe({
+      next: () => {
+        this.toast.success(`Duplicated "${row.name}" as "${newName}"`);
+        this.ctx.loadAssets();
+      },
+      error: (e: any) => this.toast.error(e?.error?.error?.message || 'Failed to duplicate asset'),
     });
   }
 

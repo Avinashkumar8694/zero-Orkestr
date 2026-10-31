@@ -37,6 +37,18 @@ export const handler: NodeHandler = async (c) => {
   // A dependent child that already finished (aborted/failed) synchronously — inside this very
   // startChild() call, never having parked in a wait — must be raised here; falling through to the
   // wait-on-child branch below would park the parent on a child that will never complete or resume.
-  if (child.status === 'aborted' || child.status === 'failed') return { error: `called process ${child.status}`, errorCode: 'CALL_ERROR', outcome: `called:${child.id}` };
+  if (child.status === 'aborted' || child.status === 'failed') {
+    return {
+      error: `called process ${child.status}`,
+      errorCode: 'CALL_ERROR',
+      errorDetails: {
+        childProcessId: resolved.processId,
+        childInstanceId: child.id,
+        childStatus: child.status,
+        childError: child.error,
+      },
+      outcome: `called:${child.id}`,
+    };
+  }
   return { wait: { kind: 'child', ref: child.id }, outcome: `called:${child.id}` };
 };

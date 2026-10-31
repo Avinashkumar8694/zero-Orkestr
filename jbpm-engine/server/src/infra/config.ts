@@ -10,8 +10,24 @@ export interface Config {
   domain: string;
   port: number;
   dataDir: string;
+  /** Storage backend: 'file' for zero-dependency local dev; 'pg' for staging/production multi-replica. */
   store: 'file' | 'pg';
+  /** Full PostgreSQL connection URL (e.g. postgresql://user:pass@host:5432/dbname or via PgBouncer :6432) */
   pgUrl?: string;
+  /** Maximum client connections in the PostgreSQL connection pool (default: 20 per replica) */
+  pgPoolMax: number;
+  /** Idle timeout (ms) before an unused connection is closed from the pool (default: 30000) */
+  pgPoolIdleTimeoutMs: number;
+  /** Connection timeout (ms) when acquiring a new connection from PostgreSQL (default: 5000) */
+  pgPoolConnectionTimeoutMs: number;
+  /** Process role: 'all' (API + Timer Worker), 'api' (stateless HTTP/WS only), 'worker' (background scheduler only) */
+  role: 'all' | 'api' | 'worker';
+  /** Interval in ms between timer scheduler ticks (default: 5000) */
+  timerTickIntervalMs: number;
+  /** Max due timer jobs to fetch and process in a single tick batch (default: 50) */
+  timerBatchSize: number;
+  /** 32-bit integer key for PostgreSQL advisory lock to coordinate active-active timer ticks (default: 424242) */
+  timerAdvisoryLockKey: number;
   jwtSecret: string;
   /** used only to seed the very first 'admin' user when no users exist yet at boot. */
   adminInitialPassword: string;
@@ -94,6 +110,7 @@ const csv = (v?: string) => (v || '').split(',').map((h) => h.trim()).filter(Boo
 const pick = (...names: string[]) => names.map((n) => env[n]?.trim()).find(Boolean);
 const oidcClientId = pick('OIDC_CLIENT_ID', 'IDS_CLIENT_ID');
 const port = Number(env.PORT || 4000);
+// (the production JWT-secret guard lives in assertProductionConfig(), called at boot: it also rejects short secrets)
 
 export const config: Config = {
   appName: env.APP_NAME || 'Orkestr',
@@ -101,9 +118,16 @@ export const config: Config = {
   port,
   dataDir: env.DATA_DIR || path.resolve(process.cwd(), '.data'),
   store: (env.STORE as 'file' | 'pg') || 'file',
-  // matches docker-compose.yml's default postgres service — `STORE=pg` works with zero extra config
+  // matches docker-compose.yml's postgres service — `STORE=pg` works with zero extra config
   // once that container is up (see jbpm-engine/docker-compose.yml, `npm run docker:up`).
-  pgUrl: env.PG_URL || 'postgresql://jbpm:jbpm@localhost:5433/jbpm',
+  pgUrl: env.PG_URL || 'postgresql://jbpm:jbpm@localhost:5434/jbpm',
+  pgPoolMax: Number(env.PG_POOL_MAX || 20),
+  pgPoolIdleTimeoutMs: Number(env.PG_POOL_IDLE_TIMEOUT_MS || 30000),
+  pgPoolConnectionTimeoutMs: Number(env.PG_POOL_CONNECTION_TIMEOUT_MS || 5000),
+  role: (env.ROLE as 'all' | 'api' | 'worker') || 'all',
+  timerTickIntervalMs: Number(env.TIMER_TICK_INTERVAL_MS || 5000),
+  timerBatchSize: Number(env.TIMER_BATCH_SIZE || 50),
+  timerAdvisoryLockKey: Number(env.TIMER_ADVISORY_LOCK_KEY || 424242),
   jwtSecret: env.JWT_SECRET || 'dev-insecure-secret-change-me',
   adminInitialPassword: env.ADMIN_INITIAL_PASSWORD || 'admin-change-me',
   integrationBaseUrl: env.INTEGRATION_BASE_URL || `https://api.${env.DOMAIN || 'orkestr.io'}`,

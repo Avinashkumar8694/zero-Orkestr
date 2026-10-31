@@ -11,6 +11,8 @@
 import 'reflect-metadata';
 import { DataSource, Entity as TypeOrmEntity, PrimaryColumn, Column, Index } from 'typeorm';
 import type { Entity as DomainEntity, Repository, Store } from './repository.ts';
+import type { TimerJob } from '../domain.ts';
+import { config } from '../infra/config.ts';
 
 @TypeOrmEntity({ name: 'kv_store' })
 @Index(['collection', 'tenantId'])
@@ -63,7 +65,10 @@ export class PgStore implements Store {
   private ds?: DataSource;
   private dsPromise?: Promise<DataSource>;
   private repos = new Map<string, PgRepo<any>>();
-  constructor(private url: string) {}
+  constructor(
+    private url: string,
+    private poolOptions?: { max?: number; idleTimeoutMillis?: number; connectionTimeoutMillis?: number },
+  ) {}
 
   /** Lazily connects on first actual use (same idiom as FileRepo's own ensureLoaded()) — constructing
    *  a PgStore never itself requires an event loop tick or a reachable database. */
@@ -71,13 +76,74 @@ export class PgStore implements Store {
     if (this.ds) return Promise.resolve(this.ds);
     if (!this.dsPromise) {
       this.dsPromise = new DataSource({
-        type: 'postgres', url: this.url, entities: [KvRow],
+        type: 'postgres',
+        url: this.url,
+        entities: [KvRow],
         // One trivial, schema-less table — safe to auto-create/reconcile; a real multi-table relational
         // rollout would want real migrations, but there's nothing here for synchronize to drift on.
-        synchronize: true, logging: false,
+        synchronize: true,
+        logging: false,
+        extra: {
+          max: this.poolOptions?.max ?? config.pgPoolMax,
+          idleTimeoutMillis: this.poolOptions?.idleTimeoutMillis ?? config.pgPoolIdleTimeoutMs,
+          connectionTimeoutMillis: this.poolOptions?.connectionTimeoutMillis ?? config.pgPoolConnectionTimeoutMs,
+        },
       }).initialize().then((ds) => (this.ds = ds));
     }
     return this.dsPromise;
+  }
+
+  /** Attempts to acquire a PostgreSQL session-level advisory lock (non-blocking). Returns true if acquired. */
+  async tryAdvisoryLock(key: number): Promise<boolean> {
+    try {
+      const ds = await this.ensureDataSource();
+      const rows = await ds.query('SELECT pg_try_advisory_lock($1) AS acquired', [key]);
+      return Boolean(rows && rows[0]?.acquired);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Releases a previously acquired PostgreSQL session-level advisory lock. */
+  async unlockAdvisoryLock(key: number): Promise<boolean> {
+    try {
+      const ds = await this.ensureDataSource();
+      const rows = await ds.query('SELECT pg_advisory_unlock($1) AS unlocked', [key]);
+      return Boolean(rows && rows[0]?.unlocked);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Atomically claims up to `limit` due timers using Postgres FOR UPDATE SKIP LOCKED.
+   *  Allows multiple active-active replicas to concurrently process distinct batches of due timers
+   *  in parallel without duplicate executions, coarse global locks, or manual role partitioning. */
+  async claimDueTimers(tenantId: string, nowIso: string, limit: number): Promise<TimerJob[]> {
+    const ds = await this.ensureDataSource();
+    const sql = `
+      WITH due_jobs AS (
+        SELECT id FROM kv_store
+        WHERE collection = 'timers'
+          AND ($1::text IS NULL OR $1 = '' OR $1 = '*' OR "tenantId" = $1)
+          AND (data->>'status') = 'scheduled'
+          AND (data->>'dueAt') <= $2
+        ORDER BY (data->>'dueAt') ASC
+        LIMIT $3
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE kv_store
+      SET data = jsonb_set(
+            jsonb_set(data, '{status}', '"fired"'),
+            '{fired}',
+            to_jsonb(COALESCE((data->>'fired')::int, 0) + 1)
+          ),
+          "updatedAt" = NOW()
+      WHERE collection = 'timers' AND id IN (SELECT id FROM due_jobs)
+      RETURNING data;
+    `;
+    const res = await ds.query(sql, [tenantId, nowIso, limit]);
+    const rows: Array<{ data: unknown }> = Array.isArray(res) ? (Array.isArray(res[0]) ? res[0] : res) : [];
+    return rows.map((r) => r.data as TimerJob);
   }
 
   repo<T extends DomainEntity>(collection: string): Repository<T> {
