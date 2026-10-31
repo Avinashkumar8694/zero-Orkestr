@@ -1,20 +1,36 @@
 # Rendered at start-up by the nginx image (envsubst): only ${UPSTREAM} is substituted, nginx variables stay as written.
+
+# --- compression: pre-compressed files are served as they are (gzip_static); everything else (the API's JSON too) is gzipped on the fly ---
 gzip on;
-gzip_types text/css application/javascript application/json image/svg+xml;
+gzip_static on;
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 5;
+gzip_min_length 512;
+gzip_types text/plain text/css text/xml application/json application/javascript text/javascript application/xml application/manifest+json image/svg+xml font/ttf font/otf application/wasm;
+
+# --- transfer ---
+tcp_nopush on;
+open_file_cache max=2000 inactive=60s;
+open_file_cache_valid 120s;
+open_file_cache_errors on;
 
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
 
 server {
   listen 80 default_server;
   root /srv/app;
+  server_tokens off;
   resolver 127.0.0.11 valid=10s ipv6=off;       # Docker's DNS: the engine is looked up per request, so a recreated engine is found without restarting this container
   client_max_body_size 25m;                      # deployments and jBPM imports can be large
 
-  location = /healthz { default_type text/plain; return 200 "ok\n"; }
+  location = /healthz { default_type text/plain; access_log off; return 200 "ok\n"; }
 
   location /api/ {
     set $engine http://${UPSTREAM};
     proxy_pass $engine;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -31,6 +47,11 @@ server {
     proxy_read_timeout 3600s;
   }
 
-  location ~* \.(js|css|woff2?|svg|png|ico)$ { add_header Cache-Control "public, max-age=31536000, immutable"; try_files $uri =404; }
-  location / { add_header Cache-Control "no-cache"; try_files $uri /index.html; }   # the app owns its page addresses
+  # built files carry a content hash in their name: cache for a year, never revalidate
+  location ~* \.(js|css|woff2?|ttf|svg|png|jpg|jpeg|webp|ico)$ {
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    access_log off;
+    try_files $uri =404;
+  }
+  location / { add_header Cache-Control "no-cache"; try_files $uri /index.html; }   # the app owns its page addresses; index.html is always revalidated
 }
