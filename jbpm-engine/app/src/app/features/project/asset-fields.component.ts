@@ -135,7 +135,7 @@ const DECISION_TREE_HELP = "This engine's decision-tree evaluator descends one f
                 <div class="kvrow">
                   <input class="k" [ngModel]="p[0]" (ngModelChange)="setEntryKey(branchThen(b), 'output', p[0], $event)" placeholder="variable" />
                   <input class="v" [ngModel]="p[1]" (ngModelChange)="setEntryVal(branchThen(b), 'output', p[0], $event)" placeholder="value" />
-                  <button class="x" (click)="removeEntry(branchThen(b), 'output', p[0])"><app-icon name="close" [size]="11" /></button>
+                  <button class="x" (click)="removeEntry(branchThen(b), 'output', p[0])" title="Remove" aria-label="Remove"><app-icon name="close" [size]="11" /></button>
                 </div>
               }
               <button class="add" (click)="addEntry(branchThen(b), 'output')">+ add</button>
@@ -149,12 +149,12 @@ const DECISION_TREE_HELP = "This engine's decision-tree evaluator descends one f
       <div class="fld"><label>Fact (variable, optional)</label><input [ngModel]="value.fact" (ngModelChange)="value.fact = $event || undefined; emit()" /><small>The fact variable tested by the table conditions and updated by actions when executed by a business rule task.</small></div>
       <div class="sec-h">Condition columns</div>
       <div class="stringlist">
-        @for (c of gtConditions(); track $index) { <div class="lrow"><input [ngModel]="c" (ngModelChange)="setListItem(gtConditions(), $index, $event)" /><button class="x" (click)="removeListItem(gtConditions(), $index)"><app-icon name="close" [size]="11" /></button></div> }
+        @for (c of gtConditions(); track $index) { <div class="lrow"><input [ngModel]="c" (ngModelChange)="setListItem(gtConditions(), $index, $event)" /><button class="x" (click)="removeListItem(gtConditions(), $index)" title="Remove" aria-label="Remove"><app-icon name="close" [size]="11" /></button></div> }
         <button class="add" (click)="addListItem(gtConditions())">+ add condition column</button>
       </div>
       <div class="sec-h">Action columns</div>
       <div class="stringlist">
-        @for (a of gtActions(); track $index) { <div class="lrow"><input [ngModel]="a" (ngModelChange)="setListItem(gtActions(), $index, $event)" /><button class="x" (click)="removeListItem(gtActions(), $index)"><app-icon name="close" [size]="11" /></button></div> }
+        @for (a of gtActions(); track $index) { <div class="lrow"><input [ngModel]="a" (ngModelChange)="setListItem(gtActions(), $index, $event)" /><button class="x" (click)="removeListItem(gtActions(), $index)" title="Remove" aria-label="Remove"><app-icon name="close" [size]="11" /></button></div> }
         <button class="add" (click)="addListItem(gtActions())">+ add action column</button>
       </div>
       <div class="sec-h">Rows</div>
@@ -192,7 +192,7 @@ const DECISION_TREE_HELP = "This engine's decision-tree evaluator descends one f
                       <div class="kvrow">
                         <input class="k" [ngModel]="p[0]" (ngModelChange)="topSetEntryKey(f.key, p[0], $event)" placeholder="key" />
                         <input class="v" [ngModel]="p[1]" (ngModelChange)="topSetEntryVal(f.key, p[0], $event)" placeholder="value" />
-                        <button class="x" (click)="topRemoveEntry(f.key, p[0])"><app-icon name="close" [size]="12" /></button>
+                        <button class="x" (click)="topRemoveEntry(f.key, p[0])" title="Remove" aria-label="Remove"><app-icon name="close" [size]="12" /></button>
                       </div>
                     }
                     <button class="add" (click)="topAddEntry(f.key)">+ add</button>
@@ -237,7 +237,7 @@ const DECISION_TREE_HELP = "This engine's decision-tree evaluator descends one f
                                   <div class="kvrow">
                                     <input class="k" [attr.list]="rf.keyOptionsFrom ? (rf.key + '-' + outerIdx + '-keydl') : null" [ngModel]="p[0]" (ngModelChange)="setEntryKey(row, rf.key, p[0], $event)" placeholder="key" />
                                     <input class="v" [ngModel]="p[1]" (ngModelChange)="setEntryVal(row, rf.key, p[0], $event)" placeholder="value" />
-                                    <button class="x" (click)="removeEntry(row, rf.key, p[0])"><app-icon name="close" [size]="11" /></button>
+                                    <button class="x" (click)="removeEntry(row, rf.key, p[0])" title="Remove" aria-label="Remove"><app-icon name="close" [size]="11" /></button>
                                   </div>
                                 }
                                 <button class="add" (click)="addEntry(row, rf.key)">+ add</button>
@@ -270,7 +270,7 @@ const DECISION_TREE_HELP = "This engine's decision-tree evaluator descends one f
                                           <div class="kvrow">
                                             <input class="k" [ngModel]="p[0]" (ngModelChange)="setEntryKey(row2, rf2.key, p[0], $event)" placeholder="key" />
                                             <input class="v" [ngModel]="p[1]" (ngModelChange)="setEntryVal(row2, rf2.key, p[0], $event)" placeholder="value" />
-                                            <button class="x" (click)="removeEntry(row2, rf2.key, p[0])"><app-icon name="close" [size]="11" /></button>
+                                            <button class="x" (click)="removeEntry(row2, rf2.key, p[0])" title="Remove" aria-label="Remove"><app-icon name="close" [size]="11" /></button>
                                           </div>
                                         }
                                         <button class="add" (click)="addEntry(row2, rf2.key)">+ add</button>

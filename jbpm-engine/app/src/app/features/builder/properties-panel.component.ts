@@ -2,14 +2,27 @@ import { Component, EventEmitter, Input, OnChanges, Output } from '@angular/core
 import { FormsModule } from '@angular/forms';
 import type { CallableProcess, UiField as Field, UiSection as Section, VarSource } from '../../core/models';
 import { IconComponent } from '../../shared/icon.component';
+import { CodeEditorComponent } from '../../shared/code-editor.component';
 
 // Generic, schema-driven property editor. Renders every configurable field for the selected node's
 // type (from NODE_SCHEMA) so a node can be fully configured. Emits `changed` on any edit.
 @Component({
   selector: 'app-properties-panel',
   standalone: true,
-  imports: [IconComponent, FormsModule],
+  imports: [IconComponent, FormsModule, CodeEditorComponent],
   template: `
+    @if (sections.length === 0) {
+      <div class="unsupported-box">
+        <div class="unsupported-hdr">
+          <span class="unsupported-ic"><app-icon name="alert-triangle" [size]="18" /></span>
+          <strong>Unsupported Construct: {{ node?.type || 'unknown' }}</strong>
+        </div>
+        <p class="unsupported-desc">This construct type is not supported by the execution engine and cannot be configured or executed directly.</p>
+        <div class="unsupported-fix">
+          <strong>Recommendation:</strong> Use "Replace Node" to replace this construct with a standard Task (Script, REST Service, User Task), Gateway, or Sub-process from the palette.
+        </div>
+      </div>
+    }
     @for (sec of sections; track sec.title) {
       <div class="sec">
         <div class="sec-h">{{ sec.title }}</div>
@@ -28,12 +41,15 @@ import { IconComponent } from '../../shared/icon.component';
                 </select>
               }
               @case ('code') {
-                @if (val('lang') === 'java' || val(f.key + 'Lang') === 'java') {
-                  <div class="lang-pill java"><span class="pill-badge">Java</span> <span class="pill-note">Imported from jBPM (language locked)</span></div>
-                } @else {
-                  <div class="lang-pill js"><span class="pill-badge">JavaScript</span> <span class="pill-note">Node.js Sandbox VM</span></div>
-                }
-                <textarea class="mono" rows="6" [ngModel]="val(f.key)" (ngModelChange)="set(f.key, $event)" [placeholder]="f.placeholder || ''"></textarea>
+                <app-code-editor
+                  [code]="val(f.key) || ''"
+                  [lang]="val('lang') || val(f.key + 'Lang') || 'js'"
+                  [placeholder]="f.placeholder || '// Write script logic here...'"
+                  [cheatSheetContent]="cheatSheetContent"
+                  [javaReferenceContent]="javaReferenceContent"
+                  (codeChange)="set(f.key, $event)"
+                  (openCheatSheet)="openCheatSheet.emit($event)"
+                ></app-code-editor>
               }
               @case ('textarea') { <textarea rows="3" [ngModel]="val(f.key)" (ngModelChange)="set(f.key, $event)" [placeholder]="f.placeholder || ''"></textarea> }
               @case ('stringlist') {
@@ -130,6 +146,12 @@ import { IconComponent } from '../../shared/icon.component';
                   }
                   @case ('escalation') { <input class="mt" placeholder="Escalation code" [ngModel]="val(f.key + '.escalation')" (ngModelChange)="set(f.key + '.escalation', $event)" /> }
                   @case ('condition') {
+                    <div class="cond-header">
+                      <span class="cond-sub">Condition (JavaScript)</span>
+                      <button type="button" class="cheat-pill" (click)="openCheatSheet.emit()" title="View JavaScript & Flow Variables Cheat Sheet">
+                        <app-icon name="code" [size]="12" /> Cheat Sheet
+                      </button>
+                    </div>
                     <input class="mt" placeholder="Condition expression (JavaScript)" [ngModel]="val(f.key + '.condition')" (ngModelChange)="set(f.key + '.condition', $event); set(f.key + '.lang', 'js')" />
                   }
                   @case ('timer') {
@@ -145,8 +167,54 @@ import { IconComponent } from '../../shared/icon.component';
         }
       </div>
     }
+
+    @if (hasLifecycleActions() || isActivityOrTask()) {
+      <div class="sec">
+        <div class="sec-h lifecycle-h">
+          <span>Lifecycle Actions (On Entry / On Exit)</span>
+          @if (hasLifecycleActions()) {
+            <button type="button" class="clear-actions-btn" (click)="clearAllLifecycleActions()" title="Clear onEntry and onExit actions">Clear Actions</button>
+          }
+        </div>
+        @if (hasLifecycleActions()) {
+          <small class="lifecycle-note">
+            These scripts execute when entering or exiting this node. If imported Java code cannot be compiled or referenced, clear these actions or replace this node.
+          </small>
+        }
+        <div class="fld">
+          <div class="lifecycle-header">
+            <label>On-Entry Script</label>
+            <select class="lang-select" [ngModel]="val('onEntryLang') || 'java'" (ngModelChange)="set('onEntryLang', $event)">
+              <option value="java">Java</option>
+              <option value="js">JavaScript</option>
+            </select>
+          </div>
+          <textarea rows="2" class="mono" [ngModel]="val('onEntry')" (ngModelChange)="set('onEntry', $event)" placeholder="// Statements executed when entering this node"></textarea>
+        </div>
+        <div class="fld">
+          <div class="lifecycle-header">
+            <label>On-Exit Script</label>
+            <select class="lang-select" [ngModel]="val('onExitLang') || 'java'" (ngModelChange)="set('onExitLang', $event)">
+              <option value="java">Java</option>
+              <option value="js">JavaScript</option>
+            </select>
+          </div>
+          <textarea rows="2" class="mono" [ngModel]="val('onExit')" (ngModelChange)="set('onExit', $event)" placeholder="// Statements executed when completing this node"></textarea>
+        </div>
+      </div>
+    }
   `,
   styles: [`
+    .unsupported-box {
+      border: 1px solid #fed7d7; background: #fff5f5; border-radius: 10px; padding: 14px 16px;
+      margin: 10px 0 16px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .unsupported-hdr { display: flex; align-items: center; gap: 8px; color: #9b2c2c; font-size: 13.5px; }
+    .unsupported-ic { color: #dc2626; display: grid; place-items: center; }
+    .unsupported-desc { font-size: 12.5px; color: #742a2a; margin: 0; line-height: 1.45; }
+    .unsupported-fix { font-size: 12px; color: #9b2c2c; background: #fee2e2; border-radius: 6px; padding: 8px 10px; border: 1px dashed #fca5a5; }
+    .unsupported-fix strong { color: #742a2a; }
+
     .sec { margin-bottom: 4px; }
     .sec-h { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 14px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
     .fld { margin-bottom: 12px; } .fld > label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
@@ -157,6 +225,10 @@ import { IconComponent } from '../../shared/icon.component';
     .lang-pill.java { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
     .lang-pill.js { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
     .pill-badge { font-weight: 700; text-transform: uppercase; }
+    .cheat-pill { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--surface-2, rgba(255,255,255,0.06)); border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; color: var(--primary); cursor: pointer; transition: all 0.15s ease; }
+    .cheat-pill:hover { background: var(--primary-50, rgba(99,102,241,0.15)); border-color: var(--primary); }
+    .cond-header { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; margin-bottom: 2px; }
+    .cond-sub { font-size: 11.5px; color: var(--text-secondary); }
     .pill-note { opacity: 0.85; font-size: 11px; }
     .mt { margin-top: 6px; }
     small { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.4; }
@@ -170,6 +242,13 @@ import { IconComponent } from '../../shared/icon.component';
     .all { padding: 8px 10px; background: var(--primary-50); border-radius: 8px; margin-bottom: 8px; }
     .nodesel { display: flex; flex-direction: column; gap: 5px; max-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
     .nodesel em { color: var(--muted); font-style: normal; font-size: 12px; }
+    .lifecycle-h { display: flex; align-items: center; justify-content: space-between; }
+    .clear-actions-btn { font-size: 11px; padding: 2px 7px; border: 1px solid var(--border); background: var(--surface-2); color: #ef4444; border-radius: 5px; cursor: pointer; }
+    .clear-actions-btn:hover { background: rgba(239,68,68,0.1); border-color: #ef4444; }
+    .lifecycle-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .lifecycle-header label { margin-bottom: 0; }
+    .lang-select { width: auto; font-size: 11px; padding: 2px 6px; }
+    .lifecycle-note { color: var(--muted); margin-bottom: 8px; font-size: 11.5px; }
   `],
 })
 export class PropertiesPanelComponent implements OnChanges {
@@ -186,10 +265,30 @@ export class PropertiesPanelComponent implements OnChanges {
   /** Every process behind a currently-active deployment, tenant-wide — backs the 'processRef' widget
    *  (see server's /catalog/processes) and, once one is picked on THIS node, the 'called' source. */
   @Input() callableProcesses: CallableProcess[] = [];
+  @Input() cheatSheetContent?: string;
+  @Input() javaReferenceContent?: string;
   @Output() changed = new EventEmitter<void>();
+  @Output() openCheatSheet = new EventEmitter<string>();
   kv: Record<string, { k: string; v: string }[]> = {};
   sl: Record<string, string[]> = {};
   errorCodes = ['SCRIPT_ERROR', 'SERVICE_ERROR', 'RULE_ERROR', 'CALL_ERROR', 'RUNTIME_ERROR'];
+
+  hasLifecycleActions(): boolean {
+    return !!(this.node?.onEntry || this.node?.onExit);
+  }
+
+  isActivityOrTask(): boolean {
+    return this.node && ['userTask', 'manual', 'rule', 'call', 'send', 'receive', 'forEach', 'workItem', 'subprocess'].includes(this.node.type);
+  }
+
+  clearAllLifecycleActions() {
+    if (!this.node) return;
+    delete this.node.onEntry;
+    delete this.node.onEntryLang;
+    delete this.node.onExit;
+    delete this.node.onExitLang;
+    this.changed.emit();
+  }
 
   assetNames(kind: string | undefined): string[] { return kind ? (this.assets[kind] || []).map((a) => a.name) : []; }
 

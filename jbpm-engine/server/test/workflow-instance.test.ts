@@ -222,3 +222,36 @@ test('descendants()-based tasks-and-processes finds a task nested inside a call 
   assert.strictEqual(viaCase.length, 1);
   assert.strictEqual(viaCase[0]!.id, tasks[0]!.id);
 });
+
+test('security: terminal or completed cases reject updateData, updateStatus, and addComment', async () => {
+  const { ctx } = newCtx();
+  const { dep } = await deploy(ctx, 'terminal-test');
+  const store = resolveWorkflowServiceStore(ctx.store);
+  const defs = new WorkflowDefinitionService(ctx, store);
+  const insts = new WorkflowInstanceService(ctx, store);
+
+  await defs.create({ name: 'term-v1', deploymentId: dep.id }, 'admin');
+  const caseRow = await insts.create({ workflowName: 'term-v1', workflowData: { note: 'initial' } }, 'admin');
+
+  // Mark the case as completed / settled
+  await insts.updateStatus(caseRow.id, 'completed', 'admin');
+
+  // Verify updating data is blocked
+  await assert.rejects(
+    () => insts.updateData(caseRow.id, { note: 'tampered' }, 'admin'),
+    /closed and read-only/
+  );
+
+  // Verify updating status is blocked
+  await assert.rejects(
+    () => insts.updateStatus(caseRow.id, 'active', 'admin'),
+    /closed and read-only/
+  );
+
+  // Verify adding comments is blocked
+  await assert.rejects(
+    () => insts.addComment(caseRow.id, 'late comment', 'admin'),
+    /closed and read-only/
+  );
+});
+

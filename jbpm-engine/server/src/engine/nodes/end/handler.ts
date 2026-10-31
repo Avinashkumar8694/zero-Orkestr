@@ -10,7 +10,10 @@ export const handler: NodeHandler = async (c) => {
   // that as "no error configured" and silently fall through to a normal completion instead (the exact
   // bug this comment is here to stop from recurring). execution-engine.ts's own handling of the
   // resulting 'error' end (see runToQuiescence) already defaults an empty code to 'ERROR'.
-  if (c.node.throw && 'error' in c.node.throw) return { end: 'error', outcome: 'error-throw' };
+  if (c.node.throw && 'error' in c.node.throw) {
+    const rethrow = c.node.throw?.rethrow ?? c.node.rethrow;
+    return { end: 'error', outcome: 'error-throw', rethrow: rethrow === true };
+  }
   if (c.node.event?.compensation || c.node.result === 'compensate') {
     return { vars: await c.compensate(c.node.event?.ref), end: 'complete', outcome: 'compensated' };
   }

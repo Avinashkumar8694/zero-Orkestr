@@ -2,14 +2,17 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { SlicePipe } from '@angular/common';
+import { catchError, finalize, forkJoin, of, switchMap, tap } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import { TaskApiService } from '../../core/api/task-api.service';
+import { InstanceApiService } from '../../core/api/instance-api.service';
+import { IamApiService } from '../../core/api/iam-api.service';
 import { ToastService } from '../../shared/toast.service';
 import { ModalService } from '../../shared/modal.service';
 import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
 import { IconComponent } from '../../shared/icon.component';
 import { KeyValueListComponent, KVPair, pairsToRecord } from '../../shared/key-value-list.component';
-import type { AuditEvent, Task, TaskComment } from '../../core/models';
+import type { AppGroup, AppUser, AuditEvent, Task, TaskComment } from '../../core/models';
 
 type Tab = 'work' | 'details' | 'assignments' | 'comments' | 'admin' | 'logs';
 const TABS: { key: Tab; label: string }[] = [
@@ -44,18 +47,27 @@ const TABS: { key: Tab; label: string }[] = [
         </div>
         <p class="muted meta">Instance <a class="lnk" [routerLink]="['/instances', task()!.instanceId]">{{ shortId(task()!.instanceId) }}</a> · Priority {{ task()!.priority ?? '—' }} · Owner {{ task()!.assignee || 'unclaimed' }}</p>
 
+        @if (isReadOnly()) {
+          <div class="donebanner" [class.aborted]="task()!.status === 'skipped' || instanceStatus() === 'aborted' || instanceStatus() === 'failed'" [class.suspended]="instanceStatus() === 'suspended'">
+            <app-icon [name]="task()!.status === 'completed' || instanceStatus() === 'completed' ? 'check' : 'warning'" [size]="14" />
+            <span>This task is <strong>{{ task()!.status }}</strong>@if (instanceStatus() && instanceStatus() !== task()!.status) { (process instance is <strong>{{ instanceStatus() }}</strong>) } — it is finished and read-only. Priority, due date, assignments, and work outputs cannot be modified.</span>
+          </div>
+        }
+
         <nav class="tabs">
           @for (t of tabDefs; track t.key) { <button [class.active]="tab() === t.key" (click)="setTab(t.key)">{{ t.label }}</button> }
         </nav>
 
-        <div class="row actionrow">
-          @if (canClaim()) { <button class="btn sm" (click)="claim()">Claim</button> }
-          @if (canRelease()) { <button class="btn sm" (click)="release()">Release</button> }
-          @if (canStart()) { <button class="btn sm" (click)="start()">Start</button> }
-          @if (canStop()) { <button class="btn sm" (click)="stop()">Stop</button> }
-          @if (canAct()) { <button class="btn primary sm" (click)="complete()">Complete</button> }
-          @if (canSkip()) { <button class="btn sm" (click)="skip()">Skip</button> }
-        </div>
+        @if (!isReadOnly()) {
+          <div class="row actionrow">
+            @if (canClaim()) { <button class="btn sm" (click)="claim()">Claim</button> }
+            @if (canRelease()) { <button class="btn sm" (click)="release()">Release</button> }
+            @if (canStart()) { <button class="btn sm" (click)="start()">Start</button> }
+            @if (canStop()) { <button class="btn sm" (click)="stop()">Stop</button> }
+            @if (canAct()) { <button class="btn primary sm" (click)="complete()">Complete</button> }
+            @if (canSkip()) { <button class="btn sm" (click)="skip()">Skip</button> }
+          </div>
+        }
 
         @switch (tab()) {
           @case ('work') {
@@ -73,7 +85,7 @@ const TABS: { key: Tab; label: string }[] = [
                   <button class="btn sm" (click)="save()">Save</button>
                   <button class="btn primary sm" (click)="complete()">Complete</button>
                 </div>
-              } @else if (task()!.status === 'completed' || task()!.status === 'skipped') {
+              } @else if (task()!.status === 'completed' || task()!.status === 'skipped' || isReadOnly()) {
                 <div class="section-title">Outputs</div>
                 @if (outputRows().length) {
                   <table class="kv"><tbody>@for (kv of outputRows(); track kv[0]) { <tr><td class="k">{{ kv[0] }}</td><td class="v mono">{{ kv[1] }}</td></tr> }</tbody></table>
@@ -104,10 +116,40 @@ const TABS: { key: Tab; label: string }[] = [
               <p class="muted sm" style="margin-bottom:14px;">{{ task()!.assignee ? task()!.assignee : 'Unclaimed — first potential owner to claim becomes the actual owner.' }}</p>
 
               <div class="section-title">Delegate to a user</div>
-              <div class="row">
-                <input placeholder="username" [(ngModel)]="delegateTo" style="flex:1;" />
-                <button class="btn sm" [disabled]="!delegateTo.trim()" (click)="delegate()">Delegate</button>
-              </div>
+              @if (isReadOnly()) {
+                <div class="readonly-note">
+                  <app-icon name="warning" [size]="13" />
+                  <span>Task is {{ task()!.status }} — delegation and reassignment are disabled.</span>
+                </div>
+              } @else {
+                <div class="row" style="gap: 8px;">
+                  <input
+                    [(ngModel)]="delegateTo"
+                    list="delegate-users-list"
+                    [disabled]="isReadOnly() || !activeUsers().length"
+                    placeholder="Type to search or select a registered user..."
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    style="flex:1; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px;"
+                  />
+                  <datalist id="delegate-users-list">
+                    @if (task()?.group && groupMembers().length) {
+                      @for (u of groupMembers(); track u.id) {
+                        <option [value]="u.username">Group: {{ task()!.group }} · {{ u.username }} @if (u.roles.length) { ({{ u.roles.join(', ') }}) }</option>
+                      }
+                    }
+                    @for (u of (task()?.group ? otherUsers() : activeUsers()); track u.id) {
+                      <option [value]="u.username">{{ u.username }} @if (u.groups.length) { [{{ u.groups.join(', ') }}] } @if (u.roles.length) { ({{ u.roles.join(', ') }}) }</option>
+                    }
+                  </datalist>
+                  <button class="btn sm" [disabled]="isReadOnly() || !delegateTo.trim() || !isValidUser(delegateTo)" (click)="delegate()">Delegate</button>
+                </div>
+                @if (!activeUsers().length) {
+                  <p class="muted sm" style="margin-top: 6px;">No registered active users found in directory.</p>
+                }
+              }
             </div>
           }
           @case ('comments') {
@@ -119,38 +161,72 @@ const TABS: { key: Tab; label: string }[] = [
                       <div class="avatar">{{ c.author.slice(0,1).toUpperCase() }}</div>
                       <div class="cbody">
                         <div class="ctext">{{ c.body }}</div>
-                        <div class="muted sm">{{ c.author }} · {{ ago(c.at) }} @if (c.author === me()) { · <button class="lnkbtn" (click)="deleteComment(c)">delete</button> }</div>
+                        <div class="muted sm">{{ c.author }} · {{ ago(c.at) }} @if (!isReadOnly() && c.author === me()) { · <button class="lnkbtn" (click)="deleteComment(c)">delete</button> }</div>
                       </div>
                     </div>
                   }
                 </div>
               } @else { <p class="muted sm" style="margin-bottom:12px;">No comments yet.</p> }
-              <div class="row">
-                <input placeholder="Add a comment…" [(ngModel)]="newComment" (keyup.enter)="postComment()" style="flex:1;" />
-                <button class="btn sm" [disabled]="!newComment.trim()" (click)="postComment()">Post</button>
-              </div>
+              @if (isReadOnly()) {
+                <div class="readonly-note" style="margin-top: 8px;">
+                  <app-icon name="warning" [size]="13" />
+                  <span>Comments are closed for finished tasks.</span>
+                </div>
+              } @else {
+                <div class="row">
+                  <input placeholder="Add a comment…" [(ngModel)]="newComment" [disabled]="isReadOnly()" (keyup.enter)="postComment()" style="flex:1;" />
+                  <button class="btn sm" [disabled]="isReadOnly() || !newComment.trim()" (click)="postComment()">Post</button>
+                </div>
+              }
             </div>
           }
           @case ('admin') {
             <div class="card pad wrap">
               <div class="row" style="margin-bottom:14px;"><span class="badge purple">Business-admin actions</span></div>
 
+              @if (isReadOnly()) {
+                <div class="readonly-note">
+                  <app-icon name="warning" [size]="13" />
+                  <span>Task is {{ task()!.status }} — administrative fields and forward/reminder actions are locked.</span>
+                </div>
+              }
+
               <div class="section-title first">Priority & due date</div>
               <div class="grid2">
-                <div class="field"><label>Priority</label><input type="number" min="0" max="10" [(ngModel)]="editPriority" /></div>
-                <div class="field"><label>Due date</label><input type="datetime-local" [(ngModel)]="editDueAt" /></div>
+                <div class="field"><label>Priority</label><input type="number" min="0" max="10" [(ngModel)]="editPriority" [disabled]="isReadOnly()" /></div>
+                <div class="field"><label>Due date</label><input type="datetime-local" [(ngModel)]="editDueAt" [disabled]="isReadOnly()" /></div>
               </div>
-              <button class="btn sm" (click)="saveAdmin()">Update</button>
+              <button class="btn sm" [disabled]="isReadOnly()" (click)="saveAdmin()">Update</button>
 
               <div class="section-title">Forward to a user or group</div>
-              <div class="row" style="margin-bottom:16px;">
-                <input placeholder="username" [(ngModel)]="forwardUser" style="flex:1;" />
-                <input placeholder="or group" [(ngModel)]="forwardGroup" style="flex:1;" />
-                <button class="btn sm" [disabled]="!forwardUser.trim() && !forwardGroup.trim()" (click)="forward()">Forward</button>
+              <div class="row" style="gap: 8px; margin-bottom:16px;">
+                <input
+                  [(ngModel)]="forwardUser"
+                  list="forward-users-list"
+                  [disabled]="isReadOnly()"
+                  placeholder="Forward to user (type or select)..."
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  style="flex:1; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px;"
+                />
+                <datalist id="forward-users-list">
+                  @for (u of activeUsers(); track u.id) {
+                    <option [value]="u.username">{{ u.username }} @if (u.roles.length) { ({{ u.roles.join(', ') }}) }</option>
+                  }
+                </datalist>
+                <select [(ngModel)]="forwardGroup" [disabled]="isReadOnly()" style="flex:1; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px;">
+                  <option value="">-- Forward to Group (optional) --</option>
+                  @for (g of groups(); track g.id) {
+                    <option [value]="g.name">{{ g.name }}</option>
+                  }
+                </select>
+                <button class="btn sm" [disabled]="isReadOnly() || (!forwardUser.trim() && !forwardGroup.trim())" (click)="forward()">Forward</button>
               </div>
 
               <div class="section-title">Reminders</div>
-              <div class="row"><span class="muted sm">Send a reminder to the actual owner</span><span class="spacer"></span><button class="btn sm" [disabled]="!task()!.assignee" (click)="remind()">Send now</button></div>
+              <div class="row"><span class="muted sm">Send a reminder to the actual owner</span><span class="spacer"></span><button class="btn sm" [disabled]="isReadOnly() || !task()!.assignee" (click)="remind()">Send now</button></div>
             </div>
           }
           @case ('logs') {
@@ -176,9 +252,7 @@ const TABS: { key: Tab; label: string }[] = [
     .mono { font-family: var(--font-mono); font-size: 12.5px; }
     .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
     .badge.purple { background: var(--purple-bg); color: var(--purple); border-color: transparent; }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
-    .tabs button { border: none; background: transparent; padding: 9px 4px; margin-right: 18px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
     .actionrow { gap: 8px; margin-bottom: 14px; }
     .wrap { max-width: 640px; }
     .pad { padding: 20px; }
@@ -201,10 +275,26 @@ const TABS: { key: Tab; label: string }[] = [
     .lrow { padding: 6px 8px; border-radius: 6px; display: flex; gap: 12px; } .lrow:nth-child(even) { background: var(--surface-2); }
     .lts { width: 150px; flex-shrink: 0; }
     .empty-state .btn { margin-top: 10px; }
+    .donebanner { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; background: rgba(34, 197, 94, 0.12); color: var(--green); font-size: 13px; font-weight: 600; margin: 10px 0 14px; border: 1px solid var(--green); }
+    .donebanner.aborted { background: rgba(239, 68, 68, 0.12); color: var(--red); border-color: var(--red); }
+    .donebanner.suspended { background: rgba(245, 158, 11, 0.12); color: var(--amber); border-color: var(--amber); }
+    .readonly-note { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+    input:disabled, textarea:disabled, button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    @media (max-width: 768px) {
+      .page { padding: 12px 14px; }
+      .topbar { flex-wrap: wrap; gap: 8px; }
+      .actionrow { flex-wrap: wrap; gap: 6px; }
+      .grid2 { grid-template-columns: 1fr; }
+      .wrap { max-width: 100%; }
+      .pad { padding: 14px; }
+    }
   `],
 })
 export class TaskDetailComponent {
   private api = inject(TaskApiService);
+  private instApi = inject(InstanceApiService);
+  private iamApi = inject(IamApiService);
   private auth = inject(AuthService);
   private toast = inject(ToastService);
   private modal = inject(ModalService);
@@ -213,9 +303,28 @@ export class TaskDetailComponent {
 
   id = signal(this.route.snapshot.paramMap.get('id')!);
   task = signal<Task | null>(null);
+  instanceStatus = signal<string | null>(null);
   loading = signal(true);
   tab = signal<Tab>((this.route.snapshot.queryParamMap.get('tab') as Tab) || 'work');
   tabDefs = TABS;
+
+  users = signal<AppUser[]>([]);
+  groups = signal<AppGroup[]>([]);
+  activeUsers = computed(() => this.users().filter((u) => u.active !== false));
+  groupMembers = computed(() => {
+    const g = this.task()?.group;
+    return g ? this.activeUsers().filter((u) => (u.groups || []).includes(g)) : [];
+  });
+  otherUsers = computed(() => {
+    const g = this.task()?.group;
+    return g ? this.activeUsers().filter((u) => !(u.groups || []).includes(g)) : this.activeUsers();
+  });
+  isValidUser = (username: string): boolean => {
+    const trimmed = (username || '').trim();
+    if (!trimmed) return false;
+    const all = this.activeUsers();
+    return all.length === 0 || all.some((u) => u.username === trimmed);
+  };
 
   outputPairs: KVPair[] = [];
   comments = signal<TaskComment[]>([]);
@@ -228,6 +337,15 @@ export class TaskDetailComponent {
 
   me = computed(() => this.auth.user()?.username);
 
+  isReadOnly = computed(() => {
+    const t = this.task();
+    if (!t) return true;
+    if (t.status === 'completed' || t.status === 'skipped') return true;
+    const is = this.instanceStatus();
+    if (is === 'completed' || is === 'aborted' || is === 'failed' || is === 'suspended') return true;
+    return false;
+  });
+
   inputRows = computed(() => Object.entries(this.task()?.inputs || {}).map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)] as [string, string]));
   outputRows = computed(() => Object.entries(this.task()?.outputs || {}).map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)] as [string, string]));
 
@@ -235,17 +353,35 @@ export class TaskDetailComponent {
 
   private load() {
     this.loading.set(true);
-    this.api.getTask(this.id()).subscribe({
-      next: (t) => {
-        this.task.set(t); this.loading.set(false);
-        this.editPriority = t.priority ?? null;
-        this.editDueAt = t.dueAt ? t.dueAt.slice(0, 16) : '';
-        this.outputPairs = Object.entries(t.outputs || {}).map(([key, v]) => ({ key, value: typeof v === 'object' ? JSON.stringify(v) : String(v) }));
-      },
-      error: () => { this.task.set(null); this.loading.set(false); },
+    forkJoin({
+      task: this.api.getTask(this.id()),
+      comments: this.api.listComments(this.id()).pipe(catchError(() => of([]))),
+      events: this.api.taskEvents(this.id()).pipe(catchError(() => of([]))),
+      users: this.iamApi.listUsers().pipe(catchError(() => of([]))),
+      groups: this.iamApi.listGroups().pipe(catchError(() => of([]))),
+    }).pipe(
+      switchMap((res) => {
+        this.task.set(res.task);
+        this.editPriority = res.task.priority ?? null;
+        this.editDueAt = res.task.dueAt ? res.task.dueAt.slice(0, 16) : '';
+        this.outputPairs = Object.entries(res.task.outputs || {}).map(([key, v]) => ({ key, value: typeof v === 'object' ? JSON.stringify(v) : String(v) }));
+        this.comments.set(res.comments);
+        this.events.set(res.events);
+        this.users.set(res.users);
+        this.groups.set(res.groups);
+
+        if (res.task.instanceId) {
+          return this.instApi.getInstance(res.task.instanceId).pipe(
+            catchError(() => of(null)),
+            tap((inst) => this.instanceStatus.set(inst?.status || null))
+          );
+        }
+        return of(null);
+      }),
+      finalize(() => this.loading.set(false))
+    ).subscribe({
+      error: () => this.task.set(null),
     });
-    this.api.listComments(this.id()).subscribe((c) => this.comments.set(c));
-    this.api.taskEvents(this.id()).subscribe((e) => this.events.set(e));
   }
   private refresh() { this.load(); }
   private onError(e: any) { this.toast.error(e?.error?.error?.message || 'That action could not be completed'); }
@@ -253,20 +389,21 @@ export class TaskDetailComponent {
   setTab(t: Tab) { this.tab.set(t); this.router.navigate([], { queryParams: { tab: t }, queryParamsHandling: 'merge', replaceUrl: true }); }
 
   isOverdue() { const t = this.task(); return !!t?.dueAt && t.dueAt < new Date().toISOString() && t.status !== 'completed' && t.status !== 'skipped'; }
-  canClaim() { return this.task()?.status === 'created'; }
-  canRelease() { const t = this.task(); return !!t && (t.status === 'reserved' || t.status === 'inprogress') && t.assignee === this.me(); }
-  canStart() { const t = this.task(); return !!t && (t.status === 'created' || (t.status === 'reserved' && t.assignee === this.me())); }
-  canStop() { const t = this.task(); return !!t && t.status === 'inprogress' && t.assignee === this.me(); }
-  canAct() { const t = this.task(); return !!t && (t.status === 'reserved' || t.status === 'inprogress') && t.assignee === this.me(); }
+  canClaim() { return !this.isReadOnly() && this.task()?.status === 'created'; }
+  canRelease() { const t = this.task(); return !this.isReadOnly() && !!t && (t.status === 'reserved' || t.status === 'inprogress') && t.assignee === this.me(); }
+  canStart() { const t = this.task(); return !this.isReadOnly() && !!t && (t.status === 'created' || (t.status === 'reserved' && t.assignee === this.me())); }
+  canStop() { const t = this.task(); return !this.isReadOnly() && !!t && t.status === 'inprogress' && t.assignee === this.me(); }
+  canAct() { const t = this.task(); return !this.isReadOnly() && !!t && (t.status === 'reserved' || t.status === 'inprogress') && t.assignee === this.me(); }
   canSkip() { return this.canAct(); }
 
-  claim() { this.api.claimTask(this.id()).subscribe({ next: () => this.refresh(), error: (e) => this.onError(e) }); }
-  release() { this.api.releaseTask(this.id()).subscribe({ next: () => this.refresh(), error: (e) => this.onError(e) }); }
-  start() { this.api.startTask(this.id()).subscribe({ next: () => this.refresh(), error: (e) => this.onError(e) }); }
-  stop() { this.api.stopTask(this.id()).subscribe({ next: () => this.refresh(), error: (e) => this.onError(e) }); }
-  skip() { this.api.skipTask(this.id()).subscribe({ next: () => { this.toast.success('Task skipped'); this.refresh(); }, error: (e) => this.onError(e) }); }
-  save() { this.api.saveTask(this.id(), pairsToRecord(this.outputPairs)).subscribe({ next: () => { this.toast.success('Saved'); this.refresh(); }, error: (e) => this.onError(e) }); }
+  claim() { if (this.isReadOnly()) return; this.api.claimTask(this.id()).subscribe({ next: () => this.refresh(), error: (e) => this.onError(e) }); }
+  release() { if (this.isReadOnly()) return; this.api.releaseTask(this.id()).subscribe({ next: () => this.refresh(), error: (e) => this.onError(e) }); }
+  start() { if (this.isReadOnly()) return; this.api.startTask(this.id()).subscribe({ next: () => this.refresh(), error: (e) => this.onError(e) }); }
+  stop() { if (this.isReadOnly()) return; this.api.stopTask(this.id()).subscribe({ next: () => this.refresh(), error: (e) => this.onError(e) }); }
+  skip() { if (this.isReadOnly()) return; this.api.skipTask(this.id()).subscribe({ next: () => { this.toast.success('Task skipped'); this.refresh(); }, error: (e) => this.onError(e) }); }
+  save() { if (this.isReadOnly()) return; this.api.saveTask(this.id(), pairsToRecord(this.outputPairs)).subscribe({ next: () => { this.toast.success('Saved'); this.refresh(); }, error: (e) => this.onError(e) }); }
   complete() {
+    if (this.isReadOnly()) return;
     this.api.completeTask(this.id(), pairsToRecord(this.outputPairs)).subscribe({
       next: () => { this.toast.success('Task completed'); this.refresh(); },
       error: (e) => this.onError(e),
@@ -274,24 +411,47 @@ export class TaskDetailComponent {
   }
 
   delegate() {
-    this.api.delegateTask(this.id(), this.delegateTo.trim()).subscribe({
-      next: () => { this.toast.success(`Delegated to ${this.delegateTo.trim()}`); this.delegateTo = ''; this.refresh(); },
+    if (this.isReadOnly()) return;
+    const target = this.delegateTo.trim();
+    if (!target) {
+      this.toast.error('Please select a user to delegate to');
+      return;
+    }
+    if (!this.isValidUser(target)) {
+      this.toast.error(`User "${target}" is not registered in the system`);
+      return;
+    }
+    this.api.delegateTask(this.id(), target).subscribe({
+      next: () => { this.toast.success(`Delegated to ${target}`); this.delegateTo = ''; this.refresh(); },
       error: (e) => this.onError(e),
     });
   }
   forward() {
-    this.api.forwardTask(this.id(), { user: this.forwardUser.trim() || undefined, group: this.forwardGroup.trim() || undefined }).subscribe({
+    if (this.isReadOnly()) return;
+    const u = this.forwardUser.trim();
+    const g = this.forwardGroup.trim();
+    if (!u && !g) {
+      this.toast.error('Please select a user or group to forward to');
+      return;
+    }
+    if (u && !this.isValidUser(u)) {
+      this.toast.error(`User "${u}" is not registered in the system`);
+      return;
+    }
+    this.api.forwardTask(this.id(), { user: u || undefined, group: g || undefined }).subscribe({
       next: () => { this.toast.success('Forwarded'); this.forwardUser = ''; this.forwardGroup = ''; this.refresh(); },
       error: (e) => this.onError(e),
     });
   }
   remind() {
+    if (this.isReadOnly()) return;
     this.api.remindTask(this.id()).subscribe({
       next: (r) => this.toast.success(`Reminder sent to ${r.notified}`),
       error: (e) => this.onError(e),
     });
   }
   saveAdmin() {
+    if (this.isReadOnly()) return;
     this.api.updateTask(this.id(), { priority: this.editPriority ?? undefined, dueAt: this.editDueAt ? new Date(this.editDueAt).toISOString() : null }).subscribe({
       next: () => { this.toast.success('Task updated'); this.refresh(); },
       error: (e) => this.onError(e),
@@ -299,6 +459,7 @@ export class TaskDetailComponent {
   }
 
   postComment() {
+    if (this.isReadOnly()) return;
     const body = this.newComment.trim(); if (!body) return;
     this.api.addComment(this.id(), body).subscribe({
       next: () => {
@@ -310,6 +471,7 @@ export class TaskDetailComponent {
     });
   }
   async deleteComment(c: TaskComment) {
+    if (this.isReadOnly()) return;
     const ok = await this.modal.confirm({ title: 'Delete comment', message: 'Delete this comment?', danger: true, confirmLabel: 'Delete' });
     if (!ok) return;
     this.api.deleteComment(this.id(), c.id).subscribe({

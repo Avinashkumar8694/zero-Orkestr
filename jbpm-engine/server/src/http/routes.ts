@@ -5,7 +5,8 @@
 // modules/iam/service.ts's DEFAULT_ROLES for what grants what.
 import { Router } from 'express';
 import type { Request } from 'express';
-import { asyncHandler } from '../infra/errors.ts';
+import { asyncHandler, forbidden } from '../infra/errors.ts';
+import { Collections, type Role } from '../domain.ts';
 import type { AppContext } from '../context.ts';
 import { WorkflowService } from '../modules/workflows/service.ts';
 import { FolderService } from '../modules/folders/service.ts';
@@ -30,11 +31,67 @@ import { exportKjar, validateJbpmExport } from '../modules/export/service.ts';
 import { ImportService } from '../modules/import/service.ts';
 import { ValidationService } from '../modules/validation/service.ts';
 import { openapiSpec, swaggerHtml } from './openapi.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const NODE_FOLDER_MAP: Record<string, string> = {
+  userTask: 'user-task',
+  forEach: 'for-each',
+  workItem: 'work-item',
+};
+
+function getNodeReadme(engineType: string): string {
+  const folder = NODE_FOLDER_MAP[engineType] || engineType;
+  const p = path.resolve(__dirname, `../engine/nodes/${folder}/README.md`);
+  if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8');
+  return '';
+}
+
+const ASSET_FILE_MAP: Record<string, string> = {
+  forms: 'forms.md',
+  decisions: 'decisions-dmn.md',
+  guidedTables: 'guided-tables.md',
+  scorecards: 'scorecards.md',
+  decisionTrees: 'decision-trees.md',
+  types: 'types.md',
+  enumerations: 'enumerations.md',
+  rulesets: 'rulesets-drl.md',
+  messages: 'messages.md',
+  tests: 'tests.md',
+};
+
+function getAssetReadme(kind: string): string {
+  const file = ASSET_FILE_MAP[kind] || `${kind}.md`;
+  const p = path.resolve(__dirname, `../../../docs/usage_docs/assets/${file}`);
+  if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8');
+  return '';
+}
+
+function getCheatSheetReadme(): string {
+  const p = path.resolve(__dirname, '../../../docs/usage_docs/15-javascript-and-flow-variables-cheatsheet.md');
+  if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8');
+  return '';
+}
+
+function getJavaReferenceReadme(): string {
+  const p = path.resolve(__dirname, '../../../docs/usage_docs/16-java-and-imported-script-reference.md');
+  if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8');
+  return '';
+}
+import { resolveWorkflowServiceStore } from '../workflow-service/store/index.ts';
 import { buildWorkflowInstanceRoutes } from './routes/workflow-instances.ts';
 import { buildTeamRoutes } from './team-routes.ts';
+import { buildCaseServiceRoutes } from './routes/case-service.ts';
 import { hub } from '../infra/ws-hub.ts';
-import { requirePermission } from './auth-middleware.ts';
+import { requirePermission, callerPermissions } from './auth-middleware.ts';
+import { PERMISSION_CATALOG } from '../modules/iam/permissions.ts';
 import { rateLimit } from './rate-limit.ts';
+import { decryptInTransit } from '../infra/crypto.ts';
+import { permissionGrants } from '../infra/auth.ts';
 
 const ctxOf = (req: Request): AppContext => (req as any).ctx;
 const actorOf = (req: Request): string => (req as any).actor;
@@ -61,7 +118,7 @@ export function buildRoutes(): Router {
   r.get('/openapi.json', (_req, res) => res.json(openapiSpec));
   r.get('/docs', (_req, res) => res.type('html').send(swaggerHtml));
 
-  // --- catalog: the UI gets the node list + per-node config (palette, ports, property schema) here ---
+  // --- catalog: the UI gets the node list + per-node config (palette, ports, property schema, docs) here ---
   r.get('/catalog/nodes', (_req, res) => res.json({
     categories: CATEGORIES,
     nodes: NODE_DEFS.flatMap((d) => d.palette),                                  // palette tiles
@@ -69,11 +126,31 @@ export function buildRoutes(): Router {
     ports: Object.fromEntries(NODE_DEFS.map((d) => [d.engineType, d.ports])),    // engineType → { in, out }
     diagram: Object.fromEntries(NODE_DEFS.map((d) => [d.engineType, d.diagram])),       // engineType → { icon, color, shape } for diagram rendering
     typeLabels: Object.fromEntries(NODE_DEFS.map((d) => [d.engineType, d.typeLabel])),   // engineType → neutral display name
+    docs: Object.fromEntries(NODE_DEFS.map((d) => [d.engineType, d.docs || null])),      // engineType → structured documentation & scenarios
+    readmes: Object.fromEntries(NODE_DEFS.map((d) => [d.engineType, getNodeReadme(d.engineType)])), // engineType → full markdown README
+    assetReadmes: Object.fromEntries(Object.keys(ASSET_FILE_MAP).map((k) => [k, getAssetReadme(k)])), // assetKind → full markdown README
+    cheatSheet: getCheatSheetReadme(), // full JavaScript & variables cheat sheet markdown
+    javaReference: getJavaReferenceReadme(), // full Java & imported script reference markdown
   }));
+  r.get('/catalog/cheat-sheet', (req, res) => {
+    const lang = String(req.query.lang || 'js');
+    if (lang === 'java') {
+      res.json({ cheatSheet: getJavaReferenceReadme(), lang: 'java' });
+    } else {
+      res.json({ cheatSheet: getCheatSheetReadme(), lang: 'js' });
+    }
+  });
   r.get('/catalog/nodes/:engineType', (req, res) => {
     const def = NODE_DEF_BY_TYPE[req.params.engineType];
     if (!def) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'node type not found' } });
-    res.json(def);
+    const readme = getNodeReadme(req.params.engineType);
+    res.json({ ...def, readme });
+  });
+  r.get('/catalog/assets/readmes', (_req, res) => res.json(Object.fromEntries(Object.keys(ASSET_FILE_MAP).map((k) => [k, getAssetReadme(k)]))));
+  r.get('/catalog/assets/:kind/readme', (req, res) => {
+    const readme = getAssetReadme(req.params.kind);
+    if (!readme) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'asset docs not found' } });
+    res.json({ kind: req.params.kind, readme });
   });
   // Every process a 'call'/'forEach' node can actually resolve at runtime: any process on any
   // currently-active deployment, tenant-wide (same project or a different one) — exactly matching
@@ -117,11 +194,31 @@ export function buildRoutes(): Router {
   r.delete('/folders/:id', perm('workflow:edit'), asyncHandler(async (req, res) => { await new FolderService(ctxOf(req)).delete(req.params.id); res.status(204).end(); }));
 
   // --- workflows ---
-  r.get('/workflows', perm('workflow:view'), asyncHandler(async (req, res) => res.json({ items: await new WorkflowService(ctxOf(req)).list() })));
+  r.get('/workflows', perm('workflow:view'), asyncHandler(async (req, res) => {
+    const svc = new WorkflowService(ctxOf(req));
+    if (req.query.archived === 'true') {
+      return res.json({ items: await svc.listArchived() });
+    }
+    const includeArchived = req.query.includeArchived === 'true' || req.query.all === 'true';
+    res.json({ items: await svc.list(includeArchived) });
+  }));
   r.post('/workflows', perm('workflow:edit'), asyncHandler(async (req, res) => res.status(201).json(await new WorkflowService(ctxOf(req)).create(req.body, actorOf(req)))));
+  r.post('/workflows/purge-archived', perm('workflow:edit'), asyncHandler(async (req, res) => res.json(await new WorkflowService(ctxOf(req)).purgeAllArchived(actorOf(req)))));
   r.get('/workflows/:id', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new WorkflowService(ctxOf(req)).get(req.params.id))));
   r.patch('/workflows/:id', perm('workflow:edit'), asyncHandler(async (req, res) => res.json(await new WorkflowService(ctxOf(req)).update(req.params.id, req.body, actorOf(req)))));
-  r.delete('/workflows/:id', perm('workflow:edit'), asyncHandler(async (req, res) => { await new WorkflowService(ctxOf(req)).archive(req.params.id, actorOf(req)); res.status(204).end(); }));
+  r.delete('/workflows/:id', perm('workflow:edit'), asyncHandler(async (req, res) => {
+    if (req.query.purge === 'true') {
+      await new WorkflowService(ctxOf(req)).purge(req.params.id, actorOf(req));
+      return res.status(204).end();
+    }
+    await new WorkflowService(ctxOf(req)).archive(req.params.id, actorOf(req));
+    res.status(204).end();
+  }));
+  r.post('/workflows/:id/restore', perm('workflow:edit'), asyncHandler(async (req, res) => res.json(await new WorkflowService(ctxOf(req)).restore(req.params.id, actorOf(req)))));
+  r.delete('/workflows/:id/purge', perm('workflow:edit'), asyncHandler(async (req, res) => {
+    await new WorkflowService(ctxOf(req)).purge(req.params.id, actorOf(req));
+    res.status(204).end();
+  }));
   r.put('/workflows/:id/permissions', perm('workflow:edit'), asyncHandler(async (req, res) => res.json(await new WorkflowService(ctxOf(req)).setPermissions(req.params.id, req.body, actorOf(req)))));
   r.put('/workflows/:id/variables', perm('workflow:edit'), asyncHandler(async (req, res) => res.json(await new WorkflowService(ctxOf(req)).setVariables(req.params.id, req.body, actorOf(req)))));
 
@@ -145,7 +242,25 @@ export function buildRoutes(): Router {
   r.get('/workflows/:id/assets/:kind/:name', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new AssetsService(ctxOf(req)).get(req.params.id, req.params.kind, req.params.name))));
   r.patch('/workflows/:id/assets/:kind/:name', perm('workflow:edit'), asyncHandler(async (req, res) => res.json(await new AssetsService(ctxOf(req)).update(req.params.id, req.params.kind, req.params.name, req.body || {}, actorOf(req)))));
   r.post('/workflows/:id/assets/:kind/:name/test', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new AssetsService(ctxOf(req)).testAsset(req.params.id, req.params.kind, req.params.name, req.body || {}))));
+  r.post('/workflows/:id/assets/:kind/:name/duplicate', perm('workflow:edit'), asyncHandler(async (req, res) => res.status(201).json(await new AssetsService(ctxOf(req)).duplicate(req.params.id, req.params.kind, req.params.name, req.body?.newName, actorOf(req)))));
   r.delete('/workflows/:id/assets/:kind/:name', perm('workflow:edit'), asyncHandler(async (req, res) => { await new AssetsService(ctxOf(req)).remove(req.params.id, req.params.kind, req.params.name, actorOf(req)); res.status(204).end(); }));
+
+  // --- project-scoped audit log (accessible with workflow:view) ---
+  r.get('/workflows/:id/audit', perm('workflow:view'), asyncHandler(async (req, res) => {
+    const { limit, offset, ...rest } = req.query as Record<string, string>;
+    res.json(await new AuditService(ctxOf(req)).list({
+      ...rest,
+      workflowId: req.params.id,
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    }));
+  }));
+  r.get('/workflows/:id/audit/facets', perm('workflow:view'), asyncHandler(async (req, res) => {
+    res.json(await new AuditService(ctxOf(req)).facets(req.params.id));
+  }));
+  r.get('/workflows/:id/audit/:eventId', perm('workflow:view'), asyncHandler(async (req, res) => {
+    res.json(await new AuditService(ctxOf(req)).get(req.params.eventId, req.params.id));
+  }));
 
   // --- branches ---
   r.get('/workflows/:id/branches', perm('workflow:view'), asyncHandler(async (req, res) => res.json({ items: await new BranchService(ctxOf(req)).listByWorkflow(req.params.id) })));
@@ -176,7 +291,14 @@ export function buildRoutes(): Router {
   // --- deployments ---
   // cross-project listing (Deployments is a top-level page, same shape as GET /instances) —
   // workflows/:id/deployments below stays as the per-project convenience alias.
-  r.get('/deployments', perm('workflow:view'), asyncHandler(async (req, res) => res.json({ items: await new DeploymentService(ctxOf(req)).list(req.query as any) })));
+  r.get('/deployments', perm('workflow:view'), asyncHandler(async (req, res) => {
+    const depService = new DeploymentService(ctxOf(req));
+    const all = await depService.list({ ...req.query as any, limit: undefined, offset: undefined });
+    const offset = req.query.offset ? Math.max(0, Number(req.query.offset)) : 0;
+    const limit = req.query.limit ? Math.max(1, Number(req.query.limit)) : undefined;
+    const paged = limit != null ? all.slice(offset, offset + limit) : all;
+    res.json({ items: paged, total: all.length, hasMore: limit != null ? offset + limit < all.length : false, offset, limit: limit ?? all.length });
+  }));
   r.get('/workflows/:id/deployments', perm('workflow:view'), asyncHandler(async (req, res) => res.json({ items: await new DeploymentService(ctxOf(req)).listByWorkflow(req.params.id) })));
   r.get('/deployments/:id', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new DeploymentService(ctxOf(req)).get(req.params.id))));
   r.post('/deployments/:id/tags', perm('workflow:deploy'), asyncHandler(async (req, res) => res.json(await new DeploymentService(ctxOf(req)).setTags(req.params.id, req.body, actorOf(req)))));
@@ -188,6 +310,18 @@ export function buildRoutes(): Router {
     const d = await new DeploymentService(ctxOf(req)).get(req.params.id);
     res.json(exportKjar(d.engine));
   }));
+  r.get('/deployments/:id/snapshot', perm('workflow:view'), asyncHandler(async (req, res) => {
+    const snap = await new DeploymentService(ctxOf(req)).exportSnapshot(req.params.id);
+    const filename = `deployment-${snap.deployment.workflowId}-${snap.deployment.environment}-v${snap.deployment.versionNumber || 1}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.json(snap);
+  }));
+  r.post('/deployments/:id/restore', perm('workflow:edit'), asyncHandler(async (req, res) => {
+    res.json(await new DeploymentService(ctxOf(req)).restore(req.params.id, actorOf(req)));
+  }));
+  r.post('/deployments/import', perm('workflow:deploy'), asyncHandler(async (req, res) => {
+    res.status(201).json(await new DeploymentService(ctxOf(req)).importSnapshot(req.body, actorOf(req)));
+  }));
   r.get('/deployments/:id/definitions', perm('workflow:view'), asyncHandler(async (req, res) => {
     const d = await new DeploymentService(ctxOf(req)).get(req.params.id);
     res.json({ items: (d.engine.processes || []).map((p) => ({ id: p.id, name: p.name || p.id, nodes: (p.nodes || []).length, startable: (p.nodes || []).some((n) => n.type === 'start') })) });
@@ -195,28 +329,204 @@ export function buildRoutes(): Router {
 
   // --- instances (runtime) ---
   r.post('/instances', perm('workflow:run'), startLimiter, asyncHandler(async (req, res) => res.status(201).json(await new InstanceService(ctxOf(req), emit).start(req.body, actorOf(req)))));
-  r.get('/instances', perm('workflow:view'), asyncHandler(async (req, res) => res.json({ items: await new InstanceService(ctxOf(req)).list(req.query as any) })));
-  r.get('/instances/:id', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).get(req.params.id))));
+  r.get('/instances', perm('workflow:view'), asyncHandler(async (req, res) => {
+    const ctx = ctxOf(req);
+    const instService = new InstanceService(ctx);
+    const qStr = ((req.query.q || req.query.search || '') as string).trim().toLowerCase();
+    const typeFilter = ((req.query.type || 'all') as string).toLowerCase();
+    const isFull = req.query.full === 'true';
+
+    // Fetch instances without pagination first so unified search and case-joining can be performed accurately
+    const instances = await instService.list({
+      workflowId: req.query.workflowId as string,
+      deploymentId: req.query.deploymentId as string,
+      correlationKey: req.query.correlationKey as string,
+      full: isFull,
+    });
+
+    let caseMap = new Map<string, any>();
+    let orphanCases: any[] = [];
+    try {
+      const wfStore = resolveWorkflowServiceStore(ctx.store);
+      const cases = await wfStore.instances().query((w) => w.tenantId === ctx.tenantId);
+      for (const c of cases) {
+        if (c.piid) {
+          caseMap.set(c.piid, c);
+        } else {
+          orphanCases.push(c);
+        }
+      }
+    } catch {}
+
+    const allItems: any[] = [];
+
+    for (const inst of instances) {
+      const c = caseMap.get(inst.id);
+      allItems.push({
+        ...inst,
+        history: isFull ? inst.history : [],
+        tokens: isFull ? inst.tokens : [],
+        caseInstanceId: c?.id,
+        caseWorkflowName: c?.workflowName,
+        caseStatus: c?.status,
+        caseData: isFull ? c?.data : undefined,
+      });
+    }
+
+    for (const c of orphanCases) {
+      {
+        if (!req.query.workflowId || req.query.workflowId === c.workflowName) {
+          allItems.push({
+            id: c.id,
+            tenantId: c.tenantId,
+            workflowId: c.workflowName,
+            deploymentId: c.deploymentId,
+            processId: c.workflowName,
+            status: c.status,
+            variables: {},
+            tokens: [],
+            history: [],
+            startedAt: c.createdAt,
+            startedBy: c.createdBy,
+            error: c.startError ? { message: c.startError } : undefined,
+            caseInstanceId: c.id,
+            caseWorkflowName: c.workflowName,
+            caseStatus: c.status,
+            caseData: isFull ? c.data : undefined,
+          });
+        }
+      }
+    }
+
+    // Sort descending by startedAt
+    allItems.sort((a, b) => ((b.startedAt || '') > (a.startedAt || '') ? 1 : -1));
+
+    // Every filter is applied HERE, on the server, so what is selected is what is fetched (and paging stays consistent).
+    // `status` is a comma-separated list; `startedBy` matches the initiator; `errorsOnly` keeps failed/errored instances.
+    const statusParam = (req.query.status as string) || '';
+    const statusSet = statusParam ? new Set(statusParam.split(',').map((x) => x.trim()).filter(Boolean)) : null;
+    const byStr = ((req.query.startedBy || '') as string).trim().toLowerCase();
+    const errorsOnly = req.query.errorsOnly === 'true';
+    const matches = (i: any, skip: 'status' | 'type' | null) => {
+      if (skip !== 'status' && statusSet && !statusSet.has(i.status)) return false;
+      if (skip !== 'type' && typeFilter === 'cases' && !i.caseInstanceId) return false;
+      if (skip !== 'type' && typeFilter === 'process' && !!i.caseInstanceId) return false;
+      if (errorsOnly && i.status !== 'failed' && !i.error) return false;
+      if (byStr && !(i.startedBy || '').toLowerCase().includes(byStr)) return false;
+      if (qStr) {
+        const hay = [i.id, i.processId, i.workflowId, i.caseInstanceId, i.caseWorkflowName, i.startedBy, i.correlationKey];
+        if (!hay.some((h) => (h || '').toLowerCase().includes(qStr))) return false;
+      }
+      return true;
+    };
+    const filtered = allItems.filter((i) => matches(i, null));
+    // Faceted counts: how many there WOULD be per state / per type given every OTHER filter — so ticking a state never
+    // makes the other states' numbers collapse to 0.
+    const byStatus: Record<string, number> = {};
+    for (const i of allItems) if (matches(i, 'status')) byStatus[i.status] = (byStatus[i.status] || 0) + 1;
+    const typeBase = allItems.filter((i) => matches(i, 'type'));
+    const byType = { all: typeBase.length, cases: typeBase.filter((i) => !!i.caseInstanceId).length, process: typeBase.filter((i) => !i.caseInstanceId).length };
+
+    const offset = req.query.offset ? Math.max(0, Number(req.query.offset)) : 0;
+    const limit = req.query.limit ? Math.max(1, Number(req.query.limit)) : undefined;
+    const total = filtered.length;
+    const paged = limit != null ? filtered.slice(offset, offset + limit) : filtered;
+    const hasMore = limit != null ? offset + limit < total : false;
+
+    res.json({
+      items: paged,
+      total,
+      hasMore,
+      offset,
+      limit: limit ?? total,
+      counts: { byStatus, byType },
+    });
+  }));
+
+  r.get('/instances/:id', perm('workflow:view'), asyncHandler(async (req, res) => {
+    const ctx = ctxOf(req);
+    const instService = new InstanceService(ctx);
+    try {
+      const inst = await instService.get(req.params.id);
+      try {
+        const wfStore = resolveWorkflowServiceStore(ctx.store);
+        const cases = await wfStore.instances().query((w) => w.tenantId === ctx.tenantId && w.piid === inst.id);
+        if (cases.length) {
+          (inst as any).caseInstanceId = cases[0].id;
+          (inst as any).caseWorkflowName = cases[0].workflowName;
+          (inst as any).caseStatus = cases[0].status;
+          (inst as any).caseData = cases[0].data;
+        }
+      } catch {}
+      return res.json(inst);
+    } catch (e: any) {
+      try {
+        const wfStore = resolveWorkflowServiceStore(ctx.store);
+        const c = await wfStore.instances().get(req.params.id);
+        if (c && c.tenantId === ctx.tenantId) {
+          return res.json({
+            id: c.id,
+            tenantId: c.tenantId,
+            workflowId: c.workflowName,
+            deploymentId: c.deploymentId,
+            processId: c.workflowName,
+            status: c.status,
+            variables: {},
+            tokens: [],
+            history: [],
+            startedAt: c.createdAt,
+            startedBy: c.createdBy,
+            error: c.startError ? { message: c.startError } : undefined,
+            caseInstanceId: c.id,
+            caseWorkflowName: c.workflowName,
+            caseStatus: c.status,
+            caseData: c.data,
+          });
+        }
+      } catch {}
+      throw e;
+    }
+  }));
   r.get('/instances/:id/history', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).history(req.params.id))));
   r.get('/instances/:id/diagram-state', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).diagramState(req.params.id))));
   r.get('/instances/:id/graph', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).graph(req.params.id))));
   r.get('/instances/:id/related', perm('workflow:view'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).related(req.params.id))));
+  r.post('/instances/bulk/abort', perm('workflow:run'), asyncHandler(async (req, res) => res.json({ results: await new InstanceService(ctxOf(req), emit).abortMany(req.body?.instanceIds || [], actorOf(req)) })));
+  r.post('/instances/bulk/signal', perm('workflow:run'), asyncHandler(async (req, res) => res.json({ results: await new InstanceService(ctxOf(req), emit).signalMany(req.body?.instanceIds || [], req.body?.name, req.body?.payload, actorOf(req)) })));
   r.post('/instances/:id/signal', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req), emit).signal(req.params.id, req.body?.name, req.body?.payload, actorOf(req)))));
   r.post('/instances/:id/retry', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req), emit).retry(req.params.id, req.body?.nodeId, actorOf(req)))));
   r.post('/instances/:id/suspend', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).suspend(req.params.id, actorOf(req)))));
   r.post('/instances/:id/resume', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).resumeInstance(req.params.id, actorOf(req)))));
   r.post('/instances/:id/abort', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).abort(req.params.id, actorOf(req)))));
   r.put('/instances/:id/variables', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req)).updateVariables(req.params.id, req.body || {}, actorOf(req)))));
+  r.get('/instances/:id/variables', perm('workflow:view'), asyncHandler(async (req, res) => res.json((await new InstanceService(ctxOf(req)).get(req.params.id)).variables || {})));
   r.get('/instances/:id/variable-history', perm('workflow:view'), asyncHandler(async (req, res) => res.json({ items: await new InstanceService(ctxOf(req)).variableHistory(req.params.id, req.query.name as string | undefined) })));
+  r.get('/instances/:id/nodes', perm('workflow:view'), asyncHandler(async (req, res) => res.json({ items: await new InstanceService(ctxOf(req)).nodes(req.params.id) })));
+  r.post('/signals/:signalName', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await new InstanceService(ctxOf(req), emit).broadcast(req.params.signalName, req.body?.payload, actorOf(req), req.body?.correlationKey))));
 
   // --- tasks (task-level group/assignee/excludedOwners/businessAdmin checks happen inside TaskService
   // itself — see modules/tasks/service.ts — on top of the role-level task:manage gate here) ---
-  r.get('/tasks', perm('task:manage'), asyncHandler(async (req, res) => res.json({ items: await taskSvc(req).list({ ...req.query as any, overdue: req.query.overdue === 'true' }) })));
+  r.get('/tasks', perm('task:manage'), asyncHandler(async (req, res) => {
+    const taskService = taskSvc(req);
+    const all = await taskService.list({ ...req.query as any, overdue: req.query.overdue === 'true', limit: undefined, offset: undefined });
+    const offset = req.query.offset ? Math.max(0, Number(req.query.offset)) : 0;
+    const limit = req.query.limit ? Math.max(1, Number(req.query.limit)) : undefined;
+    const paged = limit != null ? all.slice(offset, offset + limit) : all;
+    res.json({ items: paged, total: all.length, hasMore: limit != null ? offset + limit < all.length : false, offset, limit: limit ?? all.length });
+  }));
+  r.post('/tasks/bulk/claim', perm('task:manage'), asyncHandler(async (req, res) => res.json({ results: await taskSvc(req).claimMany(req.body?.taskIds || [], actorOf(req)) })));
+  r.post('/tasks/bulk/release', perm('task:manage'), asyncHandler(async (req, res) => res.json({ results: await taskSvc(req).releaseMany(req.body?.taskIds || [], actorOf(req)) })));
+  r.post('/tasks/bulk/complete', perm('task:manage'), asyncHandler(async (req, res) => res.json({ results: await taskSvc(req, emit).completeMany(req.body?.items || [], actorOf(req)) })));
   r.get('/tasks/:id', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req).get(req.params.id))));
+  r.get('/tasks/:id/inputs', perm('task:manage'), asyncHandler(async (req, res) => res.json((await taskSvc(req).get(req.params.id)).inputs || {})));
+  r.get('/tasks/:id/outputs', perm('task:manage'), asyncHandler(async (req, res) => res.json((await taskSvc(req).get(req.params.id)).outputs || {})));
   r.post('/tasks/:id/claim', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req).claim(req.params.id, actorOf(req)))));
   r.post('/tasks/:id/release', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req).release(req.params.id, actorOf(req)))));
   r.post('/tasks/:id/complete', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req, emit).complete(req.params.id, req.body?.outputs || {}, actorOf(req)))));
   r.post('/tasks/:id/skip', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req, emit).skip(req.params.id, actorOf(req)))));
+  r.post('/tasks/:id/fail', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req, emit).fail(req.params.id, req.body, actorOf(req)))));
+  r.post('/tasks/:id/suspend', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req).suspend(req.params.id, actorOf(req)))));
+  r.post('/tasks/:id/resume', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req).resume(req.params.id, actorOf(req)))));
   r.post('/tasks/:id/start', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req).start(req.params.id, actorOf(req)))));
   r.post('/tasks/:id/stop', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req).stop(req.params.id, actorOf(req)))));
   r.post('/tasks/:id/save', perm('task:manage'), asyncHandler(async (req, res) => res.json(await taskSvc(req).saveOutputs(req.params.id, req.body?.outputs || {}, actorOf(req)))));
@@ -227,6 +537,9 @@ export function buildRoutes(): Router {
   r.get('/tasks/:id/comments', perm('task:manage'), asyncHandler(async (req, res) => res.json({ items: await taskSvc(req).listComments(req.params.id) })));
   r.post('/tasks/:id/comments', perm('task:manage'), asyncHandler(async (req, res) => res.status(201).json(await taskSvc(req).addComment(req.params.id, req.body?.body, actorOf(req)))));
   r.delete('/tasks/:id/comments/:cid', perm('task:manage'), asyncHandler(async (req, res) => { await taskSvc(req).deleteComment(req.params.id, req.params.cid, actorOf(req)); res.status(204).end(); }));
+  r.get('/tasks/:id/attachments', perm('task:manage'), asyncHandler(async (req, res) => res.json({ items: await taskSvc(req).listAttachments(req.params.id) })));
+  r.post('/tasks/:id/attachments', perm('task:manage'), asyncHandler(async (req, res) => res.status(201).json(await taskSvc(req).addAttachment(req.params.id, req.body || {}, actorOf(req)))));
+  r.delete('/tasks/:id/attachments/:aid', perm('task:manage'), asyncHandler(async (req, res) => { await taskSvc(req).deleteAttachment(req.params.id, req.params.aid, actorOf(req)); res.status(204).end(); }));
   r.get('/tasks/:id/events', perm('task:manage'), asyncHandler(async (req, res) => res.json({ items: await taskSvc(req).events(req.params.id) })));
 
   // --- execution errors (the operational failure queue — see modules/errors/service.ts) ---
@@ -253,12 +566,46 @@ export function buildRoutes(): Router {
   r.post('/jobs/:id/trigger', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await timers(req).trigger(req.params.id, actorOf(req)))));
   r.post('/jobs/:id/reschedule', perm('workflow:run'), asyncHandler(async (req, res) => res.json(await timers(req).rescheduleJob(req.params.id, req.body?.dueAt, actorOf(req)))));
 
-  // --- audit log (reads the trail every service writes via ctx.audit) ---
-  r.get('/audit', perm('admin:iam'), asyncHandler(async (req, res) => {
-    const { limit, offset, ...rest } = req.query as Record<string, string>;
-    res.json(await new AuditService(ctxOf(req)).list({ ...rest, limit: limit ? Number(limit) : undefined, offset: offset ? Number(offset) : undefined }));
+  // --- audit log (admin:iam for global system audit, or workflow:view scoped to workflowId) ---
+  // Audit trail. Admins (admin:iam) see the whole workspace; anyone else with workflow:view only sees events that belong to a
+  // workflow they name. Permissions are the caller's real ones in THIS workspace (membership role / explicit permissions /
+  // IAM roles), the same resolution every other guard uses.
+  const auditScope = async (req: Request) => {
+    const perms = await callerPermissions(req);
+    return { isAdmin: permissionGrants(perms, 'admin:iam'), canViewWf: permissionGrants(perms, 'workflow:view') };
+  };
+  r.get('/audit', perm('admin:iam', 'workflow:view'), asyncHandler(async (req, res) => {
+    const ctx = ctxOf(req);
+    const { isAdmin, canViewWf } = await auditScope(req);
+    const { limit, offset, workflowId, ...rest } = req.query as Record<string, string>;
+    if (!isAdmin) {
+      if (!canViewWf) throw forbidden('missing permission: admin:iam or workflow:view');
+      if (!workflowId) throw forbidden('non-admin users must specify a workflowId to view audit logs');
+    }
+    res.json(await new AuditService(ctx).list({
+      ...rest,
+      ...(workflowId ? { workflowId } : {}),
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    }));
   }));
-  r.get('/audit/facets', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await new AuditService(ctxOf(req)).facets())));
+  r.get('/audit/facets', perm('admin:iam', 'workflow:view'), asyncHandler(async (req, res) => {
+    const ctx = ctxOf(req);
+    const { isAdmin, canViewWf } = await auditScope(req);
+    const workflowId = req.query.workflowId as string | undefined;
+    if (!isAdmin) {
+      if (!canViewWf) throw forbidden('missing permission: admin:iam or workflow:view');
+      if (!workflowId) throw forbidden('non-admin users must specify a workflowId to view audit facets');
+    }
+    res.json(await new AuditService(ctx).facets(workflowId));
+  }));
+  r.get('/audit/:id', perm('admin:iam', 'workflow:view'), asyncHandler(async (req, res) => {
+    const ctx = ctxOf(req);
+    const { isAdmin, canViewWf } = await auditScope(req);
+    const ev = await new AuditService(ctx).get(req.params.id);
+    if (!isAdmin && (!canViewWf || !ev.workflowId)) throw forbidden('missing permission: admin:iam');
+    res.json(ev);
+  }));
 
   // --- notifications (always scoped to the caller — no cross-user reads) ---
   r.get('/notifications', asyncHandler(async (req, res) => res.json(await new NotificationService(ctxOf(req)).listFor(actorOf(req), { unread: req.query.unread === 'true', limit: req.query.limit ? Number(req.query.limit) : undefined }))));
@@ -271,7 +618,9 @@ export function buildRoutes(): Router {
   // the workspace's plan, its limits and what it has used (every member may look; the platform admin edits plans)
   r.get('/plan/usage', perm('team:read'), asyncHandler(async (req, res) => res.json(await planUsageFor(ctxOf(req)))));
   r.get('/settings/system', asyncHandler(async (req, res) => {
-    const s = await new SettingsService(ctxOf(req)).get();
+    // secrets (SMTP password, outbound allow-list) are only revealed to someone who administers the workspace
+    const isAdmin = permissionGrants(await callerPermissions(req), 'admin:iam');
+    const s = await new SettingsService(ctxOf(req)).get(isAdmin);
     const { effective, caps } = await effectiveLimitsFor(ctxOf(req));
     res.json({
       ...s,
@@ -280,7 +629,18 @@ export function buildRoutes(): Router {
       limitCaps: caps,              // what this workspace may not exceed (set by the platform administrator)
     });
   }));
-  r.put('/settings/system', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await new SettingsService(ctxOf(req)).update(req.body || {}, actorOf(req)))));
+  r.put('/settings/system', perm('admin:iam'), asyncHandler(async (req, res) => {
+    const patch = { ...(req.body || {}) };
+    if (patch.smtpPassword) patch.smtpPassword = decryptInTransit(patch.smtpPassword);
+    // The outbound allow-list EXEMPTS hosts from the private-network (SSRF) block, so on a shared platform only the platform
+    // administrator may change it. A normal save that merely echoes the current (or masked) value is fine.
+    if ('outboundAllowlist' in patch && !(req as any).access?.platformAdmin) {
+      const current = (await new SettingsService(ctxOf(req)).get(true)).outboundAllowlist ?? '';
+      if ((patch.outboundAllowlist ?? '') !== current && patch.outboundAllowlist !== '***') throw forbidden('The outbound allow-list is controlled by the platform administrator');
+      delete patch.outboundAllowlist;
+    }
+    res.json(await new SettingsService(ctxOf(req)).update(patch, actorOf(req)));
+  }));
 
   // --- query / task-admin / analytics (jBPM KIE-Server-style; see docs/17) ---
   const q = (req: Request) => new QueryService(ctxOf(req));
@@ -293,29 +653,64 @@ export function buildRoutes(): Router {
   r.get('/query/users/:user/tasks/completed', perm('query:read'), asyncHandler(async (req, res) => res.json({ items: await q(req).tasksCompletedByUser(req.params.user) })));
   r.get('/query/groups/:group/tasks', perm('query:read'), asyncHandler(async (req, res) => res.json({ items: await q(req).tasksForGroup(req.params.group, s(req)) })));
   r.get('/query/instances/:id/tasks', perm('query:read'), asyncHandler(async (req, res) => res.json({ items: await q(req).instanceTasks(req.params.id) })));
-  r.get('/query/analytics/tasks', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).taskAnalytics())));
-  r.get('/query/analytics/processes', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).processAnalytics())));
-  r.get('/query/analytics/summary', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).summary())));
+  r.get('/query/analytics/tasks', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).taskAnalytics(req.query as any))));
+  r.get('/query/analytics/processes', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).processAnalytics(req.query as any))));
+  r.get('/query/analytics/summary', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).summary(req.query as any))));
+  r.get('/query/analytics/sla-violations', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).slaViolations(req.query as any))));
+  r.get('/query/analytics/workload', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).workload(req.query as any))));
+  r.get('/query/analytics/projects', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).projectAnalytics(req.query as any))));
+  r.get('/query/analytics/users', perm('query:read'), asyncHandler(async (req, res) => res.json({ items: await q(req).userAnalytics(req.query as any) })));
+  r.get('/query/analytics/users/:user', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).userAnalytics({ ...(req.query as any), user: req.params.user }))));
+  r.get('/query/analytics/groups', perm('query:read'), asyncHandler(async (req, res) => res.json({ items: await q(req).groupAnalytics(req.query as any) })));
+  r.get('/query/analytics/groups/:group', perm('query:read'), asyncHandler(async (req, res) => res.json(await q(req).groupAnalytics({ ...(req.query as any), group: req.params.group }))));
+  r.get('/query/analytics/task-definitions', perm('query:read'), asyncHandler(async (req, res) => res.json({ items: await q(req).taskDefinitionsAnalytics(req.query as any) })));
+  r.get('/query/analytics/process-definitions', perm('query:read'), asyncHandler(async (req, res) => res.json({ items: await q(req).processDefinitionsAnalytics(req.query as any) })));
   r.get('/query/jobs', perm('query:read'), asyncHandler(async (req, res) => res.json({ items: await q(req).jobs(s(req)) })));
 
-  // --- IAM: users, groups, roles (admin-only) ---
+  // --- IAM: users, groups, roles (admin-only mutation, directory read allowed for task managers) ---
   const iam = (req: Request) => new IamService(ctxOf(req));
-  r.get('/users', perm('admin:iam'), asyncHandler(async (req, res) => res.json({ items: await iam(req).listUsers() })));
-  r.post('/users', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createUser(req.body, actorOf(req)))));
-  r.get('/users/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).getUser(req.params.id))));
-  r.patch('/users/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateUser(req.params.id, req.body, actorOf(req)))));
-  r.post('/users/:id/password', perm('admin:iam'), asyncHandler(async (req, res) => { await iam(req).setPassword(req.params.id, req.body?.password, actorOf(req)); res.status(204).end(); }));
-  r.get('/groups', perm('admin:iam'), asyncHandler(async (req, res) => res.json({ items: await iam(req).listGroups() })));
-  r.post('/groups', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createGroup(req.body, actorOf(req)))));
+  // Task workers (task:manage) need to pick an assignee/group when delegating or forwarding, so they may LIST users and groups —
+  // but only a minimal projection (no e-mail, roles, login state); the full records stay behind admin:iam.
+  const isIamAdmin = async (req: Request) => permissionGrants(await callerPermissions(req), 'admin:iam');
+  r.get('/users', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => {
+    const items = await iam(req).listUsers();
+    res.json({ items: (await isIamAdmin(req)) ? items : items.filter((u) => u.active).map((u) => ({ id: u.id, username: u.username, displayName: u.displayName, groups: u.groups })) });
+  }));
+  r.post('/users', perm('admin:iam'), asyncHandler(async (req, res) => {
+    const input = { ...(req.body || {}) };
+    if (input.password) input.password = decryptInTransit(input.password);
+    res.status(201).json(await iam(req).createUser(input, actorOf(req), await callerPermissions(req)));
+  }));
+  r.get('/users/:id', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => {
+    const u = await iam(req).getUser(req.params.id);
+    res.json((await isIamAdmin(req)) ? u : { id: u.id, username: u.username, displayName: u.displayName, groups: u.groups });
+  }));
+  r.patch('/users/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateUser(req.params.id, req.body || {}, actorOf(req), await callerPermissions(req)))));
+  r.post('/users/:id/password', perm('admin:iam'), asyncHandler(async (req, res) => {
+    const plain = decryptInTransit(req.body?.password) ?? '';
+    await iam(req).setPassword(req.params.id, plain, actorOf(req));
+    res.status(204).end();
+  }));
+  r.get('/groups', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => {
+    const items = await iam(req).listGroups();
+    res.json({ items: (await isIamAdmin(req)) ? items : items.map((g) => ({ id: g.id, name: g.name, description: g.description })) });
+  }));
+  r.post('/groups', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createGroup(req.body || {}, actorOf(req)))));
+  r.patch('/groups/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateGroup(req.params.id, req.body || {}, actorOf(req)))));
+  r.put('/groups/:id/members', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).setGroupMembers(req.params.id, req.body?.userIds, actorOf(req)))));
   r.delete('/groups/:id', perm('admin:iam'), asyncHandler(async (req, res) => { await iam(req).deleteGroup(req.params.id, actorOf(req)); res.status(204).end(); }));
   r.get('/roles', perm('admin:iam'), asyncHandler(async (req, res) => res.json({ items: await iam(req).listRoles() })));
-  r.post('/roles', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createRole(req.body, actorOf(req)))));
-  r.patch('/roles/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateRole(req.params.id, req.body?.permissions || [], actorOf(req)))));
-  r.delete('/roles/:id', perm('admin:iam'), asyncHandler(async (req, res) => { await iam(req).deleteRole(req.params.id, actorOf(req)); res.status(204).end(); }));
+  r.get('/roles/permissions', perm('admin:iam'), asyncHandler(async (_req, res) => res.json({ items: PERMISSION_CATALOG })));
+  r.post('/roles', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await iam(req).createRole(req.body || {}, actorOf(req), await callerPermissions(req)))));
+  r.patch('/roles/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await iam(req).updateRole(req.params.id, req.body?.permissions, actorOf(req), await callerPermissions(req)))));
+  r.delete('/roles/:id', perm('admin:iam'), asyncHandler(async (req, res) => { const out = await iam(req).deleteRole(req.params.id, actorOf(req)); out.reset ? res.json(out) : res.status(204).end(); }));
 
   // --- Workflow Instance Management (Case Management) ---
   r.use(buildWorkflowInstanceRoutes());
   r.use(buildTeamRoutes());   // workspace members, invitations, ownership
+
+  // --- Case Service (Consolidated Claim Case API) ---
+  r.use(buildCaseServiceRoutes());
 
   return r;
 }

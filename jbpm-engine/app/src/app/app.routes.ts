@@ -32,13 +32,15 @@ export const routes: Routes = [
           { path: 'processes/:pid', loadComponent: () => import('./features/project/project-process-canvas-page.component').then((m) => m.ProjectProcessCanvasPageComponent) },
           { path: 'assets', loadComponent: () => import('./features/project/project-assets.component').then((m) => m.ProjectAssetsComponent) },
           { path: 'platform-limits', canActivate: [() => inject(TenantService).isSystemAdmin()], loadComponent: () => import('./features/settings/platform-limits.component').then((m) => m.PlatformLimitsComponent) },
-      { path: 'settings', loadComponent: () => import('./features/project/project-settings.component').then((m) => m.ProjectSettingsComponent) },
+          { path: 'audit', loadComponent: () => import('./features/project/project-audit.component').then((m) => m.ProjectAuditComponent) },
+          { path: 'settings', loadComponent: () => import('./features/project/project-settings.component').then((m) => m.ProjectSettingsComponent) },
         ],
       },
       // Deployments/Instances are top-level, cross-project pages (like Tasks) — a deployment/instance
       // always belongs to one project, but browsing them is a cross-project concern, matching real
       // jBPM's Deploy/Manage menus. Project header links pass ?workflowId= to pre-filter.
       { path: 'deployments', loadComponent: () => import('./features/deployments/deployments.component').then((m) => m.DeploymentsComponent) },
+      { path: 'deployments/:id', loadComponent: () => import('./features/deployments/deployment-detail.component').then((m) => m.DeploymentDetailComponent) },
       { path: 'instances', loadComponent: () => import('./features/instances/instances.component').then((m) => m.InstancesComponent) },
       // Start New Instance is its own page (jBPM's "New Process Instance" flow), not a modal —
       // it must come before instances/:id or "start" would be read as an instance id.
@@ -47,6 +49,7 @@ export const routes: Routes = [
       { path: 'instances/:id', loadComponent: () => import('./features/instances/instance-detail.component').then((m) => m.InstanceDetailComponent) },
       // Operations pages share the Instances list+rail shape (see ux_design execution-errors.html).
       { path: 'errors', loadComponent: () => import('./features/ops/execution-errors.component').then((m) => m.ExecutionErrorsComponent) },
+      { path: 'errors/:id', loadComponent: () => import('./features/ops/execution-error-detail.component').then((m) => m.ExecutionErrorDetailComponent) },
       { path: 'jobs', loadComponent: () => import('./features/ops/jobs-timers.component').then((m) => m.JobsTimersComponent) },
       { path: 'reports', loadComponent: () => import('./features/reports/reports.component').then((m) => m.ReportsComponent) },
       {
@@ -66,6 +69,11 @@ export const routes: Routes = [
         loadComponent: () => import('./features/ops/audit-log.component').then((m) => m.AuditLogComponent),
       },
       {
+        path: 'audit/:id',
+        canActivate: [permissionGuard('admin:iam')],
+        loadComponent: () => import('./features/ops/audit-detail.component').then((m) => m.AuditDetailComponent),
+      },
+      {
         path: 'admin',
         canActivate: [permissionGuard('admin:iam')],
         loadComponent: () => import('./features/admin/admin-shell.component').then((m) => m.AdminShellComponent),
@@ -74,6 +82,7 @@ export const routes: Routes = [
       { path: 'plan', loadComponent: () => import('./features/plan/plan-usage.component').then((m) => m.PlanUsageComponent) },
       { path: 'team', canActivate: [permissionGuard('team:read')], loadComponent: () => import('./features/team/team-page.component').then((m) => m.TeamPageComponent) },
       { path: 'settings', loadComponent: () => import('./features/settings/settings.component').then((m) => m.SettingsComponent) },
+      { path: 'integration-guide', loadComponent: () => import('./features/integration-guide/integration-guide.component').then((m) => m.IntegrationGuideComponent) },
       // Workflow Instance Management (Case Management)
       {
         path: 'workflow-management',
@@ -82,18 +91,17 @@ export const routes: Routes = [
       },
       {
         path: 'workflow-instances',
-        canActivate: [permissionGuard('workflowInstance:manage')],
-        loadComponent: () => import('./features/workflow-mgmt/workflow-instances-list.component').then((m) => m.WorkflowInstancesListComponent),
+        redirectTo: 'instances',
+        pathMatch: 'full',
       },
       {
         path: 'workflow-instances/:id',
-        canActivate: [permissionGuard('workflowInstance:manage')],
-        loadComponent: () => import('./features/workflow-mgmt/workflow-instance-detail.component').then((m) => m.WorkflowInstanceDetailComponent),
+        loadComponent: () => import('./features/instances/instance-detail.component').then((m) => m.InstanceDetailComponent),
       },
       {
         path: 'workflow-analytics',
-        canActivate: [permissionGuard('query:read')],
-        loadComponent: () => import('./features/workflow-mgmt/workflow-analytics.component').then((m) => m.WorkflowAnalyticsComponent),
+        redirectTo: 'reports',
+        pathMatch: 'full',
       },
     ],
   },

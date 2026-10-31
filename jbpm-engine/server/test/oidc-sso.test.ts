@@ -207,7 +207,11 @@ test('roles map to permissions inside a brand-new workspace (no Role rows needed
   assert.strictEqual((await get('/workflows', v, t.id)).status, 200);
   assert.strictEqual((await post('/workflows', { name: 'x' }, v, t.id)).status, 403, 'viewer cannot edit');
   assert.notStrictEqual((await post('/workflows', { name: 'x' }, d, t.id)).status, 403, 'developer can edit');
-  assert.strictEqual((await get('/users', d, t.id)).status, 403, 'developer is not an IAM admin');
+  // a developer (task:manage) may list assignees, but only a minimal projection — and is not an IAM admin otherwise
+  const assignees = await get('/users', d, t.id);
+  assert.strictEqual(assignees.status, 200);
+  assert.ok(((await assignees.json()) as any).items.every((u: any) => u.email === undefined && u.roles === undefined), 'no e-mail/roles for non-admins');
+  assert.strictEqual((await post('/users', { username: 'x', password: 'Sup3r-secret-pw' }, d, t.id)).status, 403, 'developer is not an IAM admin');
   assert.strictEqual((await get('/users', o, t.id)).status, 200, 'owner is');
   const profile = await (await get('/me/profile', d, t.id)).json() as any;
   assert.ok(profile.data.member.permissions.includes('workflow:edit'), 'UI profile reflects the role');

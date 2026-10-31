@@ -67,21 +67,103 @@ works differently depending on scope:
   `pru-api-error-handler` are exactly that pattern). A catch named `""`/`"*"`/`"ANY"` is a true
   catch-all regardless.
 
-## 3. Runtime behavior (matching + routing)
+## 3. Runtime behavior: The 4-Tier Hierarchical Error Architecture
 
-When a node raises an error, the engine finds the **best** matching error catch, in order:
-1. host-specific — attached to the failing node (any code, per §2)
-2. global, exact name match or the `SERVICE_ERROR` default (per §2)
-3. global, catch-all (`""`/`"*"`/`"ANY"`)
+When a node raises an error, the engine resolves it through a multi-tiered precedence hierarchy:
 
-If found: the failing token is cancelled, `errorInfo` is set, and a token is placed on the catch →
-its recovery flow runs (or, for an event sub-process catch, its internal nodes run as a nested
-child instance). A **global** catch (including any event sub-process catch) is process-interrupting
-(cancels all other tokens); a host-specific boundary only cancels its own host. If **no** catch
-matches, the instance goes `failed` (unchanged behavior). Fully covered by
-`server/test/engine-errors.test.ts`.
+```mermaid
+flowchart TD
+    A["Node Execution Failure"] --> T1{"Tier 1: Host-Specific Boundary Catch?"}
+    T1 -- "Yes (Matches host)" --> H1["Handle Locally (Cancel host token, run recovery flow)"]
+    H1 --> R1{"Rethrow or Error End?"}
+    R1 -- "No" --> Done["Instance Recovers Locally"]
+    R1 -- "Yes (rethrow: true)" --> T3
+    
+    T1 -- "No" --> T2{"Tier 2: Event Subprocess Catch?"}
+    T2 -- "Yes" --> H2["Run Event Subprocess Scope"]
+    T2 -- "No" --> T3{"Tier 3: Process Catch (* or Catch-All)?"}
+    
+    T3 -- "Yes" --> H3["Process-Wide Interrupting Recovery Flow"]
+    T3 -- "No" --> T4{"Tier 4: Project Global Error Handler Enabled?"}
+    
+    T4 -- "Yes" --> CB{"Circuit Breaker: isErrorHandler == true?"}
+    CB -- "Yes (Recursion depth >= 1)" --> Halt["HALT: Loop Prevented. Log ExecutionError."]
+    CB -- "No" --> Spawn["Spawn Project Global Error Handler Process"]
+    
+    Spawn --> Strat{"Strategy"}
+    Strat -- "repair-and-resume" --> Resume["Apply Output Mappings & Resume / Retry"]
+    Strat -- "compensate-and-abort" --> Abort["Execute Cleanup & Abort Instance"]
+    Strat -- "spawn" --> Fail["Fire-and-Forget Incident; Fail Instance"]
+    
+    T4 -- "No" --> FailInst["Fail Instance (ExecutionError Log Queue)"]
+```
 
-## 4. Validation (Phase 7 rules)
+### Precedence Resolution Steps:
+1. **Tier 1 (Host-specific)**: Attached directly to the failing node (`boundaryHandler.findErrorHandler`). If found and `rethrow !== true`, runs locally; the Global Error Handler is **not** invoked.
+2. **Tier 2 (Scope Event Subprocess)**: If failing node is inside a subprocess with an error start event.
+3. **Tier 3 (Process-wide Catch)**: Boundary with `on: '*'` or root event subprocess.
+4. **Tier 4 (Project Global Error Handler)**: Configured in Project Settings (`Workflow.globalErrorHandler` & `Deployment.globalErrorHandler`).
+   - Circuit Breaker strictly checks `if (inst.isErrorHandler) return false;` (recursion depth capped at 1).
+   - Injects rich context (`errorInfo`, `errorContext`, `failedContext`, `failedEndpoint`, `failedPayload`, etc.).
+   - Executes strategy:
+     - `repair-and-resume`: Applies `outputMappings` back to original instance variables. Resumes after failing node, or retries the node if `errorHandlerAction === 'retry'`.
+     - `compensate-and-abort`: Executes cleanup, transitions original instance to `aborted`.
+     - `spawn`: Runs background incident flow, marks original instance `failed`.
+
+## 4. Sequence Diagrams
+
+### Sequence A: Local Boundary Precedence
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Node as Failing Activity Node
+    participant Engine as ExecutionEngine
+    participant Local as Boundary Error Event
+    participant Global as Project Global Error Handler
+
+    Node->>Engine: Raise SERVICE_ERROR (HTTP 500)
+    Engine->>Engine: check boundaryHandler.findErrorHandler()
+    Engine->>Local: Match found! Push active token to Boundary Node
+    Note over Engine: Local boundary runs. Global Error Handler is NOT called!
+    Local-->>Engine: Execute recovery path
+```
+
+### Sequence B: Project Global Error Handler (Repair & Resume / Retry)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Node as Failing Activity Node
+    participant Engine as ExecutionEngine
+    participant Global as Global Error Process
+    participant Main as Original Instance
+
+    Node->>Engine: Raise SERVICE_ERROR (No local boundary)
+    Engine->>Engine: Check dep.globalErrorHandler.enabled (True)
+    Engine->>Global: Spawn error process (isErrorHandler: true)
+    Note over Global: Injects failedContext, failedEndpoint, failedPayload
+    Global->>Global: Refresh credentials, fix variables
+    Global-->>Engine: Completed (vars.errorHandlerAction = "retry")
+    Engine->>Main: Apply outputMappings, clear inst.error
+    Engine->>Node: Retrigger failing node with updated variables (Success!)
+```
+
+### Sequence C: Circuit Breaker Loop Prevention
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Engine as ExecutionEngine
+    participant ErrInst as Global Error Handler Instance
+    participant Audit as ExecutionError Repository
+
+    Engine->>ErrInst: Spawn Global Handler (isErrorHandler: true)
+    ErrInst->>Engine: Node in Global Handler throws SCRIPT_ERROR
+    Engine->>Engine: Circuit Breaker Check: ErrInst.isErrorHandler === true
+    Note over Engine: Recursion loop detected & stopped! Depth = 1.
+    Engine->>Audit: Record ExecutionError (Circuit Breaker Tripped)
+    Engine->>ErrInst: Terminate with status = 'failed'
+```
+
+## 5. Validation (Phase 7 rules)
 
 - `boundary-host` — an error catch must attach to existing node(s) or `*`; else error.
 - `node-connected` — the catch must have an outgoing (recovery) connection.

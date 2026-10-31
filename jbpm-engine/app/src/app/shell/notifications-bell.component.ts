@@ -1,5 +1,6 @@
 import { Component, HostListener, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { AuthService } from '../core/auth/auth.service';
 import { SystemApiService } from '../core/api/system-api.service';
 import { AppNotification } from '../core/models';
 import { IconComponent } from '../shared/icon.component';
@@ -60,13 +61,12 @@ import { IconComponent } from '../shared/icon.component';
     }
   `,
   styles: [`
-    /* Sticky, zero-height strip at the top of the scrolling main pane: the bell stays visible
-       while the page scrolls, without pushing any page content down. */
-    :host { position: sticky; top: 14px; z-index: 40; display: block; height: 0; }
-    .bell { position: absolute; top: 0; right: 22px; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); border-radius: 50%; cursor: pointer; box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.06)); }
-    .bell:hover { color: var(--text); background: var(--surface-3); }
+    /* Lives in the header's action row (it used to float over the page and sat on top of the DEV badge). */
+    :host { position: relative; display: inline-flex; align-items: center; }
+    .bell { position: relative; width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: var(--surface); color: var(--text-secondary); border-radius: 50%; cursor: pointer; box-shadow: var(--shadow-card); }
+    .bell:hover { color: var(--primary); background: var(--primary-50); }
     .dot { position: absolute; top: 7px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--red, #ef4444); border: 2px solid var(--surface); }
-    .panel { position: absolute; top: 42px; right: 22px; width: 340px; box-shadow: var(--shadow-pop, 0 12px 32px -8px rgba(0,0,0,.25)); border-radius: var(--radius-md, 12px); background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
+    .panel { position: absolute; top: 44px; right: 0; z-index: 200; width: min(340px, calc(100vw - 24px)); box-shadow: var(--shadow-pop, 0 12px 32px -8px rgba(0,0,0,.25)); border-radius: var(--radius-md, 12px); background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
     .head { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
     .spacer { flex: 1; }
     .link { font-size: 11.5px; color: var(--muted); cursor: pointer; }
@@ -87,10 +87,21 @@ import { IconComponent } from '../shared/icon.component';
     .nbody { font-size: 12px; }
     .nwhen { font-size: 11px; }
     .muted { color: var(--muted); }
+
+    @media (max-width: 900px) {
+      :host { top: 8px; }
+      .bell { right: 12px; width: 32px; height: 32px; }
+      .panel {
+        right: 8px; top: 38px;
+        width: min(340px, calc(100vw - 16px));
+        max-height: calc(100vh - 70px);
+      }
+    }
   `],
 })
 export class NotificationsBellComponent implements OnInit, OnDestroy {
   private api = inject(SystemApiService);
+  private auth = inject(AuthService);
   private router = inject(Router);
 
   open = signal(false);
@@ -107,6 +118,7 @@ export class NotificationsBellComponent implements OnInit, OnDestroy {
   ngOnDestroy() { if (this.timer) clearInterval(this.timer); }
 
   refresh() {
+    if (!this.auth.isAuthenticated()) return;
     this.api.listNotifications({ limit: 30 }).subscribe({
       next: (r) => {
         this.items.set(r.items); this.unread.set(r.unread);

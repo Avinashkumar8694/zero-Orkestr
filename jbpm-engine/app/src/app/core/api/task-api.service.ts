@@ -3,11 +3,30 @@ import { Observable } from 'rxjs';
 import { ApiBase, ApiList } from './api-base';
 import type { AuditEvent, Task, TaskComment } from '../models';
 
-export interface ListTasksFilter { assignee?: string; group?: string; status?: string; overdue?: boolean; }
+export interface ListTasksFilter {
+  assignee?: string;
+  group?: string;
+  status?: string;
+  overdue?: boolean;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface PagedTasksResult {
+  items: Task[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class TaskApiService extends ApiBase {
   listTasks(filter?: ListTasksFilter): Observable<Task[]> { return this.items(this.http.get<ApiList<Task>>(`${this.base}/tasks`, { params: this.cleanParams(filter) })); }
+  listTasksPaged(filter?: ListTasksFilter): Observable<PagedTasksResult> {
+    return this.http.get<PagedTasksResult>(`${this.base}/tasks`, { params: this.cleanParams(filter) });
+  }
   getTask(id: string): Observable<Task> { return this.http.get<Task>(`${this.base}/tasks/${id}`); }
   claimTask(id: string): Observable<Task> { return this.http.post<Task>(`${this.base}/tasks/${id}/claim`, {}); }
   releaseTask(id: string): Observable<Task> { return this.http.post<Task>(`${this.base}/tasks/${id}/release`, {}); }

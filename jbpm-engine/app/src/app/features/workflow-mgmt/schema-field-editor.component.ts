@@ -27,7 +27,7 @@ import type { ArrayItemType, FieldType, SchemaField } from './schema-field.model
           </select>
         }
         <label class="reqlbl"><input type="checkbox" [(ngModel)]="f.required" /> required</label>
-        <button class="btn sm danger" (click)="remove(f)"><app-icon name="trash" [size]="12" /></button>
+        <button class="btn sm danger" (click)="remove(f)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button>
       </div>
       @if (f.type === 'object' || (f.type === 'array' && f.arrayItemType === 'object')) {
         <div class="nested" [style.marginLeft.px]="(depth + 1) * 18">

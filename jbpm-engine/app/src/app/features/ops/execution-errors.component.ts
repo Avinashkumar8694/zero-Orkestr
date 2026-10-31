@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { TitleCasePipe } from '@angular/common';
@@ -13,7 +13,8 @@ type AckFilter = 'no' | 'yes' | 'any';
 const TYPES = ['process', 'task', 'job', 'integration'] as const;
 
 /** Execution Errors — the operational failure queue (ux_design/mockups/execution-errors.html):
- *  left filter rail + list + detail pane, same three-column shape as Instances/Audit. */
+ *  persistent filter rail on the left + full-width errors list. Clicking any error opens its
+ *  dedicated detail page at /errors/:id. */
 @Component({
   selector: 'app-execution-errors',
   standalone: true,
@@ -22,8 +23,12 @@ const TYPES = ['process', 'task', 'job', 'integration'] as const;
     <div class="page">
       <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Execution Errors' }]" /></div>
       <header class="pagehead">
-        <h1>Execution Errors</h1>
-        <p class="muted">Every failure the engine recorded. Errors start unacknowledged and stay listed until someone owns them.</p>
+        <div>
+          <h1>Execution Errors</h1>
+          <p class="muted">Every failure the engine recorded. Click any error row to open its full failure details, stack trace, context, and recovery actions.</p>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn" (click)="reload()"><app-icon name="refresh" [size]="14" /> Refresh</button>
       </header>
 
       @if (summary(); as s) {
@@ -34,10 +39,14 @@ const TYPES = ['process', 'task', 'job', 'integration'] as const;
         </div>
       }
 
-      <div class="grid3">
-        <!-- Filters -->
-        <div class="card railcard">
-          <div class="row railhead"><span class="section-title">Filters</span><span class="spacer"></span><button class="btn ghost sm" (click)="resetFilters()">Reset</button></div>
+      <div class="layout">
+        <!-- Left Filter Rail -->
+        <aside class="card railcard">
+          <div class="row railhead">
+            <span class="section-title">Filters</span>
+            <span class="spacer"></span>
+            <button class="btn ghost sm" (click)="resetFilters()">Reset</button>
+          </div>
 
           <div class="section-title">Type</div>
           <div class="col" style="margin-bottom:14px;">
@@ -59,17 +68,18 @@ const TYPES = ['process', 'task', 'job', 'integration'] as const;
           <input placeholder="Node name" [(ngModel)]="nodeFilter" style="width:100%; margin-bottom:14px;" />
 
           <button class="btn primary sm" style="width:100%;" (click)="reload()">Apply</button>
-        </div>
+        </aside>
 
-        <!-- List -->
-        <div class="col listcol">
+        <!-- Full-Width Error List -->
+        <main class="col listcol">
           @if (selectedIds().size) {
             <div class="bulkbar">
-              <span>{{ selectedIds().size }} selected</span>
-              <button class="btn sm" (click)="ackSelected()">Acknowledge</button>
+              <span><b>{{ selectedIds().size }}</b> selected</span>
+              <button class="btn sm" (click)="ackSelected()"><app-icon name="check" [size]="12" /> Acknowledge Selected</button>
               <span class="spacer"></span>
             </div>
           }
+
           <div class="card listcard">
             @if (loading()) {
               <div class="pad"><div class="skeleton skeleton-line" style="width:60%"></div><div class="skeleton skeleton-line" style="width:80%"></div></div>
@@ -81,125 +91,239 @@ const TYPES = ['process', 'task', 'job', 'integration'] as const;
                 @if (hasFilters()) { <button class="btn sm" (click)="resetFilters()">Reset filters</button> }
               </div>
             } @else {
-              <table>
-                <thead><tr><th></th><th>ID</th><th>Type</th><th>PIID</th><th>Node</th><th>When</th><th>Ack</th></tr></thead>
-                <tbody>
-                  @for (e of items(); track e.id) {
-                    <tr [class.sel]="selected()?.id === e.id" (click)="select(e)">
-                      <td (click)="$event.stopPropagation()"><input type="checkbox" [checked]="selectedIds().has(e.id)" (change)="toggleSelect(e.id)" /></td>
-                      <td class="mono">{{ e.id.slice(-6) }}</td>
-                      <td><span class="badge" [class.failed]="e.type==='process'||e.type==='task'" [class.waiting]="e.type==='job'">{{ e.type | titlecase }}</span></td>
-                      <td>@if (e.instanceId) { <a class="ident" [routerLink]="['/instances', e.instanceId]" (click)="$event.stopPropagation()">{{ shortId(e.instanceId) }}</a> } @else { <span class="muted">—</span> }</td>
-                      <td>{{ e.nodeName || '—' }}</td>
-                      <td class="muted">{{ ago(e.at) }}</td>
-                      <td>@if (e.acknowledged) { <span class="badge active">✓ {{ e.acknowledgedBy }}</span> } @else { <span class="badge failed">no</span> }</td>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="width:36px;"></th>
+                      <th style="width:110px;">ID</th>
+                      <th style="width:110px;">Type</th>
+                      <th style="width:130px;">PIID</th>
+                      <th>Node / Failure Reason</th>
+                      <th style="width:70px; text-align:center;">Occur</th>
+                      <th style="width:110px;">When</th>
+                      <th style="width:130px;">Ack</th>
+                      <th class="ta-r" style="width:90px;"></th>
                     </tr>
+                  </thead>
+                  <tbody>
+                    @for (e of items(); track e.id) {
+                      <tr class="err-row" (click)="openError(e)">
+                        <td (click)="$event.stopPropagation()">
+                          <input type="checkbox" [checked]="selectedIds().has(e.id)" (change)="toggleSelect(e.id)" />
+                        </td>
+                        <td class="mono">
+                          <code class="err-id">{{ e.id.slice(-6) }}</code>
+                        </td>
+                        <td>
+                          <span class="badge" [class.failed]="e.type==='process'||e.type==='task'" [class.waiting]="e.type==='job'">
+                            {{ e.type | titlecase }}
+                          </span>
+                        </td>
+                        <td>
+                          @if (e.instanceId) {
+                            <a class="ident" [routerLink]="['/instances', e.instanceId]" (click)="$event.stopPropagation()">
+                              {{ shortId(e.instanceId) }}
+                            </a>
+                          } @else {
+                            <span class="muted">—</span>
+                          }
+                        </td>
+                        <td>
+                          <div class="node-cell">
+                            <span class="node-name">{{ e.nodeName || e.nodeId || 'Unknown Node' }}</span>
+                            @if (e.message) {
+                              <span class="msg-snippet" [title]="e.message">{{ e.message }}</span>
+                            }
+                          </div>
+                        </td>
+                        <td style="text-align:center;">
+                          <span class="badge count-badge">{{ e.occurrences }}</span>
+                        </td>
+                        <td class="muted">{{ ago(e.at) }}</td>
+                        <td>
+                          @if (e.acknowledged) {
+                            <span class="badge active" [title]="'Acknowledged by ' + e.acknowledgedBy">✓ {{ e.acknowledgedBy }}</span>
+                          } @else {
+                            <span class="badge failed">unacked</span>
+                          }
+                        </td>
+                        <td class="ta-r" (click)="$event.stopPropagation()">
+                          <button class="btn sm" (click)="openError(e)" title="View Error Details">
+                            <span>View</span>
+                            <app-icon name="arrowRight" [size]="12" />
+                          </button>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+              @if (items().length > 0) {
+                <div class="infinite-status">
+                  @if (hasMore()) {
+                    <span class="spinner-dot"></span>
+                    <span class="muted">Loading more errors (showing {{ items().length }} of {{ total() }})…</span>
+                  } @else {
+                    <span class="muted">Showing all {{ total() }} errors</span>
                   }
-                </tbody>
-              </table>
+                </div>
+              }
             }
           </div>
+
           <div class="row pager">
             <span class="muted">Showing {{ items().length ? offset() + 1 : 0 }}–{{ offset() + items().length }} of {{ total() }}</span>
             <span class="spacer"></span>
             <span class="muted">Rows</span>
-            <select [(ngModel)]="limit" (ngModelChange)="reload()" style="width:70px;"><option [ngValue]="10">10</option><option [ngValue]="20">20</option><option [ngValue]="50">50</option></select>
+            <select [(ngModel)]="limit" (ngModelChange)="reload()" style="width:70px;">
+              <option [ngValue]="10">10</option>
+              <option [ngValue]="20">20</option>
+              <option [ngValue]="50">50</option>
+            </select>
             <button class="btn sm" [disabled]="offset() === 0" (click)="prevPage()">‹ Prev</button>
             <button class="btn sm" [disabled]="offset() + items().length >= total()" (click)="nextPage()">Next ›</button>
           </div>
-        </div>
-
-        <!-- Detail -->
-        <div class="card detailcard">
-          @if (selected(); as e) {
-            <div class="row" style="margin-bottom:4px;">
-              <h2>Error {{ e.id.slice(-6) }}</h2>
-              <span class="badge" [class.failed]="!e.acknowledged" [class.active]="e.acknowledged">{{ e.acknowledged ? 'acknowledged' : 'unacknowledged' }}</span>
-            </div>
-            <p class="muted small">{{ e.type | titlecase }} error · {{ ago(e.at) }}</p>
-
-            <div class="row actionrow">
-              @if (!e.acknowledged) { <button class="btn primary sm" (click)="acknowledge(e)"><app-icon name="check" [size]="12" /> Acknowledge</button> }
-              @if (e.instanceId) { <button class="btn sm" (click)="retryNode(e)"><app-icon name="refresh" [size]="12" /> Retry node</button> }
-            </div>
-
-            <div class="section-title" style="margin-top:0;">Context</div>
-            <table class="kv">
-              <tbody>
-                <tr><td class="muted">PIID</td><td>@if (e.instanceId) { <a class="ident" [routerLink]="['/instances', e.instanceId]">{{ shortId(e.instanceId) }}</a> } @else { <span class="muted">—</span> }</td></tr>
-                <tr><td class="muted">Process</td><td>{{ e.processId || '—' }}</td></tr>
-                <tr><td class="muted">Node</td><td>{{ e.nodeId || '—' }} @if (e.nodeName) { · "{{ e.nodeName }}" }</td></tr>
-                <tr><td class="muted">Node type</td><td>{{ e.nodeType || '—' }}</td></tr>
-                <tr><td class="muted">Deployment</td><td>@if (e.deploymentId) { <a class="ident" [routerLink]="['/deployments']" [queryParams]="{id: e.deploymentId}">{{ shortId(e.deploymentId) }}</a> } @else { <span class="muted">—</span> }</td></tr>
-                <tr><td class="muted">Occurrences</td><td>{{ e.occurrences }}</td></tr>
-              </tbody>
-            </table>
-
-            <div class="section-title">Message</div>
-            <pre class="msgbox">{{ e.stack || e.message }}</pre>
-
-            <div class="section-title">Go to</div>
-            <div class="col" style="gap:6px;">
-              @if (e.instanceId) { <a class="btn sm goto" [routerLink]="['/instances', e.instanceId]" [queryParams]="{tab:'diagram'}"><app-icon name="arrowRight" [size]="12" /> Instance diagram</a> }
-              @if (e.taskId) { <a class="btn sm goto" [routerLink]="['/tasks', e.taskId]"><app-icon name="tasks" [size]="12" /> Related task</a> }
-              @if (e.instanceId) { <a class="btn sm goto" [routerLink]="['/instances', e.instanceId]" [queryParams]="{tab:'logs'}"><app-icon name="file" [size]="12" /> Instance logs</a> }
-            </div>
-
-            @if (e.acknowledged) {
-              <div class="section-title">Acknowledgement</div>
-              <p class="muted small">Acknowledged by {{ e.acknowledgedBy }} · {{ ago(e.acknowledgedAt!) }}</p>
-            } @else {
-              <div class="section-title">Acknowledgement</div>
-              <p class="muted small">Acknowledging records who took ownership and when, so the unacked list stays a real work queue rather than noise.</p>
-            }
-          } @else {
-            <div class="empty-state">
-              <div class="es-icon"><app-icon name="search" [size]="22" /></div>
-              <h3>No error selected</h3>
-              <p>Select a row on the left to see its full message, context and quick actions.</p>
-            </div>
-          }
-        </div>
+        </main>
       </div>
     </div>
   `,
   styles: [`
-    .page { padding: 20px 24px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
-    .crumbwrap { margin-bottom: 8px; }
-    .pagehead { margin-bottom: 12px; }
-    h1 { font-size: 19px; margin: 0; }
-    .pagehead p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
-    .kpirow { display: flex; gap: 12px; margin-bottom: 14px; }
-    .kpi { display: flex; flex-direction: column; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+    .page { padding: 24px; max-width: 1600px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .crumbwrap { margin-bottom: 2px; }
+    .pagehead {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .pagehead h1 { font-size: 24px; margin: 0 0 4px 0; font-weight: 700; }
+    .pagehead p { margin: 0; font-size: 13.5px; color: var(--muted); }
+
+    .kpirow { display: flex; gap: 12px; }
+    .kpi { display: flex; flex-direction: column; padding: 10px 18px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
     .kpi.bad .kn { color: var(--red); }
-    .kn { font-size: 20px; font-weight: 700; }
-    .kl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
-    .grid3 { display: grid; grid-template-columns: 240px 1fr 380px; gap: 16px; flex: 1; min-height: 0; }
-    .railcard { padding: 16px; overflow: auto; }
-    .railhead { margin-bottom: 4px; }
-    .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; margin: 10px 0 6px; }
-    .col { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+    .kn { font-size: 22px; font-weight: 700; }
+    .kl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+
+    /* 2-COLUMN LAYOUT */
+    .layout {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+
+    .railcard { padding: 18px; }
+    .railhead { margin-bottom: 8px; }
+    .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; margin: 12px 0 6px; }
+    .col { display: flex; flex-direction: column; gap: 6px; }
     .chk { font-size: 13px; gap: 8px; }
     .chips { flex-wrap: wrap; gap: 6px; }
     .chip { border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 4px 11px; font-size: 12px; cursor: pointer; color: var(--text-secondary); }
     .chip.on { background: var(--primary-50); color: var(--primary); border-color: var(--primary); font-weight: 600; }
-    .listcol { min-height: 0; }
-    .listcard { flex: 1; overflow: auto; padding: 0; }
-    .bulkbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--primary-50); border-radius: var(--radius-sm); font-size: 12.5px; }
-    tbody tr { cursor: pointer; } tbody tr:hover { background: var(--surface-2); } tr.sel td { background: var(--primary-50); }
-    .mono { font-family: var(--font-mono); font-size: 12px; }
-    .ident { font-family: var(--font-mono); font-weight: 600; color: var(--primary); font-size: 12.5px; text-decoration: none; }
+
+    .listcol { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .listcard { padding: 0; overflow: hidden; }
+    .infinite-status { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; font-size: 12.5px; border-top: 1px solid var(--border); }
+    .spinner-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); animation: pulse 1s infinite alternate; }
+    @keyframes pulse { from { opacity: 0.3; transform: scale(0.8); } to { opacity: 1; transform: scale(1.2); } }
+    .table-wrap { overflow-x: auto; }
+    .bulkbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--primary-50);
+      border: 1px solid var(--primary-100, rgba(91,61,245,.2));
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      color: var(--primary);
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      padding: 11px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .err-row {
+      cursor: pointer;
+      transition: background .12s;
+    }
+    .err-row:hover { background: var(--surface-hover); }
+
+    .err-id {
+      font-size: 12px;
+      font-family: var(--font-mono);
+      background: var(--surface-soft);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .ident {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--primary);
+      text-decoration: none;
+    }
     .ident:hover { text-decoration: underline; }
-    .pager { font-size: 12.5px; }
-    .detailcard { padding: 18px; overflow: auto; }
-    h2 { font-size: 15px; margin: 0; }
-    .small { font-size: 12.5px; margin: 0 0 14px; }
-    .actionrow { gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
-    .kv { width: 100%; margin-bottom: 4px; } .kv td { padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: 12.5px; vertical-align: top; } .kv td:first-child { width: 34%; }
-    .msgbox { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; font-size: 11.5px; font-family: var(--font-mono); white-space: pre-wrap; margin: 0 0 4px; max-height: 220px; overflow: auto; }
-    .goto { justify-content: flex-start; gap: 6px; text-decoration: none; }
-    .pad { padding: 16px; }
-    .empty-state .btn { margin-top: 10px; }
+
+    .node-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .node-name {
+      font-weight: 600;
+      color: var(--text);
+    }
+    .msg-snippet {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 480px;
+    }
+    .count-badge {
+      font-size: 11px;
+      background: var(--border);
+      color: var(--text-secondary);
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .pager {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12.5px;
+      padding: 4px 0;
+    }
+    .ta-r { text-align: right; }
+    .pad { padding: 20px; }
+
+    @media (max-width: 768px) {
+      .page { padding: 12px 14px; }
+      .pagehead { flex-direction: column; align-items: stretch; gap: 10px; }
+      .kpirow { flex-wrap: wrap; }
+      .kpi { flex: 1 1 auto; }
+      .bulkbar { flex-wrap: wrap; gap: 6px; }
+    }
   `],
 })
 export class ExecutionErrorsComponent {
@@ -221,11 +345,22 @@ export class ExecutionErrorsComponent {
   items = signal<ExecutionError[]>([]);
   total = signal(0);
   loading = signal(true);
-  selected = signal<ExecutionError | null>(null);
+  loadingMore = signal(false);
+  hasMore = computed(() => this.items().length < this.total());
   selectedIds = signal<Set<string>>(new Set());
   summary = signal<{ total: number; unacknowledged: number; last24h: number } | null>(null);
 
   hasFilters = computed(() => this.typeFilter().size < TYPES.length || this.ack() !== 'no' || !!this.instanceIdFilter || !!this.jobIdFilter || !!this.nodeFilter);
+
+  @HostListener('window:scroll')
+  onWindowScroll() {
+    const threshold = 200;
+    const pos = window.innerHeight + window.scrollY;
+    const max = document.documentElement.scrollHeight;
+    if (pos >= max - threshold && this.hasMore() && !this.loading() && !this.loadingMore()) {
+      this.loadNextPage();
+    }
+  }
 
   constructor() {
     this.reload();
@@ -239,9 +374,13 @@ export class ExecutionErrorsComponent {
   }
 
   resetFilters() {
-    this.typeFilter.set(new Set(TYPES)); this.ack.set('no');
-    this.instanceIdFilter = ''; this.jobIdFilter = ''; this.nodeFilter = '';
-    this.offset.set(0); this.reload();
+    this.typeFilter.set(new Set(TYPES));
+    this.ack.set('no');
+    this.instanceIdFilter = '';
+    this.jobIdFilter = '';
+    this.nodeFilter = '';
+    this.offset.set(0);
+    this.reload();
   }
 
   reload() {
@@ -251,31 +390,54 @@ export class ExecutionErrorsComponent {
       acknowledged: this.ack() === 'any' ? undefined : this.ack() === 'yes',
       instanceId: this.instanceIdFilter || undefined,
       jobId: this.jobIdFilter || undefined,
-      limit: this.limit, offset: this.offset(),
+      limit: this.limit,
+      offset: this.offset(),
     }).subscribe({
       next: (r) => {
         const filtered = this.nodeFilter ? r.items.filter((e) => (e.nodeName || '').toLowerCase().includes(this.nodeFilter.toLowerCase())) : r.items;
-        this.items.set(filtered); this.total.set(r.total); this.loading.set(false);
+        this.items.set(filtered);
+        this.total.set(r.total);
+        this.loading.set(false);
       },
-      error: (e) => { this.loading.set(false); this.toast.error(e?.error?.error?.message || 'Could not load errors'); },
+      error: (e) => {
+        this.loading.set(false);
+        this.toast.error(e?.error?.error?.message || 'Could not load errors');
+      },
     });
   }
 
   nextPage() { this.offset.update((o) => o + this.limit); this.reload(); }
   prevPage() { this.offset.update((o) => Math.max(0, o - this.limit)); this.reload(); }
 
-  select(e: ExecutionError) { this.selected.set(e); }
+  loadNextPage() {
+    this.loadingMore.set(true);
+    const nextOffset = this.items().length;
+    this.api.listErrors({
+      type: [...this.typeFilter()].join(','),
+      acknowledged: this.ack() === 'any' ? undefined : this.ack() === 'yes',
+      instanceId: this.instanceIdFilter || undefined,
+      jobId: this.jobIdFilter || undefined,
+      limit: this.limit,
+      offset: nextOffset,
+    }).subscribe({
+      next: (r) => {
+        const filtered = this.nodeFilter ? r.items.filter((e) => (e.nodeName || '').toLowerCase().includes(this.nodeFilter.toLowerCase())) : r.items;
+        this.items.update((prev) => [...prev, ...filtered]);
+        this.total.set(r.total);
+        this.loadingMore.set(false);
+      },
+      error: () => this.loadingMore.set(false),
+    });
+  }
+
+  openError(e: ExecutionError) {
+    this.router.navigate(['/errors', e.id]);
+  }
+
   toggleSelect(id: string) {
     const s = new Set(this.selectedIds());
     if (s.has(id)) s.delete(id); else s.add(id);
     this.selectedIds.set(s);
-  }
-
-  acknowledge(e: ExecutionError) {
-    this.api.acknowledgeError(e.id).subscribe({
-      next: (updated) => { this.selected.set(updated); this.patchItem(updated); this.toast.success('Error acknowledged'); },
-      error: (err) => this.toast.error(err?.error?.error?.message || 'Could not acknowledge'),
-    });
   }
 
   ackSelected() {
@@ -289,17 +451,6 @@ export class ExecutionErrorsComponent {
       },
       error: (err) => this.toast.error(err?.error?.error?.message || 'Bulk acknowledge failed'),
     });
-  }
-
-  async retryNode(e: ExecutionError) {
-    if (!e.instanceId || !e.nodeId) return;
-    const ok = await this.modal.confirm({ title: 'Retry node', message: `Re-trigger node "${e.nodeName || e.nodeId}" on instance ${this.shortId(e.instanceId)}?`, confirmLabel: 'Retry' });
-    if (!ok) return;
-    this.router.navigate(['/instances', e.instanceId]);
-  }
-
-  private patchItem(updated: ExecutionError) {
-    this.items.update((list) => list.map((x) => (x.id === updated.id ? updated : x)));
   }
 
   shortId(id: string): string { return id.length > 8 ? `…${id.slice(-7)}` : id; }

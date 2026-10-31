@@ -18,4 +18,7 @@ export class DeploymentApiService extends ApiBase {
   archive(depId: string): Observable<Deployment> { return this.http.post<Deployment>(`${this.base}/deployments/${depId}/archive`, {}); }
   rollback(depId: string, body: { environment: string; toDeploymentId: string }): Observable<Deployment> { return this.http.post<Deployment>(`${this.base}/deployments/${depId}/rollback`, body); }
   setTags(depId: string, change: { add?: string[]; remove?: string[] }): Observable<Deployment> { return this.http.post<Deployment>(`${this.base}/deployments/${depId}/tags`, change); }
+  exportSnapshot(depId: string): Observable<any> { return this.http.get<any>(`${this.base}/deployments/${depId}/snapshot`); }
+  restoreToProject(depId: string): Observable<{ ok: boolean; workflowId: string; versionNumber?: number; message: string }> { return this.http.post<{ ok: boolean; workflowId: string; versionNumber?: number; message: string }>(`${this.base}/deployments/${depId}/restore`, {}); }
+  importSnapshot(body: { snapshot?: any; engine?: any; environment?: string; activate?: boolean }): Observable<Deployment> { return this.http.post<Deployment>(`${this.base}/deployments/import`, body); }
 }

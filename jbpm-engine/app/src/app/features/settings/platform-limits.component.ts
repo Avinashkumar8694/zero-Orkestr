@@ -1,6 +1,6 @@
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { PlatformApiService, type PlatformLimits, type PlatformUsage, type PlatformUsageRow, type WorkspaceLimitOverride } from '../../core/api/platform-api.service';
+import { PlatformApiService, type LimitInfo, type PlanRow, type PlatformLimits, type PlatformUsage, type PlatformUsageRow, type WorkspaceLimitOverride } from '../../core/api/platform-api.service';
 import { ToastService } from '../../shared/toast.service';
 import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
 
@@ -26,8 +26,33 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
     <div class="page">
       <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Platform limits' }]" /></div>
       <header class="pagehead"><h1>Platform limits</h1><p class="muted">Effective value = min(workspace setting, per-workspace cap, global cap). Changes apply live — no restart. Caps and queues are per server pod.</p></header>
-      @if (error()) { <p class="err">{{ error() }}</p> }
-      @if (g(); as limits) {
+      @if (error()) { <p class="err" role="alert">{{ error() }}</p> }
+      @if (!usage() && !error()) { <p class="muted">Loading…</p> }
+      <nav class="tabs">
+        <button [class.active]="tab() === 'workspaces'" (click)="tab.set('workspaces')">Workspaces</button>
+        <button [class.active]="tab() === 'plans'" (click)="tab.set('plans')">Plans</button>
+        <button [class.active]="tab() === 'global'" (click)="tab.set('global')">Global caps</button>
+      </nav>
+      @if (tab() === 'plans') {
+        <section class="card">
+          <h3>Plan limits</h3>
+          <p class="hint">What each plan allows, per workspace. <b>-1 = unlimited</b>. A plan can only tighten the platform-wide caps, never lift them. Saved plans apply to every workspace on them within a couple of seconds.</p>
+          @if (plans().length) {
+            <div class="tablewrap"><table data-keep>
+              <thead><tr><th>Limit</th>@for (p of plans(); track p.key) { <th>{{ p.name }}<div class="muted small">{{ p.key }}</div></th> }</tr></thead>
+              <tbody>
+                @for (k of limitKeys(); track k) {
+                  <tr><td><b>{{ catalog()[k].label || k }}</b><div class="muted small">{{ catalog()[k].unit }}</div></td>
+                    @for (p of plans(); track p.key) { <td><input type="number" min="-1" step="1" [ngModel]="planDraft()[p.key][k]" (ngModelChange)="setPlan(p.key, k, $event)" style="width:90px;" /></td> }
+                  </tr>
+                }
+              </tbody>
+              <tfoot><tr><td></td>@for (p of plans(); track p.key) { <td><button class="btn primary" [disabled]="!planDirty(p.key)" (click)="savePlan(p)">Save {{ p.name }}</button></td> }</tr></tfoot>
+            </table></div>
+          } @else { <p class="muted">Loading plans…</p> }
+        </section>
+      }
+      @if (tab() === 'global' && g(); as limits) {
         <section class="card">
           <h3>Global defaults & caps</h3>
           @for (f of fields; track f.key) {
@@ -39,15 +64,22 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
           <div class="actions"><button class="btn primary" (click)="saveGlobal()">Save global limits</button></div>
         </section>
       }
-      @if (usage(); as u) {
+      @if (tab() === 'workspaces' && usage(); as u) {
         <section class="card">
           <h3>Server <span class="muted">· {{ u.server.totalIsolates }} / {{ u.server.maxIsolates }} isolates · {{ u.server.queuedTotal }} queued · {{ u.server.executions }} runs · {{ u.server.overflowRejected + u.server.queueRejected + u.server.queueTimeouts }} refused</span></h3>
           <div class="tablewrap"><table>
-            <thead><tr><th>Workspace</th><th>Pool</th><th>Running</th><th>Queued</th><th>Peak</th><th>Created / recycled</th><th>Queue max</th><th>Mode</th><th>Caps (pool / queue)</th><th>Override</th></tr></thead>
+            <thead><tr><th>Workspace</th><th>Plan</th><th>Pool</th><th>Running</th><th>Queued</th><th>Peak</th><th>Created / recycled</th><th>Queue max</th><th>Mode</th><th>Caps (pool / queue)</th><th>Override</th></tr></thead>
             <tbody>
               @for (w of u.workspaces; track w.workspaceId) {
                 <tr>
                   <td><b>{{ w.name || w.slug || w.workspaceId }}</b><div class="muted small">{{ w.workspaceId }}</div></td>
+                  <td>
+                    <select [ngModel]="w.plan || ''" (ngModelChange)="assign(w, $event)" style="width:110px;">
+                      @for (p of plans(); track p.key) { <option [value]="p.key">{{ p.name }}</option> }
+                    </select>
+                    @if (w.planExpiresAt) { <div class="muted small">{{ expiry(w.planExpiresAt) }}</div> }
+                    <div><button class="btn small-btn" (click)="extend(w, 7)">+7 days</button></div>
+                  </td>
                   <td>{{ w.effective.scriptPoolSize }}</td><td>{{ w.pool.running }}</td><td>{{ w.pool.queued }}</td><td>{{ w.pool.peakRunning }}</td>
                   <td>{{ w.pool.created }} / {{ w.pool.recycled }}</td><td>{{ w.effective.scriptQueueMax }}</td>
                   <td>{{ w.effective.scriptOverflowMode }}@if (w.caps.lockedOverflowMode) { 🔒 }</td>
@@ -79,6 +111,8 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
     .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 8px 0; border-top: 1px solid var(--border); }
     .shint { display: block; font-size: 12px; color: var(--muted); font-weight: 400; } .actions { margin-top: 12px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; } th, td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--border); }
+
+    .hint { color: var(--muted); font-size: 13px; } .small-btn { padding: 2px 8px; font-size: 11px; margin-top: 4px; }
     .tablewrap { overflow-x: auto; } .small { font-size: 11px; } .err { color: var(--danger, #c0392b); }
   `],
 })
@@ -91,15 +125,50 @@ export class PlatformLimitsComponent implements OnInit, OnDestroy {
   editing = signal<PlatformUsageRow | null>(null);
   ov = signal<WorkspaceLimitOverride>({});
   error = signal('');
+  tab = signal<'workspaces' | 'plans' | 'global'>('workspaces');
+  plans = signal<PlanRow[]>([]);
+  catalog = signal<Record<string, LimitInfo>>({});
+  planDraft = signal<Record<string, Record<string, number>>>({});
+  limitKeys = computed(() => Object.keys(this.catalog()));
   private timer?: ReturnType<typeof setInterval>;
 
   ngOnInit() {
     this.api.getLimits().subscribe({ next: (r) => this.g.set({ ...r.limits }), error: (e) => this.error.set(e?.error?.error?.message || 'Platform administrator access required') });
+    this.loadPlans();
     this.refresh();
     this.timer = setInterval(() => this.refresh(), 5000);
   }
   ngOnDestroy() { clearInterval(this.timer); }
-  refresh() { this.api.usage().subscribe({ next: (u) => this.usage.set(u), error: () => {} }); }
+  refresh() { this.api.usage().subscribe({ next: (u) => { this.usage.set(u); this.error.set(''); }, error: (e) => this.error.set(e?.error?.error?.message || 'Could not load platform usage') }); }
+  loadPlans() {
+    this.api.plans().subscribe({
+      next: (r) => { this.plans.set(r.plans); this.catalog.set(r.catalog); this.planDraft.set(Object.fromEntries(r.plans.map((p) => [p.key, { ...p.limits }]))); },
+      error: (e) => this.error.set(e?.error?.error?.message || 'Could not load plans'),
+    });
+  }
+  setPlan(plan: string, key: string, v: unknown) {
+    const n = v === '' || v === null || v === undefined ? NaN : Number(v);
+    this.planDraft.update((d) => ({ ...d, [plan]: { ...d[plan], [key]: n } }));
+  }
+  planDirty(plan: string) {
+    const base = this.plans().find((p) => p.key === plan)?.limits ?? {}; const d = this.planDraft()[plan] ?? {};
+    return Object.keys(d).some((k) => d[k] !== base[k]);
+  }
+  savePlan(p: PlanRow) {
+    const d = this.planDraft()[p.key] ?? {};
+    const bad = Object.entries(d).find(([, v]) => !Number.isInteger(v) || v < -1);
+    if (bad) return this.toast.error(`${this.catalog()[bad[0]]?.label || bad[0]}: whole number ≥ -1 (-1 = unlimited)`);
+    const changed = Object.fromEntries(Object.entries(d).filter(([k, v]) => v !== p.limits[k]));
+    this.api.updatePlan(p.key, changed).subscribe({ next: () => { this.toast.success(`${p.name} plan saved`); this.loadPlans(); }, error: (e) => this.toast.error(e?.error?.error?.message || 'Could not save plan') });
+  }
+  assign(w: PlatformUsageRow, plan: string) {
+    if (!plan || plan === w.plan) return;
+    this.api.assignPlan(w.workspaceId, { plan }).subscribe({ next: () => { this.toast.success(`${w.name || w.workspaceId} is now on ${plan}`); this.refresh(); }, error: (e) => { this.toast.error(e?.error?.error?.message || 'Could not change plan'); this.refresh(); } });
+  }
+  extend(w: PlatformUsageRow, days: number) {
+    this.api.assignPlan(w.workspaceId, { plan: w.plan || 'trial', extendDays: days }).subscribe({ next: () => { this.toast.success(`Extended by ${days} days`); this.refresh(); }, error: (e) => this.toast.error(e?.error?.error?.message || 'Could not extend') });
+  }
+  expiry(iso: string) { const d = Math.ceil((Date.parse(iso) - Date.now()) / 86400000); return d >= 0 ? `ends in ${d} day${d === 1 ? '' : 's'}` : `expired ${-d} day${d === -1 ? '' : 's'} ago`; }
   setG(key: keyof PlatformLimits, value: unknown) { this.g.update((cur) => (cur ? ({ ...cur, [key]: value } as PlatformLimits) : cur)); }
   saveGlobal() {
     this.api.putLimits(this.g()!).subscribe({ next: (r) => { this.g.set({ ...r.limits }); this.toast.success('Platform limits saved and applied live'); this.refresh(); }, error: (e) => this.toast.error(e?.error?.error?.message || 'Could not save') });

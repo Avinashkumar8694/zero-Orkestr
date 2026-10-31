@@ -121,3 +121,16 @@ SEC-05 security headers & CORS preflight · SEC-07 no secrets in responses · AU
 3. 🟡 Postgres store: the unit suite uses the in-memory store. The production image is smoke-tested against a real Postgres by `scripts/docker-smoke.sh` (sign-in, Java + JS scripts, UTF-8, case management, 40 parallel starts); `npm run test:pg` is not part of it.
 4. ⛔ Real SMTP and real Identity Server round-trips are not automated (fakes/capture are).
 5. 🟡 Task *group* membership is enforced only for IAM-provisioned users; workspace members (SSO) are authorised by role, not by task group.
+
+## 5d. Workspace IAM — roles, groups, users (`server/test/iam-workspace.test.ts`)
+
+| ID | What it proves |
+|----|----------------|
+| IAMW-01 | A new workspace lists every built-in role (virtual until customised) with user/seat counts |
+| IAMW-02 | Editing a built-in role stores a copy for that workspace only; deleting it resets to the default |
+| IAMW-03 | Role names, reserved names, unknown permissions, duplicates; `admin` is immutable |
+| IAMW-04 | A role in use cannot be deleted; another workspace cannot see or touch it |
+| IAMW-05 | Users may only hold roles and groups that exist in their own workspace; usernames unique case-insensitively |
+| IAMW-06 | Groups: validation, rename carries members, membership editing, delete detaches members |
+| IAMW-07 | Nobody can grant a permission or role they do not hold themselves |
+| IAMW-08 | Platform-wide view is read-only for users, roles and groups |

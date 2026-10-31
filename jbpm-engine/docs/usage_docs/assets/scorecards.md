@@ -1,52 +1,130 @@
-# Scorecards
+# Scorecards (`scorecards`)
 
-**Key**: `scorecards` · **Name field**: `name` · **Exports as**: `.scgd` · **Used by**: [Business Rule](../nodes/rule.md)'s `scorecard`
+**Asset Key**: `scorecards` · **Name field**: `name` · **Exports as**: `.scgd` (Scorecard XML) · **Used by**: [Business Rule](../nodes/rule.md)'s `ruleFlowGroup`
 
-## Purpose
+---
 
-Additive scoring over a set of characteristics — a credit-score-style model: start from a baseline,
-add or subtract each characteristic's matching band, write the total to a target variable.
+## 1. Overview & Purpose
 
-## Shape
+A **Scorecard Asset** implements additive multi-characteristic risk scoring models (such as credit underwriting, fraud detection, and claim complexity evaluation). 
 
-```json
-{ "name": "CreditScore", "fact": "", "baseline": 0, "target": "score", "characteristics": [] }
+Starting from an initial **Baseline Score**, the scorecard evaluates a series of independent **Characteristics** (e.g. claimant history, claim amount, documentation completeness). Each matching attribute adds or subtracts points from the total score and can contribute an audit **Reason Code**.
+
+```mermaid
+flowchart LR
+    BS["Baseline Score: 100 pts"] --> CH1
+    subgraph Characteristics["Characteristic Evaluations"]
+        CH1["Claim Amount: > $10,000 (-20 pts, 'HIGH_EXPOSURE')"]
+        CH2["Claimant Tenure: > 5 yrs (+35 pts, 'LOYAL_CUSTOMER')"]
+        CH3["Filing Delay: > 60 days (-15 pts, 'LATE_NOTIFICATION')"]
+    end
+    CH1 --> CH2
+    CH2 --> CH3
+    CH3 --> TS["Target Score: 100 pts"]
+    TS --> RC["Reason Codes: ['HIGH_EXPOSURE', 'LATE_NOTIFICATION']"]
 ```
 
-| Property | Notes |
-|---|---|
-| `fact` | Optional variable holding the object to test fields against; blank tests the whole variable map |
-| `baseline` | Starting score |
-| `target` | Variable name the final score is written to (default `score` if unset) |
-| `characteristics` | `{ field, attributes: [{ match, points, reason? }] }` |
+---
 
-For each characteristic, the **first** attribute whose `match` passes contributes its `points` to the
-running total; `reason` (if present) is collected into `<target>Reasons` (an array) — useful for
-showing *why* a score came out the way it did.
-
-## Example
+## 2. Model Structure & Scoring Algorithms
 
 ```json
 {
-  "name": "CreditScore", "fact": "", "baseline": 600, "target": "creditScore",
+  "name": "ClaimRiskScorecard",
+  "package": "com.prudential.claims.scoring",
+  "fact": "Claim",
+  "target": "riskScore",
+  "baseline": 100,
+  "scoringStrategy": "WEIGHTED_ADDITIVE",
   "characteristics": [
-    { "field": "paymentHistory", "attributes": [
-      { "match": "excellent", "points": 80, "reason": "Excellent payment history" },
-      { "match": "poor", "points": -100, "reason": "Poor payment history" }
-    ]},
-    { "field": "utilization", "attributes": [
-      { "match": { "lt": 0.3 }, "points": 40 },
-      { "match": { "any": true }, "points": -20 }
-    ]}
+    {
+      "name": "Claimant History",
+      "field": "priorClaimsCount",
+      "attributes": [
+        { "condition": "== 0", "score": 30, "reasonCode": "CLEAN_RECORD" },
+        { "condition": "between 1 and 2", "score": 0, "reasonCode": "STANDARD_HISTORY" },
+        { "condition": "> 2", "score": -40, "reasonCode": "REPEATED_CLAIMANT" }
+      ]
+    }
   ]
 }
 ```
 
-Result: `creditScore` = `600 + points from the first matching band per characteristic`, plus
-`creditScoreReasons` listing any matched band's `reason`.
+### Scoring Strategies
 
-## Gotchas
+| Strategy | Description |
+|---|---|
+| `WEIGHTED_ADDITIVE` | Final score = Baseline + Sum of all characteristic points. |
+| `MAXIMUM_POINTS` | Final score determined by the single highest matching characteristic. |
+| `MINIMUM_POINTS` | Final score determined by the single lowest matching characteristic. |
 
-- Only the **first** matching attribute per characteristic counts — order attributes from most to
-  least specific if you have overlapping `match` conditions.
-- Failure (scorecard not found by name) raises `RULE_ERROR` on the hosting [Business Rule task](../nodes/rule.md).
+---
+
+## 3. Wiring to a Process Node
+
+1. Select a **Business Rule** node in the Process Canvas.
+2. Set **Rule Engine** to `drl` or `scorecard`.
+3. Set **Rule Flow Group** to the scorecard's configured group (e.g. `claim-risk-scoring`).
+4. The rule engine calculates the score and writes the total into the fact's `target` property (e.g., `claim.riskScore`).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Process as Process Instance
+    participant RuleNode as Business Rule Task
+    participant Scorecard as Scorecard Evaluator
+
+    Process->>RuleNode: Execute Rule Node with Claim Fact
+    RuleNode->>Scorecard: Calculate Score for Claim Fact
+    Scorecard->>Scorecard: Baseline (100) + Char1 (-20) + Char2 (+35) = 115
+    Scorecard-->>RuleNode: Write riskScore=115 & reasonCodes=["HIGH_EXPOSURE"]
+    RuleNode->>Process: Resume execution (Gateway evaluates riskScore >= 100)
+```
+
+---
+
+## 4. Production Enterprise Example
+
+```json
+{
+  "name": "FraudRiskScorecard",
+  "package": "com.prudential.claims.scoring",
+  "fact": "Claim",
+  "target": "fraudIndex",
+  "baseline": 50,
+  "scoringStrategy": "WEIGHTED_ADDITIVE",
+  "characteristics": [
+    {
+      "name": "Discrepancy In Bill Amount",
+      "field": "billedVsEstimatedRatio",
+      "attributes": [
+        { "condition": "<= 1.1", "score": 0, "reasonCode": "NORMAL_BILLING" },
+        { "condition": "between 1.1 and 1.5", "score": 25, "reasonCode": "MODERATE_DISCREPANCY" },
+        { "condition": "> 1.5", "score": 60, "reasonCode": "SEVERE_OVERBILLING" }
+      ]
+    },
+    {
+      "name": "Hospital Network Status",
+      "field": "inNetworkHospital",
+      "attributes": [
+        { "condition": "true", "score": -10, "reasonCode": "PREFERRED_PROVIDER" },
+        { "condition": "false", "score": 20, "reasonCode": "OUT_OF_NETWORK" }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## 5. Testing & Simulation
+
+1. Open **Project Assets** $\to$ select `FraudRiskScorecard`.
+2. Open **Test & Simulate**.
+3. Supply input fact data:
+   ```json
+   { "billedVsEstimatedRatio": 1.65, "inNetworkHospital": false }
+   ```
+4. Verify the simulation yields:
+   - Base (50) + Discrepancy (60) + Out of network (20) = **130**
+   - Reason Codes: `["SEVERE_OVERBILLING", "OUT_OF_NETWORK"]`

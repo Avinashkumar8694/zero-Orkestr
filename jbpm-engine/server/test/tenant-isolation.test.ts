@@ -43,7 +43,12 @@ function idRoutes() {
   const out: Array<{ method: string; path: string }> = [];
   for (const f of ['../src/http/routes.ts', '../src/http/routes/workflow-instances.ts', '../src/http/team-routes.ts']) {
     const src = fs.readFileSync(path.resolve(here, f), 'utf8');
-    for (const m of src.matchAll(/^\s*r\.(get|post|put|patch|delete)\(\s*'([^']*:[^']+)'/gm)) out.push({ method: m[1].toUpperCase(), path: m[2] });
+    for (const m of src.matchAll(/^\s*r\.(get|post|put|patch|delete)\(\s*'([^']*:[^']+)'/gm)) {
+      // broadcast signals take a signal NAME, not an entity id, and only ever reach instances of the CALLER's workspace
+      // (execution-engine.broadcastSignal filters by tenantId) — asserted separately below
+      if (/\/signals?\/:signalName$/.test(m[2])) continue;
+      out.push({ method: m[1].toUpperCase(), path: m[2] });
+    }
   }
   return out;
 }
@@ -95,5 +100,13 @@ test('B\'s list and analytics endpoints never include A\'s rows', async () => {
     const a = JSON.parse(sumA.text), b = JSON.parse(sumB.text);
     assert.ok((a.instances?.total ?? 0) >= (b.instances?.total ?? 0));
     assert.strictEqual(b.instances?.total ?? 0, 0, 'B has no instances of its own');
+  }
+});
+
+test('broadcast signals only reach the caller\'s own workspace', async () => {
+  for (const p of ['/signals/victim', '/workflow-instances/signal/victim']) {
+    const res = await fetch(`${base}${p}`, { method: 'POST', headers: { authorization: `Bearer ${tokB}`, 'x-tenant-id': wsB, 'content-type': 'application/json' }, body: '{}' });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(((await res.json()) as any).signaled, 0, 'B signalled nothing of A\'s');
   }
 });

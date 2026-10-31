@@ -82,9 +82,12 @@ export function globalNameMatches(n: EngineNode, code: string): boolean {
 export function findErrorHandler(nodes: EngineNode[], failingNodeId: string, code: string): EngineNode | undefined {
   const catches = nodes.filter((n) => isErrorCatch(n));
   const onNode = (n: EngineNode) => !isGlobalCatch(n) && onList(n).includes(failingNodeId);
+  const onNodeSpecific = (n: EngineNode) => onNode(n) && !isCatchAll(n) && catchErrorName(n) === code;
+  const onNodeCatchAll = (n: EngineNode) => onNode(n) && isCatchAll(n);
+  const onNodeAny = (n: EngineNode) => onNode(n);
   const globalNamed = (n: EngineNode) => isGlobalCatch(n) && !isCatchAll(n) && globalNameMatches(n, code);
   const globalCatchAll = (n: EngineNode) => isGlobalCatch(n) && isCatchAll(n);
-  return catches.find(onNode) || catches.find(globalNamed) || catches.find(globalCatchAll);
+  return catches.find(onNodeSpecific) || catches.find(onNodeCatchAll) || catches.find(onNodeAny) || catches.find(globalNamed) || catches.find(globalCatchAll);
 }
 
 /** Boundary nodes with a timer trigger attached to `hostNodeId` — scheduled when that host starts

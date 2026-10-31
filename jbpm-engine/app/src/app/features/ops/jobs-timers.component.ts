@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { OpsApiService } from '../../core/api/ops-api.service';
@@ -77,7 +77,7 @@ const KIND_LABEL: Record<TimerJob['kind'], string> = {
         }
       </div>
       <div class="row pager">
-        <span class="muted">Showing {{ paged().length ? offset() + 1 : 0 }}–{{ offset() + paged().length }} of {{ filtered().length }}</span>
+        <span class="muted">Showing {{ paged().length }} of {{ filtered().length }} jobs (scrolls to load more)</span>
         <span class="spacer"></span>
         <span class="muted">Rows</span>
         <select [(ngModel)]="limit" style="width:70px;"><option [ngValue]="10">10</option><option [ngValue]="20">20</option><option [ngValue]="50">50</option><option [ngValue]="100">100</option></select>
@@ -103,6 +103,13 @@ const KIND_LABEL: Record<TimerJob['kind'], string> = {
     .ta-r { text-align: right; white-space: nowrap; }
     .pager { margin-top: 12px; font-size: 12.5px; }
     .pad { padding: 16px; }
+
+    @media (max-width: 768px) {
+      .page { padding: 12px 14px; }
+      .filterbar { flex-direction: column; align-items: stretch; gap: 8px; }
+      .filterbar select, .filterbar input { width: 100% !important; }
+      .pager { flex-wrap: wrap; gap: 6px; }
+    }
   `],
 })
 export class JobsTimersComponent implements OnInit, OnDestroy {
@@ -114,8 +121,9 @@ export class JobsTimersComponent implements OnInit, OnDestroy {
   statusFilter = 'scheduled';
   kindFilter = '';
   instanceIdFilter = this.route.snapshot.queryParamMap.get('instanceId') || '';
-  limit = 20;
+  limit = 25;
   offset = signal(0);
+  displayedCount = signal(25);
 
   all = signal<TimerJob[]>([]);
   loading = signal(true);
@@ -123,8 +131,17 @@ export class JobsTimersComponent implements OnInit, OnDestroy {
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private clockTimer: ReturnType<typeof setInterval> | undefined;
 
+  @HostListener('window:scroll') onWindowScroll() {
+    const threshold = 250;
+    const pos = window.innerHeight + window.scrollY;
+    const max = document.documentElement.scrollHeight;
+    if (pos >= max - threshold && this.displayedCount() < this.filtered().length) {
+      this.displayedCount.update((c) => Math.min(c + 25, this.filtered().length));
+    }
+  }
+
   filtered = computed(() => this.all());
-  paged = computed(() => { this.tick(); return this.filtered().slice(this.offset(), this.offset() + this.limit); });
+  paged = computed(() => { this.tick(); return this.filtered().slice(0, this.displayedCount()); });
   hasFilters = computed(() => !!this.statusFilter || !!this.kindFilter || !!this.instanceIdFilter);
 
   ngOnInit() {

@@ -22,7 +22,7 @@ type SettingsTab = 'account' | 'system';
   template: `
     <div class="page">
       <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Settings' }]" /></div>
-      <header class="pagehead"><h1>Settings</h1><p class="muted">Your appearance, account and password@if (canAdmin()) { , plus system-wide configuration }.</p></header>
+      <header class="pagehead"><h1>Settings</h1><p class="muted">Your appearance, account and password{{ canAdmin() ? ', plus system-wide configuration' : '' }}.</p></header>
 
       @if (canAdmin()) {
         <div class="tabs">
@@ -68,6 +68,26 @@ type SettingsTab = 'account' | 'system';
               <div class="setting-row">
                 <div class="lbl">Default items per page<span class="shint">Applies to Instances, Tasks, Errors, Jobs and Audit.</span></div>
                 <select [(ngModel)]="s.defaultPageSize"><option [ngValue]="10">10</option><option [ngValue]="20">20</option><option [ngValue]="50">50</option><option [ngValue]="100">100</option></select>
+              </div>
+              <div class="setting-row">
+                <div class="lbl">Instance creation mode<span class="shint">Control whether users can create process instances, case instances, or both.</span></div>
+                <select [(ngModel)]="s.instanceCreationMode">
+                  <option value="both">Both (Process & Case Instances)</option>
+                  <option value="case-only">Case Instances Only</option>
+                  <option value="process-only">Process Instances Only</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <div class="lbl">Script execution timeout (seconds)<span class="shint">Maximum runtime for JS/Java script tasks before timeout termination.</span></div>
+                <input type="number" min="1" [(ngModel)]="s.scriptTimeoutSeconds" style="width:90px;" />
+              </div>
+              <div class="setting-row">
+                <div class="lbl">History audit level<span class="shint">Detail level captured in the compliance audit trail.</span></div>
+                <select [(ngModel)]="s.historyAuditLevel">
+                  <option value="full">Full (All events, variable updates & activities)</option>
+                  <option value="activity">Activity (Lifecycle, tasks & versions)</option>
+                  <option value="minimal">Minimal (Core lifecycle & errors only)</option>
+                </select>
               </div>
               <div class="setting-row">
                 <div class="lbl">Instance history retention (days)<span class="shint">Completed and aborted instances older than this are eligible for pruning.</span></div>
@@ -116,13 +136,43 @@ type SettingsTab = 'account' | 'system';
                 <input type="number" min="1" [(ngModel)]="s.executorIntervalSeconds" style="width:90px;" />
               </div>
               <div class="setting-row">
+                <div class="lbl">Timer batch size<span class="shint">Max due timers claimed per execution tick (auto-scaled across replicas).</span></div>
+                <input type="number" min="1" [(ngModel)]="s.timerBatchSize" style="width:90px;" />
+              </div>
+              <div class="setting-row">
                 <div class="lbl">Default job retries<span class="shint">Attempts before a job is marked failed and surfaced in Execution Errors.</span></div>
                 <input type="number" min="0" [(ngModel)]="s.defaultJobRetries" style="width:90px;" />
+              </div>
+              <div class="setting-row">
+                <div class="lbl">Job retry backoff multiplier<span class="shint">Exponential factor applied between consecutive job retry attempts.</span></div>
+                <input type="number" min="1" [(ngModel)]="s.jobRetryBackoffMultiplier" style="width:90px;" />
               </div>
             </section>
 
             <section class="card">
-              <h3>Notifications & email</h3>
+              <h3>Integrations & Outbound HTTP</h3>
+              <p class="hint">Network security, request timeouts, and domain allowlists for REST / service tasks.</p>
+              <div class="setting-row">
+                <div class="lbl">HTTP request timeout (seconds)<span class="shint">Abort signal timeout for outbound REST service calls.</span></div>
+                <input type="number" min="1" [(ngModel)]="s.httpTimeoutSeconds" style="width:90px;" />
+              </div>
+              <div class="setting-row">
+                <div class="lbl">Outbound domain allowlist<span class="shint">Comma-separated hostnames or .domain suffixes permitted to bypass SSRF private network filters.</span></div>
+                <input [(ngModel)]="s.outboundAllowlist" placeholder="api.enterprise.com, .internal.corp, localhost" style="width:300px;" />
+              </div>
+            </section>
+
+            <section class="card">
+              <h3>Tasks & SLAs</h3>
+              <p class="hint">Default deadlines, escalation thresholds, and task ownership lifecycles.</p>
+              <div class="setting-row">
+                <div class="lbl">Default task SLA (hours)<span class="shint">Fallback SLA duration if a User Task does not declare an explicit due date.</span></div>
+                <input type="number" min="1" [(ngModel)]="s.defaultTaskSlaHours" style="width:90px;" />
+              </div>
+              <div class="setting-row">
+                <div class="lbl">Auto-release idle claimed tasks (hours)<span class="shint">Release claimed tasks back to group pool if untouched for X hours (0 = disabled).</span></div>
+                <input type="number" min="0" [(ngModel)]="s.autoReleaseClaimedTaskHours" style="width:90px;" />
+              </div>
               <div class="setting-row">
                 <div class="lbl">SLA warning threshold<span class="shint">When a task flips from on-track to at-risk.</span></div>
                 <select [(ngModel)]="s.slaWarnThresholdPct">
@@ -131,6 +181,10 @@ type SettingsTab = 'account' | 'system';
                   <option [ngValue]="90">90% of due time</option>
                 </select>
               </div>
+            </section>
+
+            <section class="card">
+              <h3>Notifications & email</h3>
               <div class="setting-row">
                 <div class="lbl">Email delivery<span class="shint">Needed for SLA-breach and reminder emails. In-app notifications work without it.</span></div>
                 <button class="switch" [class.on]="s.emailEnabled" role="switch" [attr.aria-checked]="s.emailEnabled" (click)="s.emailEnabled = !s.emailEnabled"></button>
@@ -139,7 +193,26 @@ type SettingsTab = 'account' | 'system';
                 <div class="setting-row"><div class="lbl">From address</div><input type="email" [(ngModel)]="s.emailFrom" placeholder="bpm@example.com" style="width:240px;" /></div>
                 <div class="setting-row"><div class="lbl">SMTP host</div><input [(ngModel)]="s.smtpHost" placeholder="smtp.example.com" style="width:240px;" /></div>
                 <div class="setting-row"><div class="lbl">SMTP port</div><input type="number" [(ngModel)]="s.smtpPort" style="width:90px;" /></div>
+                <div class="setting-row"><div class="lbl">SMTP user</div><input [(ngModel)]="s.smtpUser" placeholder="smtp-user" style="width:240px;" /></div>
+                <div class="setting-row">
+                  <div class="lbl">SMTP password <span class="badge" title="RSA encrypted in-transit and at-rest"><app-icon name="lock" [size]="11" /> RSA Protected</span></div>
+                  <input type="password" [(ngModel)]="s.smtpPassword" placeholder="••••••••" style="width:240px;" />
+                </div>
               }
+            </section>
+
+            <section class="card">
+              <h3>System Diagnostics & Logging</h3>
+              <p class="hint">Engine log verbosity and system observability level.</p>
+              <div class="setting-row">
+                <div class="lbl">System log level<span class="shint">Minimum log severity output across all replicas in real-time.</span></div>
+                <select [(ngModel)]="s.logLevel">
+                  <option value="debug">Debug (Extremely verbose, development only)</option>
+                  <option value="info">Info (Recommended for production)</option>
+                  <option value="warn">Warn (Only warnings and failures)</option>
+                  <option value="error">Error (Only critical operational errors)</option>
+                </select>
+              </div>
             </section>
 
             <section class="card">
@@ -177,9 +250,7 @@ type SettingsTab = 'account' | 'system';
     h1 { font-size: 19px; margin: 0; }
     .muted { color: var(--muted); }
     .pagehead p { margin: 4px 0 0; font-size: 13px; }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-    .tab { border: none; background: none; padding: 9px 4px; margin-right: 18px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-    .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
     .sections { display: flex; flex-direction: column; gap: 16px; }
     .card { padding: 20px; }
     h3 { font-size: 14px; margin: 0 0 4px; }
@@ -202,6 +273,13 @@ type SettingsTab = 'account' | 'system';
     .switch.on::after { left: 17px; }
     .savebar { display: flex; align-items: center; gap: 8px; position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; }
     .spacer { flex: 1; }
+
+    @media (max-width: 768px) {
+      .page { padding: 12px 14px; }
+      .setting-row { flex-direction: column; align-items: stretch; gap: 8px; }
+      .setting-row input, .setting-row select { width: 100% !important; }
+      .savebar { flex-wrap: wrap; }
+    }
   `],
 })
 export class SettingsComponent {

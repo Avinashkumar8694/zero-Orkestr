@@ -25,4 +25,20 @@ export class MemoryStore implements Store {
     if (!r) { r = new MemoryRepo<T>(); this.repos.set(collection, r); }
     return r as Repository<T>;
   }
+
+  async claimDueTimers(tenantId: string, nowIso: string, limit: number): Promise<any[]> {
+    const timerRepo = this.repo<any>('timers');
+    const all = await timerRepo.query((t: any) =>
+      (!tenantId || tenantId === '*' || t.tenantId === tenantId) &&
+      t.status === 'scheduled' &&
+      t.dueAt <= nowIso,
+    );
+    const claimed = all.slice(0, limit);
+    for (const job of claimed) {
+      job.status = 'fired';
+      job.fired = (job.fired || 0) + 1;
+      await timerRepo.put(job);
+    }
+    return claimed;
+  }
 }

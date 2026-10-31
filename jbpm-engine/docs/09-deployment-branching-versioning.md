@@ -58,12 +58,13 @@ Version(published) ──deploy──▶ Deployment(inactive)
 ```
 
 ### Rules
+- **Project-Level Deployments**: Deployments operate strictly at the **Project level**, never per individual process. When a deployment is created, the entire `EngineProject` snapshot — containing all constituent processes, call activities, shared variables, DRL rulesets, DMN decision models, and forms — is packaged and tagged together under a unified project version. This prevents version skew and broken cross-process dependencies.
 - A deployment is an **immutable snapshot**: it copies the version's engine JSON + resolved env, so it
   keeps running even if the source version/branch is later changed or deleted.
 - **Exactly one active** deployment per `(workflowId, environment)`. Activating B deactivates A in the
   same environment — done in a single transaction; emits `deployment.activated`.
-- **Starting an instance** resolves the target: `POST /instances { workflowId, environment }` →
-  the active deployment for that environment; or `{ deploymentId }` to pin a specific one.
+- **Starting an instance** resolves the target: `POST /instances { workflowId, environment, processId? }` →
+  the active deployment for that environment; or `{ deploymentId, processId? }` to pin a specific one.
 - **Running instances are not migrated** on activation — they finish on the deployment they started on
   (like KIE containers). New instances use the new active deployment.
 - **Undeploy** sets `inactive` (cannot start new instances; existing continue). **Archive** hides it.

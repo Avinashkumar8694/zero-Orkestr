@@ -1,99 +1,93 @@
-/* ============================================================================
-   Design tokens — "Aurora" light theme.
+@import '@fontsource-variable/plus-jakarta-sans';
 
-   Direction: light, airy and colourful rather than dense enterprise grey. The page sits on a
-   soft mesh-gradient backdrop; the app itself is a floating rounded surface. Colour is vibrant
-   and multi-hue (violet → pink → mint → blue) and is used generously in data visualisation,
-   while chrome stays near-white so the data is what carries the colour.
+/* ============================================================================
+   Design tokens — "Lavender".
+
+   Direction (from the reference board): a soft lavender canvas with the whole app built from
+   floating white cards — large radii (24px), tinted soft shadows, pill controls, violet gradient for
+   the one primary action, and colour used for meaning (big coloured numbers, gradient chart areas,
+   status pills). The dark theme keeps the exact same shapes on a deep violet-black.
 
    Every component references these by name, so values are tuned here rather than renamed.
    ============================================================================ */
 :root {
-  /* Brand — violet with a pink-leaning gradient partner */
-  --primary: #7c3aed;
-  --primary-600: #6d28d9;
-  --primary-50: #f4f0ff;
-  --primary-100: #e9e2ff;
-  --accent-pink: #ec4899;
-  --accent-mint: #10b981;
-  --accent-blue: #3b82f6;
-  --accent-cyan: #06b6d4;
+  /* Brand — violet */
+  --primary: #6a47e0;
+  --primary-600: #5636c4;
+  --primary-50: #f1edff;
+  --primary-100: #e3dbff;
+  --accent-pink: #e0529c;
+  --accent-mint: #14b27c;
+  --accent-blue: #4a86f5;
+  --accent-cyan: #12b5d0;
 
-  /* Signature gradients — used on charts, primary buttons, brand marks */
-  --grad-brand: linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%);
-  --grad-cool: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
-  --grad-warm: linear-gradient(135deg, #d946ef 0%, #f472b6 100%);
-  --grad-fresh: linear-gradient(135deg, #10b981 0%, #34d399 100%);
-  --grad-page: radial-gradient(1200px 600px at 8% -5%, #e9dcff 0%, transparent 55%),
-               radial-gradient(1000px 520px at 98% 4%, #ffe0f2 0%, transparent 52%),
-               radial-gradient(900px 500px at 88% 96%, #ddfbef 0%, transparent 50%),
-               radial-gradient(800px 460px at 4% 92%, #e6f0ff 0%, transparent 50%);
+  --grad-brand: linear-gradient(90deg, #7f5af0 0%, #5a38cc 100%);
+  --grad-cool: linear-gradient(135deg, #7f5af0 0%, #4a86f5 100%);
+  --grad-warm: linear-gradient(135deg, #e0529c 0%, #f08a4b 100%);
+  --grad-fresh: linear-gradient(135deg, #14b27c 0%, #43d19e 100%);
+  --grad-page: none;
 
-  /* Surfaces — near-white, low-contrast separation */
-  --bg: #f7f6fb;
+  /* Surfaces */
+  --bg: #e8e9f7;
   --surface: #ffffff;
-  --surface-2: #fbfaff;
-  --surface-3: #f5f3fb;
-  --border: #eeecf5;
-  --border-strong: #ddd9ea;
+  --surface-2: #f6f6fd;
+  --surface-3: #eeeefa;
+  --border: #ececf7;
+  --border-strong: #d8d8ee;
 
   /* Text */
-  --text: #1a1730;
-  --text-secondary: #4a4763;
-  --muted: #8b88a3;
+  --text: #1f1b3a;
+  --text-secondary: #4d4a6b;
+  --muted: #6a6890;
 
-  /* Semantic status — brighter than the old enterprise set, tinted backgrounds */
-  --green: #059669;    --green-bg: #e7f9f1;
-  --blue: #2563eb;     --blue-bg: #e8f0ff;
-  --purple: #7c3aed;   --purple-bg: #f2ecff;
-  --orange: #ea580c;   --orange-bg: #fff0e6;
-  --amber: #d97706;    --amber-bg: #fff5e5;
-  --red: #e11d48;      --red-bg: #ffe9ee;
-  --pink: #db2777;     --pink-bg: #fdeaf5;
+  /* Status */
+  --green: #0b8a5f;    --green-bg: #e2f7ee;
+  --blue: #2a63d8;     --blue-bg: #e6eeff;
+  --purple: #6a47e0;   --purple-bg: #efeaff;
+  --orange: #c9500f;   --orange-bg: #fdeee2;
+  --amber: #a8620a;    --amber-bg: #fdf2d9;
+  --red: #d4224c;      --red-bg: #fde8ee;
+  --pink: #c22a82;     --pink-bg: #fbe8f3;
 
-  /* Shape — noticeably rounder than before */
-  --radius-shell: 26px;
-  --radius: 16px;
-  --radius-sm: 10px;
-  --radius-xs: 7px;
+  /* Shape — generous, friendly */
+  --radius-shell: 28px;
+  --radius: 24px;
+  --radius-sm: 16px;
+  --radius-xs: 10px;
   --radius-pill: 999px;
 
-  /* Elevation — soft and violet-tinted, never grey/heavy */
-  --shadow-xs: 0 1px 2px rgba(76, 58, 122, .05);
-  --shadow-card: 0 1px 2px rgba(76, 58, 122, .04), 0 4px 16px -6px rgba(76, 58, 122, .10);
-  --shadow-pop: 0 8px 24px -8px rgba(76, 58, 122, .18), 0 24px 48px -16px rgba(76, 58, 122, .20);
-  --shadow-shell: 0 24px 70px -24px rgba(76, 58, 122, .28);
-  --shadow-focus: 0 0 0 3px rgba(124, 58, 237, .18);
+  /* Elevation — soft, violet-tinted */
+  --shadow-xs: 0 1px 2px rgba(86, 64, 180, .06);
+  --shadow-card: 0 1px 2px rgba(86, 64, 180, .04), 0 14px 34px -18px rgba(86, 64, 180, .22);
+  --shadow-pop: 0 10px 28px -10px rgba(86, 64, 180, .28), 0 28px 60px -22px rgba(86, 64, 180, .30);
+  --shadow-shell: 0 24px 60px -28px rgba(86, 64, 180, .30);
+  --shadow-focus: 0 0 0 4px rgba(106, 71, 224, .18);
 
   /* Layout */
-  --header-h: 64px;
+  --header-h: 68px;
   --footer-h: 32px;
-  --sidenav-w: 232px;
+  --sidenav-w: 252px;
   --panel-w: 320px;
   --panel-w-lg: 420px;
 
-  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
 
-  /* Type scale — six steps only. Deliberately capped: dense consoles that adopt a generic 13-step
-     scale end up with half-pixel sizes nobody chose. 12px is a hard floor (Carbon/Atlassian/Ant all
-     hold this line). Density comes from padding, never from shrinking text below the floor. */
-  --text-xs: 12px;    --lh-xs: 16px;   /* metadata, timestamps, table headers */
-  --text-sm: 14px;    --lh-sm: 20px;   /* body, table cells, labels — the workhorse */
-  --text-base: 16px;  --lh-base: 24px; /* form inputs, emphasised body */
-  --text-lg: 18px;    --lh-lg: 28px;   /* section headers */
-  --text-xl: 22px;    --lh-xl: 28px;   /* page titles */
-  --text-2xl: 28px;   --lh-2xl: 36px;  /* dashboard hero numbers only */
+  /* Type scale — six steps; 12px is the hard floor. */
+  --text-xs: 12px;    --lh-xs: 16px;
+  --text-sm: 14px;    --lh-sm: 20px;
+  --text-base: 16px;  --lh-base: 24px;
+  --text-lg: 18px;    --lh-lg: 28px;
+  --text-xl: 26px;    --lh-xl: 32px;
+  --text-2xl: 34px;   --lh-2xl: 40px;
 
-  /* Table density — font-size is FIXED across all three; only padding and row height move. */
-  --row-h: 44px;      --cell-pad: 10px 16px;   /* comfortable (default) */
+  --row-h: 52px;      --cell-pad: 12px 18px;
 
-  --canvas-bg: #fbfaff;
-  --canvas-dot: #e4e0f0;
+  --canvas-bg: #fafaff;
+  --canvas-dot: #dcdcf0;
   color-scheme: light;
 
-  /* Status aliases — named by meaning so a palette change doesn't touch components */
   --status-running: var(--blue);      --status-running-bg: var(--blue-bg);
   --status-waiting: var(--amber);     --status-waiting-bg: var(--amber-bg);
   --status-completed: var(--green);   --status-completed-bg: var(--green-bg);
@@ -108,105 +102,95 @@
   --token-error: var(--red);
 }
 
-/* Dark theme — same names, deep violet-black rather than neutral charcoal, so the brand
-   identity survives the switch. Status colours brighten; tinted fills replace pastel fills. */
+/* Dark — deep violet-black; same shapes, brighter violet, tinted status fills. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --primary: #a78bfa;
-  --primary-600: #c4b5fd;
-  --primary-50: rgba(167, 139, 250, .14);
-  --primary-100: rgba(167, 139, 250, .22);
-  --grad-page: radial-gradient(1200px 600px at 8% -5%, rgba(124,58,237,.20) 0%, transparent 55%),
-               radial-gradient(1000px 520px at 98% 4%, rgba(217,70,239,.15) 0%, transparent 52%),
-               radial-gradient(900px 500px at 88% 96%, rgba(16,185,129,.12) 0%, transparent 50%);
-  --bg: #0e0b18;
-  --surface: #171327;
-  --surface-2: #1c1730;
-  --surface-3: #221c39;
-  --border: #2a2340;
-  --border-strong: #3d3357;
-  --text: #f0edfa;
-  --text-secondary: #bdb7d1;
-  --muted: #8e88a8;
-  --green: #34d399;   --green-bg: rgba(52, 211, 153, .14);
-  --blue: #60a5fa;    --blue-bg: rgba(96, 165, 250, .14);
-  --purple: #a78bfa;  --purple-bg: rgba(167, 139, 250, .16);
-  --orange: #fb923c;  --orange-bg: rgba(251, 146, 60, .14);
-  --amber: #fbbf24;   --amber-bg: rgba(251, 191, 36, .14);
-  --red: #fb7185;     --red-bg: rgba(251, 113, 133, .14);
-  --pink: #f472b6;    --pink-bg: rgba(244, 114, 182, .14);
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .4);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px -6px rgba(0, 0, 0, .5);
-  --shadow-pop: 0 8px 24px -8px rgba(0, 0, 0, .6), 0 24px 48px -16px rgba(0, 0, 0, .7);
-  --shadow-shell: 0 24px 70px -24px rgba(0, 0, 0, .7);
-  --shadow-focus: 0 0 0 3px rgba(167, 139, 250, .3);
-  --canvas-bg: #14101f;
-  --canvas-dot: #2a2340;
+  --primary: #a58bff;
+  --primary-600: #c3b2ff;
+  --primary-50: rgba(165, 139, 255, .13);
+  --primary-100: rgba(165, 139, 255, .22);
+  --grad-brand: linear-gradient(90deg, #8a66f2 0%, #5d3bd1 100%);
+  --bg: #0e0b1c;
+  --surface: #18142b;
+  --surface-2: #1e1936;
+  --surface-3: #261f42;
+  --border: #2a2448;
+  --border-strong: #3b3360;
+  --text: #f1eefc;
+  --text-secondary: #bfb9d9;
+  --muted: #9a95b8;
+  --green: #4be0a6;   --green-bg: rgba(75, 224, 166, .13);
+  --blue: #7db2ff;    --blue-bg: rgba(125, 178, 255, .13);
+  --purple: #b3a0ff;  --purple-bg: rgba(165, 139, 255, .15);
+  --orange: #ffa066;  --orange-bg: rgba(255, 160, 102, .13);
+  --amber: #f7c75a;   --amber-bg: rgba(247, 199, 90, .13);
+  --red: #ff7d99;     --red-bg: rgba(255, 125, 153, .13);
+  --pink: #f68fc8;    --pink-bg: rgba(246, 143, 200, .13);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .35);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .35), 0 14px 34px -18px rgba(0, 0, 0, .6);
+  --shadow-pop: 0 10px 28px -10px rgba(0, 0, 0, .65), 0 28px 60px -22px rgba(0, 0, 0, .75);
+  --shadow-shell: 0 24px 60px -28px rgba(0, 0, 0, .7);
+  --shadow-focus: 0 0 0 4px rgba(165, 139, 255, .28);
+  --canvas-bg: #120f24;
+  --canvas-dot: #2a2448;
 }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
   font-family: var(--font); color: var(--text); font-size: 14px; line-height: 1.55;
-  background: var(--grad-page), var(--bg);
-  background-attachment: fixed;
-  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility;
 }
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; }
-h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -.015em; color: var(--text); }
-h1 { font-size: 22px; } h2 { font-size: 17px; } h3 { font-size: 14px; }
+h1, h2, h3, h4 { margin: 0; font-weight: 700; letter-spacing: -.02em; color: var(--text); }
+h1 { font-size: var(--text-xl); line-height: var(--lh-xl); letter-spacing: -.03em; } h2 { font-size: 18px; } h3 { font-size: 15px; }
 p { line-height: 1.6; margin: 0; }
 code, pre { font-family: var(--font-mono); }
+::selection { background: var(--primary-100); }
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
-/* Focus is always visible, styled once, never suppressed. A real 2px outline with an offset rather
-   than a box-shadow ring: WCAG 2.2 SC 2.4.13 wants a ≥2px perimeter at ≥3:1 against every surface,
-   and an outline (unlike a shadow) is never clipped by an ancestor's overflow. */
-:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius-sm); }
 
-/* Density: font-size never changes, only padding and row height (Carbon's rule). Set
-   data-density="compact" on <html> to switch. */
-:root[data-density="compact"]  { --row-h: 32px; --cell-pad: 6px 12px; }
-:root[data-density="spacious"] { --row-h: 56px; --cell-pad: 14px 16px; }
+:root[data-density="compact"]  { --row-h: 38px; --cell-pad: 7px 14px; }
+:root[data-density="spacious"] { --row-h: 62px; --cell-pad: 16px 20px; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: .001ms !important; animation-iteration-count: 1 !important;
-    transition-duration: .001ms !important;
-  }
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
 
-/* ---------------------------------------------------------------- Buttons */
+/* ---------------------------------------------------------------- Page rhythm */
+.pagehead { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.sub { font-size: 14px; max-width: 70ch; }
+
+/* ---------------------------------------------------------------- Buttons — pills */
 .btn {
-  border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px; font-weight: 550; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px; box-shadow: var(--shadow-xs);
-  transition: background-color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .08s ease;
+  white-space: nowrap; flex-shrink: 0;   /* a pill label never wraps onto a second line */
+  border: 1px solid transparent; background: var(--surface); color: var(--primary);
+  border-radius: var(--radius-pill); padding: 9px 18px; font-size: 13.5px; font-weight: 650; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; box-shadow: var(--shadow-card); line-height: 1.35;
+  transition: background-color .15s ease, box-shadow .15s ease, transform .1s ease, filter .15s ease;
 }
-.btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
-.btn:active { transform: translateY(.5px); }
+.btn:hover { background: var(--primary-50); }
+.btn:active { transform: translateY(1px); }
 .btn.primary {
-  background: var(--grad-brand); border-color: transparent; color: #fff;
-  box-shadow: 0 1px 0 rgba(255,255,255,.2) inset, 0 6px 18px -8px rgba(139, 92, 246, .8);
+  background: var(--grad-brand); color: #fff;
+  box-shadow: 0 10px 22px -10px rgba(90, 56, 204, .85), 0 1px 0 rgba(255, 255, 255, .22) inset;
 }
-.btn.primary:hover { filter: brightness(1.06); }
-.btn.ghost { border-color: transparent; background: transparent; box-shadow: none; }
-.btn.ghost:hover { background: var(--surface-3); }
-.btn.danger { color: var(--red); border-color: var(--red-bg); background: var(--red-bg); box-shadow: none; }
-.btn.danger:hover { filter: brightness(.97); }
-.btn.sm { padding: 5px 10px; font-size: 12.5px; border-radius: var(--radius-xs); }
-.btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; transform: none; }
+.btn.primary:hover { filter: brightness(1.08); background: var(--grad-brand); }
+.btn.ghost { background: transparent; box-shadow: none; color: var(--text-secondary); }
+.btn.ghost:hover { background: var(--surface-3); color: var(--text); }
+.btn.danger { color: var(--red); background: var(--red-bg); box-shadow: none; }
+.btn.danger:hover { filter: brightness(.97); background: var(--red-bg); }
+.btn.sm { padding: 5px 13px; font-size: 12.5px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; filter: none; transform: none; }
 
-/* ---------------------------------------------------------------- Badges */
+/* ---------------------------------------------------------------- Badges — soft pills */
 .badge {
-  font-size: 11.5px; font-weight: 600; letter-spacing: .005em; padding: 3px 9px;
+  font-size: 12px; flex-shrink: 0; font-weight: 650; letter-spacing: 0; padding: 3px 11px;
   border-radius: var(--radius-pill); background: var(--surface-3); color: var(--text-secondary);
-  border: 1px solid transparent; display: inline-flex; align-items: center; gap: 4px;
-  line-height: 1.45; white-space: nowrap;
+  border: 0; display: inline-flex; align-items: center; gap: 5px; line-height: 1.5; white-space: nowrap;
 }
 .badge.active, .badge.completed { background: var(--green-bg); color: var(--green); }
 .badge.inactive { background: var(--surface-3); color: var(--muted); }
@@ -216,94 +200,93 @@ code, pre { font-family: var(--font-mono); }
 .badge.aborted { background: var(--surface-3); color: var(--muted); }
 .badge.suspended { background: var(--purple-bg); color: var(--purple); }
 
-/* ---------------------------------------------------------------- Cards */
-.card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow-card);
-}
+/* ---------------------------------------------------------------- Cards — the building block */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-card); }
 .card.flat { box-shadow: none; }
-.card.clickable, a.card { transition: box-shadow .16s ease, transform .12s ease, border-color .16s ease; }
-.card.clickable:hover, a.card:hover {
-  box-shadow: var(--shadow-pop); border-color: var(--primary-100); transform: translateY(-2px);
-}
+.card.clickable, a.card { transition: box-shadow .18s ease, transform .14s ease; }
+.card.clickable:hover, a.card:hover { box-shadow: var(--shadow-pop); transform: translateY(-2px); }
+.card:has(> table), .card:has(> .tablewrap) { overflow: hidden; }
 
 /* ---------------------------------------------------------------- Tables */
 table { width: 100%; border-collapse: collapse; background: transparent; }
-th, td {
-  text-align: left; padding: var(--cell-pad); border-bottom: 1px solid var(--border);
-  font-size: var(--text-sm); line-height: var(--lh-sm); height: var(--row-h);
-}
-th {
-  color: var(--muted); font-weight: 600; font-size: var(--text-xs); text-transform: uppercase;
-  letter-spacing: .05em; background: transparent; white-space: nowrap; height: auto;
-}
-/* Sticky header must sit on <th>, not <thead>/<tr> — the latter don't establish a sticky context. */
+th, td { text-align: left; padding: var(--cell-pad); border-bottom: 1px solid var(--border); font-size: var(--text-sm); line-height: var(--lh-sm); height: var(--row-h); }
+th { color: var(--muted); font-weight: 650; font-size: var(--text-xs); letter-spacing: .02em; background: transparent; white-space: nowrap; height: auto; padding-top: 12px; padding-bottom: 12px; }
 thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); }
-/* Counts, durations and money align only with tabular figures. */
 td.num, .tnum { font-variant-numeric: tabular-nums; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr { transition: background-color .12s ease; }
 tbody tr:hover td { background: var(--surface-2); }
 tr.selected td { background: var(--primary-50); }
 
-/* ---------------------------------------------------------------- Inputs */
-input:not([type=checkbox]):not([type=radio]), select, textarea {
-  font-family: inherit; font-size: 13px; color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 11px;
-  background: var(--surface-2);
-  transition: border-color .14s ease, box-shadow .14s ease, background-color .14s ease;
+/* ---------------------------------------------------------------- Inputs — soft filled pills */
+input:not([type=checkbox]):not([type=radio]):not([type=range]), select {
+  font-family: inherit; font-size: 13.5px; color: var(--text);
+  border: 1px solid transparent; border-radius: var(--radius-pill); padding: 10px 16px;
+  background: var(--surface-3);
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+textarea {
+  font-family: inherit; font-size: 13.5px; color: var(--text);
+  border: 1px solid transparent; border-radius: var(--radius-sm); padding: 12px 16px; background: var(--surface-3);
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
 input:hover, select:hover, textarea:hover { border-color: var(--border-strong); }
-input:focus, select:focus, textarea:focus {
-  outline: none; border-color: var(--primary); background: var(--surface); box-shadow: var(--shadow-focus);
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); background: var(--surface); box-shadow: var(--shadow-focus); }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
+input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 16px; height: 16px; }
+
+/* ---------------------------------------------------------------- Tabs — one segmented pill control, used by every tab bar */
+.tabs {
+  display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin: 0 0 18px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-pill); box-shadow: var(--shadow-card);
 }
-input::placeholder, textarea::placeholder { color: var(--muted); }
-input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 15px; height: 15px; }
+.tabs a, .tabs button, .tabs .tab {
+  display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; padding: 7px 18px; margin: 0; font-size: 13.5px; font-weight: 650; color: var(--text-secondary);
+  border-radius: var(--radius-pill); cursor: pointer; transition: background-color .15s ease, color .15s ease;
+  white-space: nowrap; flex: 0 0 auto;   /* a tab label never wraps; the bar scrolls instead */
+}
+[role="tab"] { white-space: nowrap; flex: 0 0 auto; }
+[role="tablist"] { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+[role="tablist"]::-webkit-scrollbar { display: none; }
+.tabs a:hover, .tabs button:hover, .tabs .tab:hover { color: var(--primary); background: var(--primary-50); }
+.tabs a.active, .tabs button.active, .tabs .tab.active { background: var(--grad-brand); color: #fff; box-shadow: 0 8px 18px -10px rgba(90, 56, 204, .85); }
 
 /* ---------------------------------------------------------------- Utility */
 .muted { color: var(--muted); }
 .row { display: flex; gap: 8px; align-items: center; }
 .spacer { flex: 1; }
 .mono { font-family: var(--font-mono); }
-
-/* Identity values (PIID, keys) — monospace, brand-coloured, click-to-copy affordance. */
 .ident { font-family: var(--font-mono); font-weight: 600; color: var(--primary); font-size: 12.5px; }
 
-/* ---------------------------------------------------------------- Empty & loading */
-.empty-state {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  text-align: center; padding: 56px 24px; gap: 6px;
-}
-.empty-state .es-icon {
-  width: 60px; height: 60px; display: grid; place-items: center;
-  background: var(--grad-brand); color: #fff; border-radius: 20px; font-size: 24px;
-  margin-bottom: 10px; box-shadow: 0 10px 24px -10px rgba(139, 92, 246, .8);
-}
-.empty-state h3 { margin: 0; font-size: 15px; font-weight: 650; }
-.empty-state p { margin: 0; font-size: 13px; color: var(--muted); max-width: 380px; }
-.empty-state .btn { margin-top: 12px; }
+/* Progress / meter — a gradient pill on a soft track */
+.meter { height: 8px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
+.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--grad-brand); }
 
-.skeleton {
-  position: relative; overflow: hidden; background: var(--surface-3);
-  border-radius: var(--radius-sm);
+/* ---------------------------------------------------------------- Empty & loading */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 64px 24px; gap: 6px; }
+.empty-state .es-icon {
+  width: 64px; height: 64px; display: grid; place-items: center;
+  background: var(--grad-brand); color: #fff; border-radius: 22px; font-size: 24px;
+  margin-bottom: 12px; box-shadow: 0 14px 28px -12px rgba(90, 56, 204, .75);
 }
-.skeleton::after {
-  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .7), transparent);
-  animation: skeleton-shimmer 1.4s infinite;
-}
+.empty-state h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.empty-state p { margin: 0; font-size: 13.5px; color: var(--muted); max-width: 400px; }
+.empty-state .btn { margin-top: 14px; }
+
+.skeleton { position: relative; overflow: hidden; background: var(--surface-3); border-radius: var(--radius-sm); }
+.skeleton::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface) 70%, transparent), transparent); animation: skeleton-shimmer 1.4s infinite; }
 @keyframes skeleton-shimmer { 100% { transform: translateX(100%); } }
 .skeleton-line { height: 12px; margin: 6px 0; }
 .skeleton-card { height: 96px; border-radius: var(--radius); }
 
 /* ---- auth screens (login / register / forgot / reset / verify) — one shared card, rendered from /api/auth/config ---- */
-.auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: transparent; }
+.auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: var(--bg); }
 .auth-card { width: 100%; max-width: 400px; padding: 32px 30px 26px; display: flex; flex-direction: column; gap: 14px; border-radius: var(--radius-shell); box-shadow: var(--shadow-pop); }
-.auth-logo { width: 44px; height: 44px; margin: 0 auto; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 13px; box-shadow: 0 8px 20px -8px rgba(139, 92, 246, .9); }
+.auth-logo { width: 44px; height: 44px; margin: 0 auto; display: grid; place-items: center; background: var(--grad-brand); color: #fff; border-radius: 16px; box-shadow: 0 12px 24px -10px rgba(90, 56, 204, .8); }
 .auth-title { margin: 4px 0 0; text-align: center; font-size: var(--text-xl); letter-spacing: -.02em; }
 .auth-sub { margin: -6px 0 4px; text-align: center; color: var(--muted); font-size: 13px; }
 .auth-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
-.auth-field input { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 14px; font-family: inherit; }
+.auth-field input { padding: 12px 18px; border: 1px solid transparent; border-radius: var(--radius-pill); font-size: 14px; font-family: inherit; }
 .auth-field input:focus { outline: 2px solid var(--primary); outline-offset: 1px; border-color: var(--primary); }
 .auth-pw { position: relative; display: flex; } .auth-pw input { flex: 1; padding-right: 64px; }
 .auth-pw button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: 0; color: var(--muted); font-size: 12px; cursor: pointer; padding: 4px 6px; }
@@ -319,3 +302,67 @@ input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 1
 .auth-links a, .auth-foot a { color: var(--primary); cursor: pointer; text-decoration: none; } .auth-links a:hover, .auth-foot a:hover { text-decoration: underline; }
 .auth-foot { text-align: center; font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
 .auth-card .btn.primary, .auth-card .btn.secondary { justify-content: center; padding: 10px; font-size: 14px; width: 100%; }
+
+/* ---- Responsive layer (phones and small tablets) -------------------------------------------------------------
+   Pages are authored for desktop: fixed-height flex columns, grids with pixel columns, filter rows that cannot wrap.
+   Below 900px they all fall back to normal document flow: one column, natural height, wrapping rows, and any wide
+   table scrolls INSIDE its card instead of being clipped or pushing the whole page sideways. */
+@media (max-width: 900px) {
+  .tabs { max-width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .page, .page-content > * { min-width: 0; max-width: 100%; }
+  .page { height: auto !important; min-height: 0 !important; }
+  .split, .layout, .grid2, .grid3, .tabgrid, .chartgrid { grid-template-columns: minmax(0, 1fr) !important; flex: none !important; height: auto !important; min-height: 0 !important; }
+  .split > *, .layout > *, .grid2 > *, .grid3 > *, .tabgrid > *, .chartgrid > * { min-width: 0; min-height: 0; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .card, .card:has(> table), .card:has(> .tablewrap) { max-width: 100%; overflow-x: auto; }
+  .rail, .railcard { position: static !important; max-height: none !important; }
+  .pagehead, .filterbar, .toolbar, .filters, .create, .fchips { flex-wrap: wrap !important; }
+  .filterbar > *, .toolbar > *, .filters > *, .create > * { max-width: 100%; min-width: 0; }
+  .filterbar input:not([type=checkbox]), .toolbar input:not([type=checkbox]), .create input { flex: 1 1 150px; width: auto !important; }
+  .pager { flex-wrap: wrap; gap: 8px; }
+  .btn { white-space: nowrap; }
+  h1 { font-size: 22px; line-height: 28px; }
+
+  /* Tables become stacked cards: one card per row, each value labelled by its column header (labels come from
+     shared/responsive-tables.ts). Cells with no header text (checkboxes, row menus) sit on the right without a label. */
+  table[data-rt] { min-width: 0 !important; width: 100% !important; }
+  table[data-rt], table[data-rt] tbody, table[data-rt] tr, table[data-rt] td { display: block; width: 100%; }
+  .list:has(> table[data-rt]), .listcard:has(> table[data-rt]) { overflow-x: hidden; }
+  table[data-rt] thead { display: none; }
+  table[data-rt] tbody tr { position: relative; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  table[data-rt] tbody tr:last-child { border-bottom: 0; }
+  table[data-rt] td { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 4px 0 !important; border: 0 !important; height: auto !important; min-width: 0; text-align: right; overflow-wrap: anywhere; background: transparent !important; }
+  table[data-rt] tbody tr { padding: 12px 18px !important; }
+  table[data-rt] td::before { content: attr(data-label); flex: 0 0 36%; max-width: 40%; text-align: left; color: var(--muted); font-size: 12px; font-weight: 650; overflow-wrap: normal; }
+  table[data-rt] td[data-label=""]::before, table[data-rt] td:not([data-label])::before { display: none; }
+  table[data-rt] td[data-label=""] { justify-content: flex-end; }
+  table[data-rt] td[colspan] { display: block; text-align: center; }
+  table[data-rt] td > * { max-width: 100%; }
+  table[data-rt] td a, table[data-rt] td .badge { min-width: 0; }
+  table[data-rt] tbody tr:hover td { background: transparent; }
+  table[data-rt] tbody tr:hover { background: var(--surface-2); }
+  .card:has(> table[data-rt]) { overflow: hidden; }
+  /* the card title: first meaningful cell, full width, bold, no label — so names/emails never share a cramped column */
+  table[data-rt] td[data-primary] { display: block; text-align: left; font-size: 15px; font-weight: 700; padding: 0 0 8px !important; margin-bottom: 4px; border-bottom: 1px solid var(--border) !important; }
+  table[data-rt] td[data-primary]::before { display: none; }
+  table[data-rt] td[data-primary] .muted, table[data-rt] td[data-primary] small { font-weight: 500; }
+  /* row selector / row menu: tucked into the card's top-right corner instead of taking rows of their own */
+  table[data-rt] td[data-label=""]:has(input[type=checkbox]) { position: absolute; top: 12px; left: auto; right: 16px; width: auto; padding: 0 !important; z-index: 1; }
+  table[data-rt] td[data-label=""]:has(.kebab, [aria-haspopup]) { position: absolute; top: 6px; right: 50px; width: auto; padding: 0 !important; z-index: 1; }
+  table[data-rt] td { flex-wrap: wrap; }
+  table[data-rt] td > div { flex-basis: 100%; text-align: right; }
+  /* header-less lists (deployments etc.): each row is a wrapping flex line */
+  table[data-rl], table[data-rl] tbody { display: block; width: 100%; min-width: 0 !important; }
+  table[data-rl] tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 12px 16px !important; border-bottom: 1px solid var(--border); }
+  table[data-rl] td { display: block; padding: 0 !important; border: 0 !important; height: auto !important; white-space: nowrap; background: transparent !important; }
+  table[data-rl] td:has(a) { flex: 1 1 150px; white-space: normal; font-weight: 650; }
+  /* a master/detail page whose detail pane is only an empty placeholder: don't spend a screen on it */
+  .detail:has(> .empty-state:only-child), .card.detail:has(> .empty-state:only-child) { display: none; }
+  /* touch ergonomics: 16px inputs (no iOS zoom-on-focus) and comfortable tap targets */
+  input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px; }
+  .btn { min-height: 40px; }
+  .btn.sm { min-height: 34px; }
+  a.btn, button.btn { touch-action: manipulation; }
+}
+

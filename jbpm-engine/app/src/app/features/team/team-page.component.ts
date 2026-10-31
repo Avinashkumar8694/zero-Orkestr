@@ -4,14 +4,17 @@ import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { TenantService } from '../../core/tenant/tenant.service';
 import { TeamApiService, type InviteResult, type TeamMember } from '../../core/team/team.service';
+import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
+import { ModalService } from '../../shared/modal.service';
 import { ToastService } from '../../shared/toast.service';
 
 @Component({
   selector: 'app-team-page',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, BreadcrumbComponent],
   template: `
     <div class="page">
+      <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Team' }]" /></div>
       <header class="head">
         <div>
           <h1>Team</h1>
@@ -88,6 +91,7 @@ import { ToastService } from '../../shared/toast.service';
     </div>
   `,
   styles: [`
+    .crumbwrap { margin-bottom: 10px; }
     .page { padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 1000px; }
     .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     h1 { margin: 0 0 4px; font-size: var(--text-xl); } h3 { margin: 0 0 10px; }
@@ -109,6 +113,7 @@ export class TeamPageComponent implements OnInit {
   tenant = inject(TenantService);
   private api = inject(TeamApiService);
   private toast = inject(ToastService);
+  private modal = inject(ModalService);
   private router = inject(Router);
 
   members = signal<TeamMember[]>([]);
@@ -157,13 +162,16 @@ export class TeamPageComponent implements OnInit {
   cancel(m: TeamMember) { return this.run(() => this.api.cancelInvite(m.id), 'Invitation cancelled'); }
   setRole(m: TeamMember, role: string) { return this.run(() => this.api.update(m.id, { role }), 'Role updated'); }
   toggle(m: TeamMember) { return this.run(() => this.api.update(m.id, { status: m.status === 'suspended' ? 'active' : 'suspended' })); }
-  remove(m: TeamMember) { if (confirm(`Remove ${m.email} from this workspace?`)) return this.run(() => this.api.remove(m.id), 'Member removed'); return; }
-  transfer(m: TeamMember) {
-    if (!confirm(`Make ${m.email} the owner? You will become an admin.`)) return;
+  async remove(m: TeamMember) {
+    if (!(await this.modal.confirm({ title: 'Remove member', message: `Remove ${m.email} from this workspace? They lose access immediately.`, confirmLabel: 'Remove', danger: true }))) return;
+    return this.run(() => this.api.remove(m.id), 'Member removed');
+  }
+  async transfer(m: TeamMember) {
+    if (!(await this.modal.confirm({ title: 'Transfer ownership', message: `Make ${m.email} the owner? You will become an admin.`, confirmLabel: 'Transfer', danger: true }))) return;
     return this.run(async () => { await this.api.transferOwnership(m.id); await this.tenant.refresh(); }, 'Ownership transferred');
   }
   async leave() {
-    if (!confirm('Leave this workspace? You will lose access until you are invited again.')) return;
+    if (!(await this.modal.confirm({ title: 'Leave workspace', message: 'Leave this workspace? You will lose access until you are invited again.', confirmLabel: 'Leave', danger: true }))) return;
     try { await this.api.leave(); await this.tenant.refresh(); this.router.navigateByUrl('/home'); }
     catch (e: any) { this.error.set(e?.error?.error?.message || 'Could not leave'); }
   }

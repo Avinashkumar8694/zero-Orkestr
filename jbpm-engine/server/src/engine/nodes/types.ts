@@ -15,6 +15,8 @@ export interface HandlerResult {
   outcome?: string;
   error?: string;
   errorCode?: string;     // BPMN-style error code for error-boundary routing
+  errorDetails?: Record<string, unknown>; // enriched error payload (HTTP status, body, headers, stack, etc.)
+  rethrow?: boolean;      // bubble up to outer/global error handler
 }
 
 /** Everything a node handler needs — the node + instance state plus engine capabilities. */

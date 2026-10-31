@@ -4,10 +4,10 @@ import { ApiBase, ApiList } from './api-base';
 import type { WorkflowDefinition } from '../models';
 
 export interface CreateWorkflowDefinitionBody {
-  name: string; deploymentId: string; dataSchema?: Record<string, unknown>; schemaValidationEnabled?: boolean;
+  name: string; deploymentId: string; processId?: string; dataSchema?: Record<string, unknown>; schemaValidationEnabled?: boolean;
 }
 export interface UpdateWorkflowDefinitionBody {
-  name?: string; deploymentId?: string; dataSchema?: Record<string, unknown>; schemaValidationEnabled?: boolean;
+  name?: string; deploymentId?: string; processId?: string; dataSchema?: Record<string, unknown>; schemaValidationEnabled?: boolean;
 }
 
 @Injectable({ providedIn: 'root' })

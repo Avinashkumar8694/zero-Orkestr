@@ -12,9 +12,13 @@ const toExpress = (p: string) => p.replace(/\{([^}]+)\}/g, ':$1');
 
 function collect(router: any, out: Set<string>, prefix = '') {
   for (const layer of router.stack) {
-    const route = layer.route;
-    if (!route) continue;
-    for (const m of Object.keys(route.methods)) if (route.methods[m]) out.add(`${m.toUpperCase()} ${prefix}${route.path}`);
+    if (layer.route) {
+      for (const m of Object.keys(layer.route.methods)) {
+        if (layer.route.methods[m]) out.add(`${m.toUpperCase()} ${prefix}${layer.route.path}`);
+      }
+    } else if (layer.name === 'router' && layer.handle) {
+      collect(layer.handle, out, prefix);
+    }
   }
 }
 

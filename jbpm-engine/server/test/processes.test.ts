@@ -53,3 +53,40 @@ test('project with multiple processes: start each by processId; shared deploymen
   assert.strictEqual(a.status, 'completed');
   assert.ok(a.history.some((h) => h.nodeId === 'a'));
 });
+
+test('WorkflowService: archive, restore, and purge lifecycle', async () => {
+  const ctx = newCtx();
+  const wfSvc = new WorkflowService(ctx);
+
+  const wf1 = await wfSvc.create({ name: 'Project 1' }, 'admin');
+  const wf2 = await wfSvc.create({ name: 'Project 2' }, 'admin');
+
+  assert.strictEqual((await wfSvc.list()).length, 2);
+  assert.strictEqual((await wfSvc.listArchived()).length, 0);
+
+  // Archive wf1
+  await wfSvc.archive(wf1.id, 'admin');
+  assert.strictEqual((await wfSvc.list()).length, 1);
+  assert.strictEqual((await wfSvc.listArchived()).length, 1);
+  assert.strictEqual((await wfSvc.list(true)).length, 2);
+
+  // Restore wf1
+  await wfSvc.restore(wf1.id, 'admin');
+  assert.strictEqual((await wfSvc.list()).length, 2);
+  assert.strictEqual((await wfSvc.listArchived()).length, 0);
+
+  // Archive both and purge wf1
+  await wfSvc.archive(wf1.id, 'admin');
+  await wfSvc.archive(wf2.id, 'admin');
+  assert.strictEqual((await wfSvc.listArchived()).length, 2);
+
+  await wfSvc.purge(wf1.id, 'admin');
+  assert.strictEqual((await wfSvc.listArchived()).length, 1);
+  assert.strictEqual((await wfSvc.list(true)).length, 1);
+
+  // Purge all remaining archived
+  const res = await wfSvc.purgeAllArchived('admin');
+  assert.strictEqual(res.purgedCount, 1);
+  assert.strictEqual((await wfSvc.listArchived()).length, 0);
+  assert.strictEqual((await wfSvc.list(true)).length, 0);
+});

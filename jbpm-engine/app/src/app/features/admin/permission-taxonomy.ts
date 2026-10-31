@@ -1,16 +1,20 @@
-// The known, documented permission strings (server/src/modules/iam/service.ts's DEFAULT_ROLES + '*').
-// A checkbox list of exactly these, not freeform text — the backend does zero validation on permission
-// strings, so a typo in a hand-typed permission would silently grant nothing.
-export const KNOWN_PERMISSIONS: { key: string; label: string }[] = [
-  { key: 'workflow:view', label: 'View projects & processes' },
-  { key: 'workflow:edit', label: 'Edit projects & processes' },
-  { key: 'workflow:deploy', label: 'Deploy projects' },
-  { key: 'workflow:run', label: 'Run / manage instances' },
-  { key: 'query:read', label: 'Read analytics & queries' },
-  { key: 'task:manage', label: 'Manage tasks' },
-  { key: 'admin:iam', label: 'Manage users, roles & groups' },
-  { key: 'workflowInstance:manage', label: 'Manage workflow instances (cases)' },
-  { key: 'workflowInstance:admin', label: 'Manage workflow definitions (name → deployment mapping)' },
-  { key: 'analytics:query', label: 'Run & save ad-hoc analytics queries' },
+// Mirror of server/src/modules/iam/permissions.ts (the server rejects anything outside it, and the Roles page also
+// loads the live list from GET /roles/permissions — this copy is only the offline fallback).
+import type { PermissionInfo } from '../../core/models';
+
+export const KNOWN_PERMISSIONS: PermissionInfo[] = [
+  { key: 'workflow:view', label: 'View workflows, folders and processes', group: 'Workflows' },
+  { key: 'workflow:edit', label: 'Create and edit workflows', group: 'Workflows' },
+  { key: 'workflow:deploy', label: 'Deploy workflows', group: 'Workflows' },
+  { key: 'workflow:run', label: 'Start and operate process instances', group: 'Workflows' },
+  { key: 'workflowInstance:manage', label: 'Work on cases (workflow instances)', group: 'Cases' },
+  { key: 'workflowInstance:admin', label: 'Manage case definitions (name → deployment mapping)', group: 'Cases' },
+  { key: 'task:manage', label: 'Claim and complete tasks', group: 'Tasks' },
+  { key: 'query:read', label: 'Read instances, tasks and reports', group: 'Insight' },
+  { key: 'analytics:query', label: 'Run and save ad-hoc analytics queries', group: 'Insight' },
+  { key: 'team:read', label: 'See the workspace team', group: 'Team' },
+  { key: 'team:invite', label: 'Invite people to the workspace', group: 'Team' },
+  { key: 'team:manage', label: 'Change or remove team members', group: 'Team' },
+  { key: 'admin:iam', label: 'Manage users, roles and groups', group: 'Administration' },
 ];
 export const FULL_ACCESS = '*';

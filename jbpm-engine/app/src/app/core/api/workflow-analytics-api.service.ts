@@ -3,12 +3,23 @@ import { Observable } from 'rxjs';
 import { ApiBase, ApiList } from './api-base';
 import type { OwnershipTimeline, QueryDefinition, QueryRunResult, SavedQuery, TasksAndProcesses, WorkflowTat } from '../models';
 
-export interface WorkflowInstanceSummary { total: number; byStatus: Record<string, number>; withoutPiid: number; }
+export interface WorkflowInstanceSummary {
+  total: number;
+  byStatus: Record<string, number>;
+  byWorkflowName?: Record<string, number>;
+  activeCases?: number;
+  closedCases?: number;
+  withoutPiid: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class WorkflowAnalyticsApiService extends ApiBase {
-  summary(): Observable<WorkflowInstanceSummary> { return this.http.get<WorkflowInstanceSummary>(`${this.base}/workflow-analytics/summary`); }
-  tat(): Observable<WorkflowTat> { return this.http.get<WorkflowTat>(`${this.base}/workflow-analytics/tat`); }
+  summary(params?: { since?: string; from?: string; to?: string }): Observable<WorkflowInstanceSummary> {
+    return this.http.get<WorkflowInstanceSummary>(`${this.base}/workflow-analytics/summary`, { params: this.cleanParams(params) });
+  }
+  tat(params?: { since?: string; from?: string; to?: string }): Observable<WorkflowTat> {
+    return this.http.get<WorkflowTat>(`${this.base}/workflow-analytics/tat`, { params: this.cleanParams(params) });
+  }
   ownershipTimeline(workflowInstanceId: string, taskId: string): Observable<OwnershipTimeline> {
     return this.http.get<OwnershipTimeline>(`${this.base}/workflow-instances/${workflowInstanceId}/tasks/${taskId}/ownership-timeline`);
   }

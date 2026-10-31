@@ -251,3 +251,128 @@ test('instance/node also work in a JS gateway condition', async () => {
   assert.ok(inst.history.some((h) => h.nodeId === 'a'));
   assert.ok(!inst.history.some((h) => h.nodeId === 'b'));
 });
+
+test('getVariable and setVariable top-level helpers work in JS script and gateway condition', async () => {
+  const inst = await run(newCtx(),
+    [
+      { id: 's', type: 'start' },
+      { id: 't', type: 'script', lang: 'js', code: 'setVariable("status", "VALIDATED:" + getVariable("code")); setVariable("flag", true);' },
+      { id: 'g', type: 'gateway', mode: 'exclusive' },
+      { id: 'a', type: 'manual', name: 'A' }, { id: 'b', type: 'manual', name: 'B' }, { id: 'e', type: 'end' },
+    ],
+    [
+      { id: 'f1', from: 's', to: 't' },
+      { id: 'f2', from: 't', to: 'g' },
+      { id: 'f3', from: 'g', to: 'a', lang: 'js', when: 'getVariable("flag") === true' },
+      { id: 'f4', from: 'g', to: 'b', lang: 'js', when: 'getVariable("flag") !== true' },
+      { id: 'f5', from: 'a', to: 'e' }, { id: 'f6', from: 'b', to: 'e' },
+    ],
+    { code: 'ABC' },
+  );
+  assert.strictEqual(inst.status, 'completed', JSON.stringify(inst.error));
+  assert.strictEqual(inst.variables['status'], 'VALIDATED:ABC');
+  assert.ok(inst.history.some((h) => h.nodeId === 'a'));
+});
+
+test('bare variable names work directly in JS gateway condition', async () => {
+  const inst = await run(newCtx(),
+    [
+      { id: 's', type: 'start' }, { id: 'g', type: 'gateway', mode: 'exclusive' },
+      { id: 'a', type: 'manual', name: 'A' }, { id: 'b', type: 'manual', name: 'B' }, { id: 'e', type: 'end' },
+    ],
+    [
+      { id: 'f1', from: 's', to: 'g' },
+      { id: 'f2', from: 'g', to: 'a', lang: 'js', when: 'amount > 1000' },
+      { id: 'f3', from: 'g', to: 'b', lang: 'js', when: 'amount <= 1000' },
+      { id: 'f4', from: 'a', to: 'e' }, { id: 'f5', from: 'b', to: 'e' },
+    ],
+    { amount: 5000 },
+  );
+  assert.strictEqual(inst.status, 'completed', JSON.stringify(inst.error));
+  assert.ok(inst.history.some((h) => h.nodeId === 'a'));
+});
+
+test('KieFunctions full suite functions correctly in JS sandbox', async () => {
+  const inst = await run(newCtx(),
+    [
+      { id: 's', type: 'start' },
+      {
+        id: 't', type: 'script', lang: 'js', code: `
+          vars.eq = KieFunctions.equalsTo(100, "100");
+          vars.isT = KieFunctions.isTrue("true") && KieFunctions.isTrue(1);
+          vars.isF = KieFunctions.isFalse("false") && KieFunctions.isFalse(0);
+          vars.isN = KieFunctions.isNull(null) && !KieFunctions.isNull("hello");
+          vars.notN = KieFunctions.notNull("hello") && !KieFunctions.notNull(undefined);
+          vars.isEmp = KieFunctions.isEmpty("") && KieFunctions.isEmpty([]) && KieFunctions.isEmpty({});
+          vars.containsArr = KieFunctions.contains(["apple", "banana"], "apple");
+          vars.containsStr = KieFunctions.contains("hello world", "world");
+          vars.sw = KieFunctions.startsWith("PRU-1234", "PRU");
+          vars.ew = KieFunctions.endsWith("report.pdf", ".pdf");
+          vars.gt = KieFunctions.greaterThan(50, 20);
+          vars.gte = KieFunctions.greaterOrEqualThan(50, 50);
+          vars.lt = KieFunctions.lessThan(10, 20);
+          vars.lte = KieFunctions.lessOrEqualThan(20, 20);
+          vars.btw = KieFunctions.between(25, 20, 30);
+        `,
+      },
+      { id: 'e', type: 'end' },
+    ],
+    [{ id: 'f1', from: 's', to: 't' }, { id: 'f2', from: 't', to: 'e' }],
+  );
+  assert.strictEqual(inst.status, 'completed', JSON.stringify(inst.error));
+  assert.strictEqual(inst.variables['eq'], true);
+  assert.strictEqual(inst.variables['isT'], true);
+  assert.strictEqual(inst.variables['isF'], true);
+  assert.strictEqual(inst.variables['isN'], true);
+  assert.strictEqual(inst.variables['notN'], true);
+  assert.strictEqual(inst.variables['isEmp'], true);
+  assert.strictEqual(inst.variables['containsArr'], true);
+  assert.strictEqual(inst.variables['containsStr'], true);
+  assert.strictEqual(inst.variables['sw'], true);
+  assert.strictEqual(inst.variables['ew'], true);
+  assert.strictEqual(inst.variables['gt'], true);
+  assert.strictEqual(inst.variables['gte'], true);
+  assert.strictEqual(inst.variables['lt'], true);
+  assert.strictEqual(inst.variables['lte'], true);
+  assert.strictEqual(inst.variables['btw'], true);
+});
+
+test('instance and node convenience methods work in JS scripts and conditions', async () => {
+  const inst = await run(newCtx(),
+    [
+      { id: 's', type: 'start' },
+      {
+        id: 'probe', type: 'script', name: 'ProbeNode', lang: 'js', code: `
+          instance.setVariable("hasInit", instance.hasVariable("initVal"));
+          instance.setVariable("fetchedVal", instance.getVariable("initVal"));
+          instance.setVariable("thisNodeId", node.getNodeId());
+          instance.setVariable("thisNodeName", node.getNodeName());
+          instance.setVariable("metaInstId", instanceId.length > 0);
+          instance.setVariable("metaProcId", processId.length > 0);
+          instance.setVariable("metaNodeId", currentNodeId);
+          instance.setVariable("metaNodeName", currentNodeName);
+        `,
+      },
+      { id: 'g', type: 'gateway', mode: 'exclusive' },
+      { id: 'a', type: 'manual', name: 'A' }, { id: 'b', type: 'manual', name: 'B' }, { id: 'e', type: 'end' },
+    ],
+    [
+      { id: 'f1', from: 's', to: 'probe' },
+      { id: 'f2', from: 'probe', to: 'g' },
+      { id: 'f3', from: 'g', to: 'a', lang: 'js', when: 'instance.getVariable("fetchedVal") === 999 && node.getNodeId() === "g"' },
+      { id: 'f4', from: 'g', to: 'b', lang: 'js', when: 'instance.getVariable("fetchedVal") !== 999' },
+      { id: 'f5', from: 'a', to: 'e' }, { id: 'f6', from: 'b', to: 'e' },
+    ],
+    { initVal: 999 },
+  );
+  assert.strictEqual(inst.status, 'completed', JSON.stringify(inst.error));
+  assert.strictEqual(inst.variables['hasInit'], true);
+  assert.strictEqual(inst.variables['fetchedVal'], 999);
+  assert.strictEqual(inst.variables['thisNodeId'], 'probe');
+  assert.strictEqual(inst.variables['thisNodeName'], 'ProbeNode');
+  assert.strictEqual(inst.variables['metaInstId'], true);
+  assert.strictEqual(inst.variables['metaProcId'], true);
+  assert.strictEqual(inst.variables['metaNodeId'], 'probe');
+  assert.strictEqual(inst.variables['metaNodeName'], 'ProbeNode');
+  assert.ok(inst.history.some((h) => h.nodeId === 'a'), 'gateway successfully evaluated node.getNodeId() and instance.getVariable()');
+});

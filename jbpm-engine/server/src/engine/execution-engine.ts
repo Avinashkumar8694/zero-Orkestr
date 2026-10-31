@@ -57,7 +57,7 @@ export class ExecutionEngine {
   private incoming(p: EngineProcess, nodeId: string): EngineFlow[] { return p.flows.filter((f) => f.to === nodeId); }
 
   // ---- lifecycle ----
-  async start(dep: Deployment, variables: Record<string, unknown>, actor: string, opts: { processId?: string; correlationKey?: string } = {}): Promise<Instance> {
+  async start(dep: Deployment, variables: Record<string, unknown>, actor: string, opts: { processId?: string; correlationKey?: string; parentInstanceId?: string; isErrorHandler?: boolean } = {}): Promise<Instance> {
     const p = this.pick(dep, opts.processId);
     const startNode = p.nodes.find((n) => n.type === 'start') || p.nodes[0];
     if (!startNode) throw new Error('process has no start node');
@@ -69,6 +69,8 @@ export class ExecutionEngine {
       correlationKey: opts.correlationKey, status: 'running', variables: { ...seed, ...variables },
       tokens: [{ id: this.ctx.newId(), nodeId: startNode.id!, state: 'active', enteredAt: now }],
       history: [], startedAt: now, startedBy: actor,
+      parentInstanceId: opts.parentInstanceId,
+      isErrorHandler: opts.isErrorHandler,
     };
     this.emit({ kind: 'instance.started', instanceId: inst.id });
     // Every instance is created here — a direct start, a scheduled/cron start, a call-activity or
@@ -126,7 +128,7 @@ export class ExecutionEngine {
             // an admin opted in — no behavior change for any existing deployment).
             this.removeToken(inst, token.id);
             const code = (e as { code?: string }).code === 'QUOTA_EXCEEDED' ? 'QUOTA_EXCEEDED' : 'RUNTIME_ERROR';
-            if (this.raiseError(inst, p, node.id!, code, (e as Error).message)) continue;
+            if (await this.raiseError(inst, p, dep, node.id!, code, (e as Error).message)) continue;
             inst.status = 'failed'; inst.error = { nodeId: node.id!, message: (e as Error).message, at: this.ctx.clock() }; break;
           }
           // Message/signal/escalation boundaries get a WAITING token of their own, same idea as the
@@ -141,15 +143,16 @@ export class ExecutionEngine {
         if (result.error) {
           this.removeToken(inst, token.id);
           const code = result.errorCode || 'RUNTIME_ERROR';
-          if (this.raiseError(inst, p, node.id!, code, result.error)) continue;   // routed to an error catch
-          inst.status = 'failed'; inst.error = { nodeId: node.id!, message: result.error, at: this.ctx.clock() }; break;
+          if (await this.raiseError(inst, p, dep, node.id!, code, result.error, result.errorDetails)) continue;   // routed to an error catch
+          inst.status = 'failed'; inst.error ||= { nodeId: node.id!, message: result.error, at: this.ctx.clock() }; break;
         }
         if (result.end === 'terminate') { inst.tokens = []; inst.status = 'completed'; break; }
         if (result.end === 'error') {
           this.removeToken(inst, token.id);
           const code = (node as any).throw?.error || 'ERROR';
-          if (this.raiseError(inst, p, node.id!, code, `error end: ${code}`)) continue;
-          inst.status = 'failed'; inst.error = { nodeId: node.id!, message: `unhandled error end (${code})`, at: this.ctx.clock() }; break;
+          const rethrow = result.rethrow ?? (node as any).throw?.rethrow ?? (node as any).rethrow;
+          if (await this.raiseError(inst, p, dep, node.id!, code, `error end: ${code}`, undefined, rethrow)) continue;
+          inst.status = 'failed'; inst.error ||= { nodeId: node.id!, message: `unhandled error end (${code})`, at: this.ctx.clock() }; break;
         }
         // an activity that completed normally and has a compensation boundary → remember its handler.
         // WHICH boundaries match is boundary/handler.ts's decision; resolving the boundary's outgoing
@@ -292,6 +295,32 @@ export class ExecutionEngine {
     // mapChildOutputs in nodes/index.ts's CHILD_OUTPUT_MAPPERS (same logic the sync-completion path uses).
     const mapper = callNode ? CHILD_OUTPUT_MAPPERS[callNode.type as string] : undefined;
     const vars = mapper ? mapper(callNode, child) : {};
+    if (child.isErrorHandler && pdep.globalErrorHandler) {
+      let mappings = pdep.globalErrorHandler.outputMappings;
+      if (pdep.globalErrorHandler.rules) {
+        const matched = pdep.globalErrorHandler.rules.find((r) => r.processId === child.processId);
+        if (matched?.outputMappings) mappings = matched.outputMappings;
+      }
+      if (mappings) {
+        for (const [targetVar, sourceVar] of Object.entries(mappings)) {
+          if (child.variables[sourceVar] !== undefined) {
+            vars[targetVar] = child.variables[sourceVar];
+          } else if (child.variables[targetVar] !== undefined) {
+            vars[sourceVar] = child.variables[targetVar];
+          }
+        }
+      }
+      vars['errorRepaired'] = true;
+      if (child.variables['errorHandlerAction'] === 'retry') {
+        Object.assign(parent.variables, vars);
+        delete parent.error;
+        this.removeToken(parent, token.id);
+        parent.tokens.push({ id: this.ctx.newId(), nodeId: token.nodeId, state: 'active', enteredAt: this.ctx.clock() });
+        parent.status = 'running';
+        await this.runToQuiescence(parent, pdep);
+        return;
+      }
+    }
     await this.resumeToken(parent, pdep, token.id, vars);
   }
 
@@ -299,7 +328,7 @@ export class ExecutionEngine {
    *  multi-instance token: route to an error boundary if one is attached, otherwise fail the parent
    *  and cascade upward — the same either way regardless of which node type raised it. */
   private async failParentWith(parent: Instance, p: EngineProcess, pdep: Deployment, nodeId: string, code: string, message: string): Promise<void> {
-    if (this.raiseError(parent, p, nodeId, code, message)) {
+    if (await this.raiseError(parent, p, pdep, nodeId, code, message)) {
       parent.status = 'running';
       await this.runToQuiescence(parent, pdep);   // handler token → runs recovery, then settles (may cascade)
     } else {
@@ -410,16 +439,27 @@ export class ExecutionEngine {
    *  "PaymentReceived" — without this, one payment webhook would incorrectly resume all N). Signal/
    *  message-START events are never correlation-scoped: a brand-new instance has no correlationKey
    *  yet to match against. */
-  private async broadcast(name: string, correlationValue?: string): Promise<void> {
+  /** Broadcast a signal across all running/waiting instances in the tenant + trigger any matching signal-start events.
+   *  Matches jBPM KIE-Server POST /server/containers/{id}/processes/instances/signal/{signalName}. */
+  async broadcastSignal(name: string, payload?: unknown, correlationValue?: string): Promise<{ signaled: number }> {
     const others = await this.inst().query((i) => i.tenantId === this.ctx.tenantId && (i.status === 'waiting' || i.status === 'running'));
+    let count = 0;
     for (const other of others) {
       if (correlationValue !== undefined && other.correlationKey !== correlationValue) continue;
       const hit = other.tokens.some((t) => t.state === 'waiting' && (t.waitFor?.kind === 'signal' || t.waitFor?.kind === 'message') && t.waitFor?.ref === name);
       if (!hit) continue;
       const dep = await this.deps().get(other.deploymentId);
-      if (dep) await this.signalInstance(other, dep, name);
+      if (dep) {
+        await this.signalInstance(other, dep, name, payload);
+        count++;
+      }
     }
     if (correlationValue === undefined) await this.startTriggeredProcesses(name);
+    return { signaled: count };
+  }
+
+  private async broadcast(name: string, correlationValue?: string): Promise<void> {
+    await this.broadcastSignal(name, undefined, correlationValue);
   }
 
   /** Signal/message-start events: begin a new instance of every active deployment's process whose
@@ -590,17 +630,227 @@ export class ExecutionEngine {
   // orchestration that ACTS on a match (mutating instance/token state) stays here.
 
   /** Route an error to a matching error-catch; returns true if handled (a handler token was spawned). */
-  private raiseError(inst: Instance, p: EngineProcess, failingNodeId: string, code: string, message: string): boolean {
-    const handler = boundaryHandler.findErrorHandler(p.nodes, failingNodeId, code);
-    if (!handler) return false;
-    inst.variables[ERROR_VAR] = { code, node: failingNodeId, message };
-    // a global catch (on: '*', or any event sub-process error-catch) is interrupting for the whole
-    // instance → cancel all other tokens. A host-specific boundary only ever cancels its own host,
-    // which the caller has already done before raiseError runs.
-    if (boundaryHandler.isGlobalCatch(handler)) inst.tokens = [];
-    inst.tokens.push({ id: this.ctx.newId(), nodeId: handler.id!, state: 'active', enteredAt: this.ctx.clock() });
-    this.emit({ kind: 'node.entered', instanceId: inst.id, nodeId: handler.id!, tokenId: inst.tokens.at(-1)!.id });
-    return true;
+  private async raiseError(
+    inst: Instance,
+    p: EngineProcess,
+    dep: Deployment,
+    failingNodeId: string,
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+    rethrow?: boolean
+  ): Promise<boolean> {
+    const nodeDef = p.nodes.find((n) => n.id === failingNodeId);
+    const errorInfo = {
+      code,
+      node: failingNodeId,
+      nodeName: nodeDef?.name || failingNodeId,
+      nodeType: nodeDef?.type || 'unknown',
+      message,
+      details: details || {},
+      at: this.ctx.clock(),
+    };
+    inst.variables[ERROR_VAR] = errorInfo;
+
+    // TIER 1 & 2: Local Boundary / Process-level Catch
+    // If rethrow is false/undefined, we check local and process-level error handlers first.
+    if (!rethrow) {
+      const handler = boundaryHandler.findErrorHandler(p.nodes, failingNodeId, code);
+      if (handler) {
+        // a global catch (on: '*', or any event sub-process error-catch) is interrupting for the whole
+        // instance → cancel all other tokens. A host-specific boundary only ever cancels its own host,
+        // which the caller has already done before raiseError runs.
+        if (boundaryHandler.isGlobalCatch(handler)) inst.tokens = [];
+        inst.tokens.push({ id: this.ctx.newId(), nodeId: handler.id!, state: 'active', enteredAt: this.ctx.clock() });
+        this.emit({ kind: 'node.entered', instanceId: inst.id, nodeId: handler.id!, tokenId: inst.tokens.at(-1)!.id });
+        return true;
+      }
+    }
+
+    // TIER 3 & 4: Project Global Error Handler
+    // If no local or process catch handled it, check if the project has a global error handler configured.
+    const geh = dep.globalErrorHandler;
+    if (!geh || !geh.enabled) {
+      return false;
+    }
+
+    // If this is a dependent child process instance (call activity child),
+    // unhandled errors propagate up to the parent Call Activity first so the parent's
+    // boundary error event can catch it before escalating to the project global handler.
+    if (inst.parentInstanceId && !inst.independent) {
+      return false;
+    }
+
+    // CIRCUIT BREAKER / LOOP PREVENTION:
+    // If this instance itself is running as an error handler (isErrorHandler: true),
+    // strictly PREVENT recursion! Recursion depth is capped at 1.
+    if (inst.isErrorHandler) {
+      return false;
+    }
+
+    let targetProcessId: string | undefined;
+    let targetStrategy: 'spawn' | 'repair-and-resume' | 'compensate-and-abort' = 'repair-and-resume';
+    let targetOutputMappings: Record<string, string> | undefined;
+
+    if (geh.rules && geh.rules.length > 0) {
+      // 1. Exact or comma-separated match by error code or HTTP status
+      let matched = geh.rules.find((r) => {
+        const types = (r.errorType || '').split(',').map((t) => t.trim().toUpperCase());
+        if (types.includes(code.toUpperCase())) return true;
+        if (details?.httpStatus && types.includes(String(details.httpStatus))) return true;
+        return false;
+      });
+      // 2. Fallback to '*' or 'DEFAULT' or 'ANY'
+      if (!matched) {
+        matched = geh.rules.find((r) => {
+          const types = (r.errorType || '').split(',').map((t) => t.trim().toUpperCase());
+          return types.includes('*') || types.includes('DEFAULT') || types.includes('ANY');
+        });
+      }
+      if (!matched || !matched.processId) {
+        return false;
+      }
+      targetProcessId = matched.processId;
+      targetStrategy = matched.strategy || 'repair-and-resume';
+      targetOutputMappings = matched.outputMappings;
+    } else if (geh.processId) {
+      // Legacy single process configuration
+      if (geh.filter && geh.filter.length > 0) {
+        const filterMatches = geh.filter.some((f) => {
+          if (f === '*' || f.toUpperCase() === 'ANY') return true;
+          if (f === code) return true;
+          if (details?.httpStatus && String(details.httpStatus) === f) return true;
+          return false;
+        });
+        if (!filterMatches) {
+          return false;
+        }
+      }
+      targetProcessId = geh.processId;
+      targetStrategy = geh.strategy || 'repair-and-resume';
+      targetOutputMappings = geh.outputMappings;
+    } else {
+      return false;
+    }
+
+    // Resolve the error handler process definition
+    const errorProc = dep.engine.processes.find((pr) => pr.id === targetProcessId);
+    if (!errorProc) {
+      return false;
+    }
+    const startNode = errorProc.nodes.find((n) => n.type === 'start');
+    if (!startNode) {
+      return false;
+    }
+
+    // Construct enriched error context payload
+    const errorContext = {
+      failedInstanceId: inst.id,
+      workflowId: inst.workflowId,
+      deploymentId: inst.deploymentId,
+      processId: p.id,
+      processName: p.name,
+      nodeId: failingNodeId,
+      nodeName: nodeDef?.name || failingNodeId,
+      nodeType: nodeDef?.type || 'unknown',
+      errorCode: code,
+      errorMessage: message,
+      details: details || {},
+      failedVariables: { ...inst.variables },
+      occurredAt: this.ctx.clock(),
+    };
+
+    const handlerVars: Record<string, unknown> = {
+      ...inst.variables,
+      errorInfo,
+      errorContext,
+      failedContext: JSON.stringify(errorContext),
+      failedEndpoint: (details?.url as string) || '',
+      failedPayload: (details?.responseBody != null ? (typeof details.responseBody === 'string' ? details.responseBody : JSON.stringify(details.responseBody)) : ''),
+      failedMethod: (details?.method as string) || '',
+      failedHeaders: details?.headers ? (typeof details.headers === 'string' ? details.headers : JSON.stringify(details.headers)) : '',
+      errorCode: code,
+      errorMessage: message,
+      failedNodeId: failingNodeId,
+    };
+
+    // Spawn the Global Error Handler instance
+    const handlerInst: Instance = {
+      id: this.ctx.newId(),
+      tenantId: inst.tenantId,
+      deploymentId: inst.deploymentId,
+      workflowId: inst.workflowId,
+      processId: targetProcessId,
+      status: 'running',
+      variables: handlerVars,
+      tokens: [{ id: this.ctx.newId(), nodeId: startNode.id!, state: 'active', enteredAt: this.ctx.clock() }],
+      history: [],
+      startedAt: this.ctx.clock(),
+      startedBy: inst.startedBy || 'system',
+      isErrorHandler: true, // CIRCUIT BREAKER
+      handlingInstanceId: inst.id,
+      parentInstanceId: inst.id,
+    };
+
+    await this.inst().put(handlerInst);
+    this.emit({ kind: 'instance.started', instanceId: handlerInst.id });
+    await this.runToQuiescence(handlerInst, dep);
+    await this.inst().put(handlerInst);
+
+    const strategy = targetStrategy || 'repair-and-resume';
+
+    if (strategy === 'repair-and-resume') {
+      if (handlerInst.status === 'completed') {
+        // Apply output mappings
+        if (targetOutputMappings && Object.keys(targetOutputMappings).length > 0) {
+          for (const [k1, k2] of Object.entries(targetOutputMappings)) {
+            if (k1 in handlerInst.variables) {
+              inst.variables[k2] = handlerInst.variables[k1];
+            } else if (k2 in handlerInst.variables) {
+              inst.variables[k1] = handlerInst.variables[k2];
+            }
+          }
+        } else {
+          // Merge non-internal variables modified by the handler
+          for (const [k, v] of Object.entries(handlerInst.variables)) {
+            if (!['errorInfo', 'errorContext', 'failedContext', 'failedVariables', 'failedEndpoint', 'failedPayload', 'failedMethod', 'failedHeaders', 'errorCode', 'errorMessage', 'failedNodeId'].includes(k)) {
+              inst.variables[k] = v;
+            }
+          }
+        }
+        delete inst.error;
+        inst.variables['errorRepaired'] = true;
+
+        // If the error handler specified retry, retry the failing node
+        if (handlerInst.variables['errorHandlerAction'] === 'retry') {
+          inst.tokens.push({ id: this.ctx.newId(), nodeId: failingNodeId, state: 'active', enteredAt: this.ctx.clock() });
+        } else {
+          // Default: advance to default targets of the failing node
+          const targets = this.outgoing(p, failingNodeId).map((f) => f.to);
+          for (const t of targets) {
+            inst.tokens.push({ id: this.ctx.newId(), nodeId: t, state: 'active', enteredAt: this.ctx.clock() });
+          }
+        }
+        return true; // Successfully repaired and resumed!
+      } else if (handlerInst.status === 'waiting') {
+        // Global error handler parked on a wait (e.g. IT admin review task or backoff timer)
+        inst.tokens.push({ id: this.ctx.newId(), nodeId: failingNodeId, state: 'waiting', waitFor: { kind: 'child', ref: handlerInst.id }, enteredAt: this.ctx.clock() });
+        return true;
+      } else {
+        // Handler did not complete successfully (e.g. failed or aborted)
+        inst.error = { nodeId: failingNodeId, message: `Global error handler (${targetProcessId}) failed: ${handlerInst.error?.message || handlerInst.status}`, at: this.ctx.clock() };
+        return false;
+      }
+    } else if (strategy === 'compensate-and-abort') {
+      inst.status = 'aborted';
+      inst.endedAt = this.ctx.clock();
+      inst.error = { nodeId: failingNodeId, message: `Compensated and aborted by global error handler (${targetProcessId})`, at: this.ctx.clock() };
+      return true;
+    } else {
+      // strategy === 'spawn' (fire-and-forget incident process)
+      // Original instance fails normally
+      return false;
+    }
   }
 
   private defaultTargets(p: EngineProcess, node: EngineNode, _inst: Instance): string[] {
@@ -636,7 +886,11 @@ export class ExecutionEngine {
     if (!text) return undefined;
     const lang = (node as any)[`${kind}Lang`] as string | undefined;
     try {
-      await runScript(text, c.inst.variables, config.scriptTimeoutMs, {
+      const settings = await new SettingsService(c.app).get().catch(() => null);
+      const timeoutMs = (settings?.scriptTimeoutSeconds && settings.scriptTimeoutSeconds > 0)
+        ? settings.scriptTimeoutSeconds * 1000
+        : config.scriptTimeoutMs;
+      await runScript(text, c.inst.variables, timeoutMs, {
         ...kcontextInfoOf(c), ...(await scriptLimitsOf(c)), lang, varTypes: varTypesOf(c), onAction: onActionOf(c),
       });
       return undefined;
@@ -692,7 +946,7 @@ export class ExecutionEngine {
       const c = this.buildCtx(node, inst, p, {}, dep, tokenId);
       const exitErr = await this.runLifecycle(node, 'onExit', c);
       if (exitErr) {
-        if (!this.raiseError(inst, p, node.id!, 'SCRIPT_ERROR', exitErr)) {
+        if (!(await this.raiseError(inst, p, dep, node.id!, 'SCRIPT_ERROR', exitErr))) {
           inst.status = 'failed';
           inst.error = { nodeId: node.id!, message: exitErr, at: this.ctx.clock() };
           return this.runToQuiescence(inst, dep);   // status !== 'running' → settles/persists/cleans up, no looping
@@ -703,6 +957,23 @@ export class ExecutionEngine {
     }
     if (node) for (const t of this.defaultTargets(p, node, inst)) inst.tokens.push({ id: this.ctx.newId(), nodeId: t, state: 'active', enteredAt: this.ctx.clock() });
     inst.status = 'running';
+    return this.runToQuiescence(inst, dep);
+  }
+
+  /** Fail a waiting token (e.g. from TaskService.fail). Raises a TASK_FAILED error into the instance. */
+  async failToken(inst: Instance, dep: Deployment, tokenId: string, errorMessage?: string, errorDetails?: Record<string, unknown>): Promise<Instance> {
+    if (inst.status === 'suspended') throw conflict('instance is suspended');
+    const token = inst.tokens.find((t) => t.id === tokenId);
+    if (!token || token.state !== 'waiting') throw conflict('token is not waiting');
+    await this.cancelTimersForToken(inst, tokenId);
+    const p = this.proc(inst, dep);
+    this.removeHostToken(inst, p, tokenId, token.nodeId);
+    const msg = errorMessage || `Task on node ${token.nodeId} failed`;
+    const handled = await this.raiseError(inst, p, dep, token.nodeId, 'TASK_FAILED', msg, errorDetails);
+    if (!handled) {
+      inst.status = 'failed';
+      inst.error = { nodeId: token.nodeId, message: msg, at: this.ctx.clock() };
+    }
     return this.runToQuiescence(inst, dep);
   }
 

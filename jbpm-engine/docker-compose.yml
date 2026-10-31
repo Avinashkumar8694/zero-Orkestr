@@ -1,4 +1,7 @@
 services:
+  # ----------------------------------------------------------------------------
+  # PILLAR 1: SHARED POSTGRESQL DATABASE
+  # ----------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: jbpm-engine-postgres
@@ -7,8 +10,8 @@ services:
       POSTGRES_PASSWORD: jbpm
       POSTGRES_DB: jbpm
     ports:
-      # 5433, not 5432 — avoids colliding with any Postgres already running natively on the host.
-      - "5433:5432"
+      # Port 5434 maps to container 5432 to avoid host collisions
+      - "5434:5432"
     volumes:
       - jbpm-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -24,6 +27,42 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
       - "6380:6379"
+
+  # ----------------------------------------------------------------------------
+  # PILLAR 3: PGBOUNCER DATABASE CONNECTION POOLER
+  # Multiplexes hundreds/thousands of client connections to a small, fast PG pool
+  # ----------------------------------------------------------------------------
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.22.1
+    container_name: jbpm-engine-pgbouncer
+    ports:
+      - "6432:6432"
+    environment:
+      DB_USER: jbpm
+      DB_PASSWORD: jbpm
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: jbpm
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 25
+      AUTH_TYPE: plain
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # PILLAR 4: NGINX LOAD BALANCER WITH STICKY SESSIONS & WEBSOCKET UPGRADES
+  # ----------------------------------------------------------------------------
+  loadbalancer:
+    image: nginx:alpine
+    container_name: jbpm-engine-lb
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - postgres
 
 volumes:
   jbpm-postgres-data:

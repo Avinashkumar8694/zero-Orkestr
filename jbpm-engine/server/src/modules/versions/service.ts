@@ -2,7 +2,7 @@
 // Saving writes to the branch's head DRAFT (creating one if the head is published); publishing freezes
 // the draft and opens a fresh draft as the new head.
 import type { AppContext } from '../../context.ts';
-import { Collections, type Branch, type Version } from '../../domain.ts';
+import { Collections, type Branch, type Version, type Workflow } from '../../domain.ts';
 import type { EngineProject } from '../../sdk/index.ts';
 import { conflict, notFound, validation } from '../../infra/errors.ts';
 import { ValidationService } from '../validation/service.ts';
@@ -37,34 +37,57 @@ export class VersionService {
     if (!branch || branch.tenantId !== this.ctx.tenantId) throw notFound('Branch');
 
     let head = branch.headVersionId ? await this.ve().get(branch.headVersionId) : undefined;
+    let savedVersion: Version;
     if (head && head.state === 'draft') {
       head.engine = engine; head.message = message ?? head.message;
       await this.ve().put(head);
       await this.ctx.audit({ actor, kind: 'version.saved', workflowId: branch.workflowId, data: { versionId: head.id } });
-      return head;
+      savedVersion = head;
+    } else {
+      // head is published (or none) -> open a new draft numbered after the current head
+      const all = await this.listByBranch(branchId);
+      const nextNumber = (all.at(-1)?.number || 0) + 1;
+      const version: Version = {
+        id: this.ctx.newId(), tenantId: this.ctx.tenantId, workflowId: branch.workflowId, branchId,
+        number: nextNumber, state: 'draft', engine, parentVersionId: head?.id, message,
+        createdAt: this.ctx.clock(), createdBy: actor,
+      };
+      await this.ve().put(version);
+      branch.headVersionId = version.id;
+      await this.br().put(branch);
+      await this.ctx.audit({ actor, kind: 'version.created', workflowId: branch.workflowId, data: { versionId: version.id, number: nextNumber } });
+      savedVersion = version;
     }
-    // head is published (or none) -> open a new draft numbered after the current head
-    const all = await this.listByBranch(branchId);
-    const nextNumber = (all.at(-1)?.number || 0) + 1;
-    const version: Version = {
-      id: this.ctx.newId(), tenantId: this.ctx.tenantId, workflowId: branch.workflowId, branchId,
-      number: nextNumber, state: 'draft', engine, parentVersionId: head?.id, message,
-      createdAt: this.ctx.clock(), createdBy: actor,
-    };
-    await this.ve().put(version);
-    branch.headVersionId = version.id;
-    await this.br().put(branch);
-    await this.ctx.audit({ actor, kind: 'version.created', workflowId: branch.workflowId, data: { versionId: version.id, number: nextNumber } });
-    return version;
+
+    // Maintain cached validationSummary on Workflow for fast project-level visual danger indicators
+    try {
+      const valRes = await new ValidationService().validateProject(engine);
+      const wfRepo = this.ctx.store.repo<Workflow>(Collections.workflows);
+      const wf = await wfRepo.get(branch.workflowId);
+      if (wf) {
+        wf.validationSummary = {
+          hasErrors: !valRes.ok,
+          errorCount: valRes.errors.length,
+          warningCount: valRes.warnings.length,
+          problems: valRes.problems,
+        };
+        await wfRepo.put(wf);
+      }
+    } catch {
+      // best-effort cache update
+    }
+
+    return savedVersion;
   }
 
   /** Freeze a draft and open a new draft head that continues from it. Blocks on validation errors. */
   async publish(id: string, actor: string, label?: string): Promise<{ published: Version; newDraft: Version }> {
     const v = await this.mine(id);
     if (v.state === 'published') throw conflict('version already published');
-    const proc = v.engine.processes?.[0];
-    if (!proc) throw validation('version has no process');
-    await new ValidationService().assertValid(proc, 'publish');   // no invalid/unconnected process is published
+    const procs = v.engine.processes || [];
+    if (!procs.length) throw validation('version has no process');
+    await new ValidationService().assertValidProject(v.engine, 'publish');   // all processes in project must be valid
+
     v.state = 'published'; v.label = label ?? v.label;
     await this.ve().put(v);
 
@@ -82,9 +105,8 @@ export class VersionService {
 
   async validate(id: string) {
     const v = await this.mine(id);
-    const proc = v.engine.processes?.[0];
-    if (!proc) throw validation('version has no process');
-    return await new ValidationService().validate(proc);
+    if (!v.engine.processes?.length) throw validation('version has no process');
+    return await new ValidationService().validateProject(v.engine);
   }
 
   async diff(aId: string, bId: string): Promise<DiffResult> {

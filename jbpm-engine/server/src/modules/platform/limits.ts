@@ -325,13 +325,13 @@ export class PlatformLimitsService {
   async usage() {
     const g = (await this.getGlobal()).limits;
     const stats = sandboxStats();
-    const tenants = await this.store.repo<{ id: string; name?: string; slug?: string }>(Collections.tenants).list();
+    const tenants = await this.store.repo<{ id: string; name?: string; slug?: string; plan?: string; planExpiresAt?: string | null; status?: string }>(Collections.tenants).list();
     const rows = [];
     for (const t of tenants) {
       const settings = await new SettingsService(makeContext({ store: this.store, tenantId: t.id })).get();
       const override = await readWs(this.store, t.id);
       rows.push({
-        workspaceId: t.id, name: t.name, slug: t.slug,
+        workspaceId: t.id, name: t.name, slug: t.slug, plan: t.plan ?? null, planExpiresAt: t.planExpiresAt ?? null, status: t.status ?? 'active',
         effective: resolveLimits(g, override, settings), caps: capsOf(g, override),
         pool: { size: stats.effectiveConcurrency[t.id] ?? null, isolatesAlive: stats.isolatesAlive[t.id] ?? 0, running: stats.running[t.id] ?? 0, queued: stats.queued[t.id] ?? 0, peakRunning: stats.peakRunning[t.id] ?? 0, created: stats.perTenant[t.id]?.created ?? 0, recycled: stats.perTenant[t.id]?.recycled ?? 0 },
       });

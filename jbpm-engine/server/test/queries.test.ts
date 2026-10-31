@@ -105,3 +105,70 @@ test('instance tasks + TAT analytics', async () => {
   assert.strictEqual(pa.byStatus.completed, 1);
   assert.strictEqual(pa.byStatus.waiting, 1);
 });
+
+test('extended analytics: projects, users, groups, task-definitions, and process-definitions', async () => {
+  const { q, wf, procId } = await setup();
+
+  // 1. Project analytics
+  const proj = await q.projectAnalytics();
+  assert.strictEqual(proj.summary.totalProjects, 1);
+  assert.strictEqual(proj.summary.totalInstances, 2);
+  assert.strictEqual(proj.summary.completedTasks, 1);
+  assert.strictEqual(proj.byProject[0]?.workflowId, wf.id);
+  assert.strictEqual(proj.byProject[0]?.instances.total, 2);
+  assert.strictEqual(proj.byProject[0]?.tasks.completed, 1);
+
+  // Filter by workflowId
+  const projFiltered = await q.projectAnalytics({ workflowId: wf.id });
+  assert.strictEqual(projFiltered.byProject.length, 1);
+
+  // 2. User analytics
+  const users = await q.userAnalytics() as any[];
+  assert.ok(Array.isArray(users));
+  const carolStats = users.find((u) => u.user === 'carol');
+  assert.ok(carolStats);
+  assert.strictEqual(carolStats.tasksCompleted, 1);
+  assert.ok(carolStats.tat.avgMs > 0);
+  assert.strictEqual(carolStats.byTaskName[0]?.taskName, 'Review');
+
+  // Single user query
+  const carolSingle = await q.userAnalytics({ user: 'carol' }) as any;
+  assert.strictEqual(carolSingle.user, 'carol');
+  assert.strictEqual(carolSingle.tasksCompleted, 1);
+
+  // 3. Group analytics
+  const groups = await q.groupAnalytics() as any[];
+  assert.ok(Array.isArray(groups));
+  const opsGroup = groups.find((g) => g.group === 'ops');
+  assert.ok(opsGroup);
+  assert.strictEqual(opsGroup.tasksCompleted, 1);
+  assert.strictEqual(opsGroup.tasksOpen, 1);
+  assert.strictEqual(opsGroup.tasksUnassigned, 1);
+
+  // Single group query
+  const opsSingle = await q.groupAnalytics({ group: 'ops' }) as any;
+  assert.strictEqual(opsSingle.group, 'ops');
+  assert.strictEqual(opsSingle.tasksCompleted, 1);
+
+  // 4. Task definitions analytics
+  const taskDefs = await q.taskDefinitionsAnalytics();
+  assert.strictEqual(taskDefs.length, 1);
+  const reviewDef = taskDefs[0]!;
+  assert.strictEqual(reviewDef.taskName, 'Review');
+  assert.strictEqual(reviewDef.totalCount, 2);
+  assert.strictEqual(reviewDef.completedCount, 1);
+  assert.strictEqual(reviewDef.openCount, 1);
+  assert.ok(reviewDef.tat.avgMs > 0);
+  assert.strictEqual(reviewDef.byAssignee[0]?.user, 'carol');
+  assert.strictEqual(reviewDef.byGroup[0]?.group, 'ops');
+
+  // 5. Process definitions analytics
+  const procDefs = await q.processDefinitionsAnalytics();
+  assert.ok(procDefs.length >= 1);
+  const pDef = procDefs.find((p) => p.processId === procId);
+  assert.ok(pDef);
+  assert.strictEqual(pDef.instances.total, 2);
+  assert.strictEqual(pDef.instances.completed, 1);
+  assert.strictEqual(pDef.totalTasks, 2);
+  assert.strictEqual(pDef.tasksCompleted, 1);
+});

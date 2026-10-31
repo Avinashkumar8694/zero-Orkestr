@@ -1,4 +1,4 @@
-# 📘 Prudential Claims BPM: Mock Testing Blueprint
+# 📘 BPM Workflow Engine: Mock Testing Blueprint
 
 This testing blueprint serves as the **Mock Solution Document** for testing your industrialized jBPM claims process end-to-end. It details the different business scenarios, the exact **Startup JSON Payloads** to send to KIE Server, how the BPMN execution branches, and how the Mock API server responds to trigger each specific scenario.
 

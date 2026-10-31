@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
 
 interface Period { used: number; limit: number | null; remaining: number | null; resetsAt: string }
 interface Res { used: number; limit: number | null }
@@ -20,8 +21,10 @@ const LIMIT_LABELS: Array<[string, string]> = [
 @Component({
   selector: 'app-plan-usage',
   standalone: true,
+  imports: [BreadcrumbComponent],
   template: `
     <div class="page">
+      <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Plan & usage' }]" /></div>
       <header>
         <h1>Plan &amp; usage</h1>
         @if (data(); as d) {
@@ -33,7 +36,8 @@ const LIMIT_LABELS: Array<[string, string]> = [
           </p>
         }
       </header>
-      @if (error()) { <div class="error">{{ error() }}</div> }
+      @if (error()) { <div class="error" role="alert">{{ error() }}</div> }
+      @if (!data() && !error()) { <p class="muted">Loading your plan…</p> }
       @if (data(); as d) {
         <section class="card">
           <h3>Process starts</h3>
@@ -66,6 +70,7 @@ const LIMIT_LABELS: Array<[string, string]> = [
     </div>
   `,
   styles: [`
+    .crumbwrap { margin-bottom: 10px; }
     .page { padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
     h1 { margin: 0 0 4px; font-size: var(--text-xl); } h3 { margin: 0 0 12px; font-size: 15px; }
     .card { padding: 16px 18px; border-radius: var(--radius-shell); }
@@ -76,6 +81,7 @@ const LIMIT_LABELS: Array<[string, string]> = [
     .num { text-align: right; font-variant-numeric: tabular-nums; } .muted { color: var(--muted); } .small { font-size: 12px; }
     .bad { color: var(--red); } .error { color: var(--red); background: var(--red-bg); padding: 8px 10px; border-radius: var(--radius-sm); }
     table { width: 100%; border-collapse: collapse; } td { padding: 7px 4px; border-top: 1px solid var(--border); }
+      @media (max-width: 900px) { .row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; } .row .bar { grid-column: 1 / -1; grid-row: 2; } .row .small { grid-column: 1 / -1; margin-top: 0; } .num { text-align: right; white-space: nowrap; } }
   `],
 })
 export class PlanUsageComponent implements OnInit {

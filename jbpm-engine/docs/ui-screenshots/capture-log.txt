@@ -1,0 +1,16 @@
+light/desktop/deployments
+light/desktop/deployment-detail
+light/desktop/deployment-processes
+light/desktop/deployment-history
+light/mobile/deployments
+light/mobile/deployment-detail
+light/mobile/deployment-processes
+light/mobile/deployment-history
+dark/desktop/deployments
+dark/desktop/deployment-detail
+dark/desktop/deployment-processes
+dark/desktop/deployment-history
+dark/mobile/deployments
+dark/mobile/deployment-detail
+dark/mobile/deployment-processes
+dark/mobile/deployment-history

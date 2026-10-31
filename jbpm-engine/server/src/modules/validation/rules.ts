@@ -7,7 +7,41 @@ import { validateJavaSupport } from '../../engine/java-compat.ts';
 import { validateJava } from '../../engine/java-sidecar.ts';
 
 export type Severity = 'error' | 'warning';
-export interface Problem { rule: string; severity: Severity; message: string; nodeId?: string; flowId?: string; }
+export interface Problem {
+  rule: string;
+  severity: Severity;
+  message: string;
+  nodeId?: string;
+  nodeName?: string;
+  flowId?: string;
+  processId?: string;
+  processName?: string;
+  remedy?: string;
+}
+
+export const REMEDIES: Record<string, string> = {
+  'start-exists': 'Add a Start Event to the process diagram from the palette.',
+  'end-exists': 'Add at least one End Event to the process diagram.',
+  'single-start': 'Merge multiple starts or use gateway branching after a single Start event.',
+  'unique-ids': 'Assign a unique ID to every node in its properties panel.',
+  'flow-endpoints': 'Re-connect or delete sequence flows that point to deleted nodes.',
+  'flow-direction': 'Verify that End events have no outgoing flows and Start events have no incoming flows.',
+  'connection-cardinality': 'Use diverging Gateways (Exclusive/Parallel) to branch into multiple sequence flows.',
+  'start-connections': 'Draw an outgoing sequence flow from the Start event to the first activity.',
+  'end-connections': 'Draw an incoming sequence flow from the preceding activity to the End event.',
+  'node-connected': 'Connect this floating activity with incoming and outgoing sequence flows, or delete it.',
+  'reachable': 'Connect a sequence flow path from a Start event to reach this activity.',
+  'ends-at-end': 'Ensure all branches and paths from this node terminate at an End event.',
+  'boundary-host': 'Attach this boundary catch event to an existing activity or set it to "*" for process-wide.',
+  'node-config': 'Fill in the required configuration fields (e.g. Script code, HTTP URL, Rule reference) in the node properties.',
+  'event-trigger': 'Define a signal, message, error, or timer trigger definition in the event properties.',
+  'gateway-branching': 'Define explicit condition expressions or designate a default outgoing flow for the gateway.',
+  'usertask-assignment': 'Assign a candidate group or actor to this user task in properties.',
+  'condition-lang': 'Set flow condition language to "js" or "java".',
+  'node-name': 'Provide a descriptive name for this activity in properties.',
+  'java-support': 'Review and fix Java syntax errors. Recommendation: Replace this node with a fresh node from the palette if internal code cannot be resolved.',
+  'unsupported-construct': 'Recommendation: Replace this unsupported construct with a standard BPMN 2.0 Task, Gateway, or Sub-process from the palette.',
+};
 
 export interface GraphCtx {
   process: EngineProcess;
@@ -146,7 +180,7 @@ export const RULES: Rule[] = [
     const out: Problem[] = [];
     for (const n of c.nodes) {
       if (!NODE_DEF_BY_TYPE[n.type]) {
-        out.push(P('unsupported-construct', 'warning', `"${label(n)}" (${n.type}) is a construct this engine doesn't structurally support — imported as opaque data; it will not execute as intended and needs manual reconstruction`, { nodeId: n.id }));
+        out.push(P('unsupported-construct', 'error', `"${label(n)}" (${n.type}) is a construct this engine doesn't structurally support — imported as opaque data; it will not execute as intended and needs manual reconstruction`, { nodeId: n.id }));
       }
     }
     return out;
@@ -341,18 +375,36 @@ export const RULES: Rule[] = [
         for (const n of nodes) {
           const a = n as any;
           if (n.type === 'script' && a.lang === 'java' && a.code) {
-            check(String(a.code), false, varTypes, (msg) => P('java-support', 'error', `Script "${label(n)}": ${msg}`, { nodeId: n.id }));
+            check(String(a.code), false, varTypes, (msg) => {
+              const remedy = msg.includes('cannot find symbol') || msg.includes('does not exist') || msg.includes('package')
+                ? 'The script references external Java classes or symbols not available in this environment. Recommendation: Replace this node with a fresh node from the palette, or rewrite the script in JavaScript.'
+                : 'Review and fix Java syntax errors. Recommendation: Replace this node with a fresh node from the palette if internal code cannot be resolved.';
+              return P('java-support', 'error', `Script "${label(n)}": ${msg}`, { nodeId: n.id, remedy });
+            });
           }
           if (n.type === 'http' && a.lang === 'java' && a.exitScript) {
-            check(String(a.exitScript), false, httpVarTypes, (msg) => P('java-support', 'error', `Exit script "${label(n)}": ${msg}`, { nodeId: n.id }));
+            check(String(a.exitScript), false, httpVarTypes, (msg) => P('java-support', 'error', `Exit script "${label(n)}": ${msg}`, {
+              nodeId: n.id,
+              remedy: 'Review exit script Java syntax or replace this service task with a fresh node from the palette.'
+            }));
           }
           // onEntry/onExit — real jBPM's generic action-hook mechanism, attachable to any activity
           // (userTask/businessRuleTask/sendTask/receiveTask/manualTask/subProcess/call/forEach/
           // workItem — see execution-engine.ts's runLifecycle). Skipped for 'http', whose onEntry/
           // onExit is the separate, already-checked exitScript mechanism above.
           if (n.type !== 'http') {
-            if (a.onEntry && a.onEntryLang === 'java') check(String(a.onEntry), false, varTypes, (msg) => P('java-support', 'error', `onEntry "${label(n)}": ${msg}`, { nodeId: n.id }));
-            if (a.onExit && a.onExitLang === 'java') check(String(a.onExit), false, varTypes, (msg) => P('java-support', 'error', `onExit "${label(n)}": ${msg}`, { nodeId: n.id }));
+            if (a.onEntry && a.onEntryLang === 'java') {
+              check(String(a.onEntry), false, varTypes, (msg) => P('java-support', 'error', `onEntry "${label(n)}": ${msg}`, {
+                nodeId: n.id,
+                remedy: 'This node contains internal onEntry Java actions from an imported model that failed compilation. Recommendation: Replace this node with a fresh node from the palette, or clear its internal actions in properties.'
+              }));
+            }
+            if (a.onExit && a.onExitLang === 'java') {
+              check(String(a.onExit), false, varTypes, (msg) => P('java-support', 'error', `onExit "${label(n)}": ${msg}`, {
+                nodeId: n.id,
+                remedy: 'This node contains internal onExit Java actions from an imported model that failed compilation. Recommendation: Replace this node with a fresh node from the palette, or clear its internal actions in properties.'
+              }));
+            }
           }
           if (Array.isArray(a.nodes)) walk(a.nodes, a.flows || []);
         }
@@ -374,7 +426,21 @@ export interface ValidationResult { ok: boolean; errors: Problem[]; warnings: Pr
 export async function validateProcess(process: EngineProcess): Promise<ValidationResult> {
   const ctx = buildCtx(process);
   const perRule = await Promise.all(RULES.map((r) => r.run(ctx)));
-  const problems = perRule.flat();
+  const problems = perRule.flat().map((p) => {
+    let nodeName = p.nodeName;
+    if (!nodeName && p.nodeId && ctx.byId.has(p.nodeId)) {
+      const n = ctx.byId.get(p.nodeId)!;
+      nodeName = n.name || n.id || n.type;
+    }
+    const remedy = p.remedy || REMEDIES[p.rule] || 'Review and adjust the process model or node configuration.';
+    return {
+      ...p,
+      processId: process.id,
+      processName: process.name || process.id,
+      ...(nodeName ? { nodeName } : {}),
+      remedy,
+    };
+  });
   const errors = problems.filter((p) => p.severity === 'error');
   const warnings = problems.filter((p) => p.severity === 'warning');
   return { ok: errors.length === 0, errors, warnings, problems };

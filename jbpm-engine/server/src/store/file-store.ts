@@ -27,7 +27,18 @@ class FileRepo<T extends Entity> implements Repository<T> {
     }
     this.loaded = true;
   }
-  private file(id: string) { return path.join(this.dir, `${id}.json`); }
+  private file(id: string) {
+    if (!id || typeof id !== 'string' || id.includes('..') || id.includes('/') || id.includes('\\')) {
+      throw new Error(`Invalid entity ID "${id}": path traversal characters not permitted`);
+    }
+    const target = path.join(this.dir, `${id}.json`);
+    const resolved = path.resolve(target);
+    const resolvedDir = path.resolve(this.dir);
+    if (!resolved.startsWith(resolvedDir + path.sep)) {
+      throw new Error(`Path traversal attempt blocked for ID "${id}"`);
+    }
+    return target;
+  }
 
   async get(id: string) { this.ensureLoaded(); return this.cache.get(id); }
   async list() { this.ensureLoaded(); return [...this.cache.values()]; }
@@ -55,5 +66,21 @@ export class FileStore implements Store {
     let r = this.repos.get(collection);
     if (!r) { r = new FileRepo<T>(path.join(this.dataDir, collection)); this.repos.set(collection, r); }
     return r as Repository<T>;
+  }
+
+  async claimDueTimers(tenantId: string, nowIso: string, limit: number): Promise<any[]> {
+    const timerRepo = this.repo<any>('timers');
+    const all = await timerRepo.query((t: any) =>
+      (!tenantId || tenantId === '*' || t.tenantId === tenantId) &&
+      t.status === 'scheduled' &&
+      t.dueAt <= nowIso,
+    );
+    const claimed = all.slice(0, limit);
+    for (const job of claimed) {
+      job.status = 'fired';
+      job.fired = (job.fired || 0) + 1;
+      await timerRepo.put(job);
+    }
+    return claimed;
   }
 }

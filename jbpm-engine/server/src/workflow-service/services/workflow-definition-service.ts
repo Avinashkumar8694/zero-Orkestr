@@ -33,7 +33,7 @@ export class WorkflowDefinitionService {
     return (await this.repo().query((d) => d.tenantId === this.ctx.tenantId)).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async create(input: { name: string; deploymentId: string; dataSchema?: Record<string, unknown>; schemaValidationEnabled?: boolean }, actor: string): Promise<WorkflowDefinition> {
+  async create(input: { name: string; deploymentId: string; processId?: string; dataSchema?: Record<string, unknown>; schemaValidationEnabled?: boolean }, actor: string): Promise<WorkflowDefinition> {
     const name = (input.name || '').trim();
     if (!name) throw validation('name is required');
     if (!input.deploymentId?.trim()) throw validation('deploymentId is required');
@@ -45,6 +45,7 @@ export class WorkflowDefinitionService {
     const now = this.ctx.clock();
     const def: WorkflowDefinition = {
       id: this.ctx.newId(), tenantId: this.ctx.tenantId, name, deploymentId: input.deploymentId,
+      processId: input.processId?.trim() || undefined,
       dataSchema, schemaValidationEnabled: !!input.schemaValidationEnabled,
       createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
     };
@@ -53,7 +54,7 @@ export class WorkflowDefinitionService {
     return def;
   }
 
-  async update(id: string, patch: { name?: string; deploymentId?: string; dataSchema?: Record<string, unknown>; schemaValidationEnabled?: boolean }, actor: string): Promise<WorkflowDefinition> {
+  async update(id: string, patch: { name?: string; deploymentId?: string; processId?: string; dataSchema?: Record<string, unknown>; schemaValidationEnabled?: boolean }, actor: string): Promise<WorkflowDefinition> {
     const d = await this.get(id);
     if (patch.deploymentId) await new DeploymentService(this.ctx).get(patch.deploymentId);
     if (patch.name && patch.name.trim() !== d.name) {
@@ -65,6 +66,7 @@ export class WorkflowDefinitionService {
       ...d,
       name: patch.name?.trim() || d.name,
       deploymentId: patch.deploymentId || d.deploymentId,
+      processId: patch.processId !== undefined ? (patch.processId ? patch.processId.trim() : undefined) : d.processId,
       dataSchema: patch.dataSchema ?? d.dataSchema,
       schemaValidationEnabled: patch.schemaValidationEnabled ?? d.schemaValidationEnabled,
       updatedAt: this.ctx.clock(), updatedBy: actor,

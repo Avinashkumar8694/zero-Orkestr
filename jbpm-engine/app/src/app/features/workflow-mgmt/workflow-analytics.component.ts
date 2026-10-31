@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { DecimalPipe, JsonPipe } from '@angular/common';
 import { WorkflowAnalyticsApiService } from '../../core/api/workflow-analytics-api.service';
 import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
+import { ModalService } from '../../shared/modal.service';
 import { ToastService } from '../../shared/toast.service';
 import { IconComponent } from '../../shared/icon.component';
 import type { QueryDefinition, QueryFilter, QueryOp, QueryRunResult, QueryableEntity, SavedQuery, WorkflowTat } from '../../core/models';
@@ -72,7 +73,7 @@ const OPS: QueryOp[] = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'contains'];
             <input class="fkey" [(ngModel)]="f.field" placeholder="field, e.g. data.amount" />
             <select [(ngModel)]="f.op">@for (o of ops; track o) { <option [value]="o">{{ o }}</option> }</select>
             <input [(ngModel)]="f.value" placeholder="value" />
-            <button class="btn sm danger" (click)="removeFilter(f)"><app-icon name="trash" [size]="12" /></button>
+            <button class="btn sm danger" (click)="removeFilter(f)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button>
           </div>
         }
         <button class="btn sm" (click)="addFilter()"><app-icon name="plus" [size]="12" /> Add filter</button>
@@ -102,7 +103,7 @@ const OPS: QueryOp[] = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'contains'];
         @for (q of savedQueries(); track q.id) {
           <div class="crow"><span>{{ q.name }}</span><span class="muted sm">{{ q.definition.entity }}</span><span class="spacer"></span>
             <button class="btn sm" (click)="runSaved(q)">Run</button>
-            <button class="btn sm danger" (click)="deleteSaved(q)"><app-icon name="trash" [size]="12" /></button>
+            <button class="btn sm danger" (click)="deleteSaved(q)" title="Delete" aria-label="Delete"><app-icon name="trash" [size]="12" /></button>
           </div>
         }
       </div>
@@ -141,6 +142,7 @@ const OPS: QueryOp[] = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'contains'];
 export class WorkflowAnalyticsComponent {
   private api = inject(WorkflowAnalyticsApiService);
   private toast = inject(ToastService);
+  private modal = inject(ModalService);
 
   entities = ENTITIES;
   ops = OPS;
@@ -211,7 +213,8 @@ export class WorkflowAnalyticsComponent {
       error: (e) => this.toast.error(e?.error?.error?.message || 'Run failed'),
     });
   }
-  deleteSaved(q: SavedQuery) {
+  async deleteSaved(q: SavedQuery) {
+    if (!(await this.modal.confirm({ title: 'Delete saved query', message: `Delete the saved query "${q.name}"?`, confirmLabel: 'Delete', danger: true }))) return;
     this.api.deleteSavedQuery(q.id).subscribe({
       next: () => { this.toast.success('Deleted'); this.loadSaved(); },
       error: (e) => this.toast.error(e?.error?.error?.message || 'Delete failed'),

@@ -103,6 +103,7 @@ test('group membership is enforced ONLY for real registered IAM users — ad-hoc
 test('a registered user NOT in the task\'s group is rejected; a member of the group (or the assignee) succeeds', async () => {
   const ctx = newCtx();
   const iam = new IamService(ctx);
+  await iam.createGroup({ name: 'finance' }, 'admin'); await iam.createGroup({ name: 'ops' }, 'admin');
   await iam.createUser({ username: 'outsider', password: 'password123', groups: ['finance'] }, 'admin');
   await iam.createUser({ username: 'ops-carol', password: 'password123', groups: ['ops'] }, 'admin');
 
@@ -142,3 +143,73 @@ test('list() sorts by priority (highest first), then newest-first within the sam
   const items = await new TaskService(ctx).list({ group: 'ops' });
   assert.deepStrictEqual(items.map((t) => t.name), ['High', 'Low', 'None']);
 });
+
+test('security: completed or skipped tasks reject release(), complete(), and addComment()', async () => {
+  const ctx = newCtx();
+  const inst = await run(ctx, { skippable: true });
+  const task = (await ctx.store.repo<Task>(Collections.tasks).query((t) => t.instanceId === inst.id))[0]!;
+  const svc = new TaskService(ctx);
+
+  await svc.claim(task.id, 'carol');
+  await svc.complete(task.id, {}, 'carol');
+
+  // Verify complete() rejects on completed task
+  await assert.rejects(() => svc.complete(task.id, {}, 'carol'), /task already completed/);
+
+  // Verify release() rejects (either instance completed or task completed)
+  await assert.rejects(() => svc.release(task.id, 'carol'), /instance is completed|task already completed/);
+
+  // Verify addComment() rejects (either instance completed or task comments closed)
+  await assert.rejects(() => svc.addComment(task.id, 'hello', 'carol'), /instance is completed|comments are closed/);
+});
+
+test('security: delegate and forward strictly reject unregistered or inactive users', async () => {
+  const ctx = newCtx();
+  const iam = new IamService(ctx);
+  await iam.createGroup({ name: 'ops' }, 'admin');   // users may only hold groups that exist in their workspace
+  await iam.createUser({ username: 'valid-worker', password: 'password123', groups: ['ops'] }, 'admin');
+  const inactive = await iam.createUser({ username: 'inactive-worker', password: 'password123', groups: ['ops'] }, 'admin');
+  await iam.updateUser(inactive.id, { active: false }, 'admin');
+  await iam.createGroup({ name: 'claims-team' }, 'admin');
+
+  const inst = await run(ctx, {});
+  const task = (await ctx.store.repo<Task>(Collections.tasks).query((t) => t.instanceId === inst.id))[0]!;
+  const svc = new TaskService(ctx);
+
+  // Attempting to delegate to a user that hasn't been added must fail
+  await assert.rejects(
+    () => svc.delegate(task.id, 'ghost-user', 'bob'),
+    /user is not registered in the system/
+  );
+
+  // Attempting to delegate to an inactive user must fail
+  await assert.rejects(
+    () => svc.delegate(task.id, 'inactive-worker', 'bob'),
+    /user account is inactive/
+  );
+
+  // Attempting to forward to an unregistered user must fail
+  await assert.rejects(
+    () => svc.forward(task.id, { user: 'ghost-user' }, 'bob'),
+    /user is not registered in the system/
+  );
+
+  // Attempting to forward to an unregistered group must fail
+  await assert.rejects(
+    () => svc.forward(task.id, { group: 'non-existent-group' }, 'bob'),
+    /group does not exist in the system/
+  );
+
+  // Delegating to a valid registered user succeeds
+  const delegated = await svc.delegate(task.id, 'valid-worker', 'bob');
+  assert.strictEqual(delegated.assignee, 'valid-worker');
+  assert.strictEqual(delegated.status, 'reserved');
+
+  // Forwarding to a valid registered group succeeds — by the task's new owner (only the holder or an admin may forward a held task)
+  await assert.rejects(() => svc.forward(task.id, { group: 'claims-team' }, 'bob'), /assigned to valid-worker/);
+  const forwarded = await svc.forward(task.id, { group: 'claims-team' }, 'valid-worker');
+  assert.strictEqual(forwarded.group, 'claims-team');
+  assert.strictEqual(forwarded.status, 'created');
+});
+
+

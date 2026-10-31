@@ -6,10 +6,20 @@ import type { EngineProcess, EngineProject } from '../../sdk/index.ts';
 import { WorkflowService } from '../workflows/service.ts';
 import { VersionService } from '../versions/service.ts';
 import { notFound, validation } from '../../infra/errors.ts';
+import { ValidationService, type Problem } from '../validation/service.ts';
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
-export interface ProcessSummary { id: string; name: string; nodes: number; flows: number; }
+export interface ProcessSummary {
+  id: string;
+  name: string;
+  nodes: number;
+  flows: number;
+  hasErrors?: boolean;
+  errorCount?: number;
+  warningCount?: number;
+  problems?: Problem[];
+}
 
 export class ProcessService {
   private wf: WorkflowService;
@@ -29,7 +39,20 @@ export class ProcessService {
 
   async list(projectId: string): Promise<ProcessSummary[]> {
     const { engine } = await this.head(projectId);
-    return (engine.processes || []).map((p) => ({ id: p.id!, name: p.name || p.id!, nodes: (p.nodes || []).length, flows: (p.flows || []).length }));
+    const vService = new ValidationService();
+    return Promise.all((engine.processes || []).map(async (p) => {
+      const v = await vService.validate(p);
+      return {
+        id: p.id!,
+        name: p.name || p.id!,
+        nodes: (p.nodes || []).length,
+        flows: (p.flows || []).length,
+        hasErrors: !v.ok,
+        errorCount: v.errors.length,
+        warningCount: v.warnings.length,
+        problems: v.problems,
+      };
+    }));
   }
 
   async getProcess(projectId: string, processId: string): Promise<EngineProcess> {

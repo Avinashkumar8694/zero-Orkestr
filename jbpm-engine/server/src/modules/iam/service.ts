@@ -3,7 +3,7 @@
 // describes: named roles carrying permission strings, users carrying role + group names, group names
 // matching the same plain strings userTask.group/Task.group already use.
 import type { AppContext } from '../../context.ts';
-import { Collections, type Group, type Role, type User } from '../../domain.ts';
+import { Collections, type Group, type Role, type TenantMember, type User } from '../../domain.ts';
 import { hashPassword, verifyPassword, signToken, permissionGrants } from '../../infra/auth.ts';
 import { notFound, validation, conflict, forbidden, authRequired, rateLimited } from '../../infra/errors.ts';
 import { config } from '../../infra/config.ts';
@@ -11,6 +11,7 @@ import { sendMail } from '../../infra/mailer.ts';
 import { templates } from '../../infra/mail-templates.ts';
 import { passwordProblem } from '../../infra/passwords.ts';
 import { AccountService } from './accounts.ts';
+import { permissionProblem } from './permissions.ts';
 
 export { sanitize, type PublicUser, type LoginResult } from './session.ts';
 import { sanitize, finishSignIn, type PublicUser, type LoginResult } from './session.ts';
@@ -110,30 +111,68 @@ export class IamService {
     if (!u || u.tenantId !== this.ctx.tenantId) throw notFound('User');
     return sanitize(u);
   }
-  async createUser(input: { username: string; password: string; roles?: string[]; groups?: string[] }, actor: string): Promise<PublicUser> {
+  async createUser(input: { username: string; password: string; roles?: string[]; groups?: string[] }, actor: string, grantable?: string[]): Promise<PublicUser> {
+    this.needWorkspace();
     const username = (input.username || '').trim();
     if (!username) throw validation('username is required');
+    if (username.length > 100) throw validation('username is too long (max 100 characters)');
     { const pp = passwordProblem(input.password, config.auth.passwordMinLength, username, false); if (pp) throw validation(pp); }
-    const dupe = await this.users().query((u) => u.tenantId === this.ctx.tenantId && u.username === username);
+    const dupe = await this.users().query((u) => u.tenantId === this.ctx.tenantId && u.username.toLowerCase() === username.toLowerCase());
     if (dupe.length) throw conflict(`username "${username}" already exists`);
+    const roles = await this.checkRoleNames(input.roles, grantable);
+    const groups = await this.checkGroupNames(input.groups);
     const u: User = {
       id: this.ctx.newId(), tenantId: this.ctx.tenantId, username,
       passwordHash: await hashPassword(input.password),
-      roles: input.roles || [], groups: input.groups || [], active: true, createdAt: this.ctx.clock(),
+      roles, groups, active: true, createdAt: this.ctx.clock(),
     };
     await this.users().put(u);
-    await this.ctx.audit({ actor, kind: 'user.created', data: { username } });
+    await this.ctx.audit({ actor, kind: 'user.created', data: { username, roles, groups } });
     return sanitize(u);
   }
-  async updateUser(id: string, patch: Partial<Pick<User, 'roles' | 'groups' | 'active'>>, actor: string): Promise<PublicUser> {
+  async updateUser(id: string, patch: Partial<Pick<User, 'roles' | 'groups' | 'active'>>, actor: string, grantable?: string[]): Promise<PublicUser> {
+    this.needWorkspace();
     const u = await this.users().get(id);
     if (!u || u.tenantId !== this.ctx.tenantId) throw notFound('User');
-    if (patch.roles !== undefined) u.roles = patch.roles;
-    if (patch.groups !== undefined) u.groups = patch.groups;
+    if (patch.active !== undefined && typeof patch.active !== 'boolean') throw validation('active must be true or false');
+    if (patch.active === false && u.active && [u.id, u.username, u.email].some((x) => x && x.toLowerCase() === (actor || '').toLowerCase())) throw validation('You cannot deactivate your own account');
+    if (patch.roles !== undefined) u.roles = await this.checkRoleNames(patch.roles, grantable, u.roles);
+    if (patch.groups !== undefined) u.groups = await this.checkGroupNames(patch.groups);
     if (patch.active !== undefined) u.active = patch.active;
     await this.users().put(u);
-    await this.ctx.audit({ actor, kind: 'user.updated', data: { userId: id } });
+    await this.ctx.audit({ actor, kind: 'user.updated', data: { userId: id, roles: u.roles, groups: u.groups, active: u.active } });
     return sanitize(u);
+  }
+
+  // ---- scope + validation helpers ----
+  /** Roles, groups and users belong to ONE workspace; the platform-wide view ('all') is read-only for them. */
+  private needWorkspace() {
+    if (!this.ctx.tenantId || this.ctx.tenantId === 'all') throw validation('Select a workspace first: users, roles and groups belong to a single workspace');
+  }
+  private async roleNames(): Promise<Set<string>> {
+    return new Set((await this.listRoles()).map((r) => r.name));
+  }
+  /** unique, trimmed, existing in THIS workspace (built-in or custom); `keep` = names already held, which are never refused */
+  private async checkRoleNames(input: unknown, grantable?: string[], keep: string[] = []): Promise<string[]> {
+    if (input === undefined || input === null) return [];
+    if (!Array.isArray(input) || input.some((x) => typeof x !== 'string')) throw validation('roles must be a list of role names');
+    const names = [...new Set((input as string[]).map((x) => x.trim()).filter(Boolean))];
+    const known = await this.listRoles();
+    const byName = new Map(known.map((r) => [r.name, r]));
+    for (const n of names) {
+      const role = byName.get(n);
+      if (!role) throw validation(`unknown role "${n}" in this workspace`);
+      if (grantable && !keep.includes(n) && !role.permissions.every((p) => permissionGrants(grantable, p))) throw forbidden(`You cannot assign the role "${n}": it carries permissions you do not hold yourself`);
+    }
+    return names;
+  }
+  private async checkGroupNames(input: unknown): Promise<string[]> {
+    if (input === undefined || input === null) return [];
+    if (!Array.isArray(input) || input.some((x) => typeof x !== 'string')) throw validation('groups must be a list of group names');
+    const names = [...new Set((input as string[]).map((x) => x.trim()).filter(Boolean))];
+    const known = new Set((await this.listGroups()).map((g) => g.name));
+    for (const n of names) if (!known.has(n)) throw validation(`unknown group "${n}" in this workspace`);
+    return names;
   }
   async setPassword(id: string, newPassword: string, actor: string): Promise<void> {
     const u = await this.users().get(id);
@@ -161,48 +200,158 @@ export class IamService {
   }
 
   // ---- groups ----
-  async listGroups(): Promise<Group[]> { return (await this.groups().query((g) => g.tenantId === this.ctx.tenantId)).sort((a, b) => a.name.localeCompare(b.name)); }
-  async createGroup(input: { name: string; description?: string }, actor: string): Promise<Group> {
-    const name = (input.name || '').trim();
+  async listGroups(): Promise<Array<Group & { memberCount: number }>> {
+    const users = await this.users().query((u) => u.tenantId === this.ctx.tenantId);
+    return (await this.groups().query((g) => g.tenantId === this.ctx.tenantId)).sort((a, b) => a.name.localeCompare(b.name))
+      .map((g) => ({ ...g, memberCount: users.filter((u) => u.groups.includes(g.name)).length }));
+  }
+  private groupName(raw: unknown): string {
+    const name = typeof raw === 'string' ? raw.trim() : '';
     if (!name) throw validation('name is required');
-    if ((await this.groups().query((g) => g.tenantId === this.ctx.tenantId && g.name === name)).length) throw conflict(`group "${name}" already exists`);
-    const g: Group = { id: this.ctx.newId(), tenantId: this.ctx.tenantId, name, description: input.description };
+    if (!GROUP_NAME.test(name)) throw validation('group name must be 1–60 characters: letters, digits, space, dot, dash, underscore or @');
+    return name;
+  }
+  async createGroup(input: { name: string; description?: string }, actor: string): Promise<Group> {
+    this.needWorkspace();
+    const name = this.groupName(input?.name);
+    const description = this.description(input?.description);
+    if ((await this.groups().query((g) => g.tenantId === this.ctx.tenantId && g.name.toLowerCase() === name.toLowerCase())).length) throw conflict(`group "${name}" already exists`);
+    const g: Group = { id: this.ctx.newId(), tenantId: this.ctx.tenantId, name, ...(description ? { description } : {}) };
     await this.groups().put(g);
     await this.ctx.audit({ actor, kind: 'group.created', data: { name } });
     return g;
   }
-  async deleteGroup(id: string, actor: string): Promise<void> {
+  private description(raw: unknown): string | undefined {
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (typeof raw !== 'string') throw validation('description must be text');
+    if (raw.length > 300) throw validation('description is too long (max 300 characters)');
+    return raw.trim() || undefined;
+  }
+  /** Rename and/or re-describe a group. A rename carries every member along (users hold groups by name). */
+  async updateGroup(id: string, patch: { name?: string; description?: string }, actor: string): Promise<Group> {
+    this.needWorkspace();
     const g = await this.groups().get(id);
     if (!g || g.tenantId !== this.ctx.tenantId) throw notFound('Group');
+    const before = g.name;
+    if (patch.name !== undefined) {
+      const name = this.groupName(patch.name);
+      if (name !== before) {
+        if ((await this.groups().query((x) => x.tenantId === this.ctx.tenantId && x.id !== id && x.name.toLowerCase() === name.toLowerCase())).length) throw conflict(`group "${name}" already exists`);
+        g.name = name;
+        for (const u of await this.users().query((x) => x.tenantId === this.ctx.tenantId && x.groups.includes(before))) { u.groups = u.groups.map((n) => (n === before ? name : n)); await this.users().put(u); }
+      }
+    }
+    if (patch.description !== undefined) { const d = this.description(patch.description); if (d) g.description = d; else delete g.description; }
+    await this.groups().put(g);
+    await this.ctx.audit({ actor, kind: 'group.updated', data: { id, from: before, name: g.name } });
+    return g;
+  }
+  /** Replace a group's membership with exactly these users (ids). */
+  async setGroupMembers(id: string, userIds: unknown, actor: string): Promise<{ group: Group; members: string[] }> {
+    this.needWorkspace();
+    const g = await this.groups().get(id);
+    if (!g || g.tenantId !== this.ctx.tenantId) throw notFound('Group');
+    if (!Array.isArray(userIds) || userIds.some((x) => typeof x !== 'string')) throw validation('userIds must be a list of user ids');
+    const want = new Set(userIds as string[]);
+    const users = await this.users().query((u) => u.tenantId === this.ctx.tenantId);
+    const known = new Set(users.map((u) => u.id));
+    for (const x of want) if (!known.has(x)) throw validation(`unknown user "${x}" in this workspace`);
+    for (const u of users) {
+      const has = u.groups.includes(g.name);
+      if (want.has(u.id) && !has) { u.groups = [...u.groups, g.name]; await this.users().put(u); }
+      else if (!want.has(u.id) && has) { u.groups = u.groups.filter((n) => n !== g.name); await this.users().put(u); }
+    }
+    await this.ctx.audit({ actor, kind: 'group.members', data: { name: g.name, count: want.size } });
+    return { group: g, members: [...want] };
+  }
+  async deleteGroup(id: string, actor: string): Promise<void> {
+    this.needWorkspace();
+    const g = await this.groups().get(id);
+    if (!g || g.tenantId !== this.ctx.tenantId) throw notFound('Group');
+    // a deleted group must not linger on its members: they would silently keep matching group-scoped tasks
+    const holders = await this.users().query((u) => u.tenantId === this.ctx.tenantId && u.groups.includes(g.name));
+    for (const u of holders) { u.groups = u.groups.filter((n) => n !== g.name); await this.users().put(u); }
     await this.groups().delete(id);
-    await this.ctx.audit({ actor, kind: 'group.deleted', data: { name: g.name } });
+    await this.ctx.audit({ actor, kind: 'group.deleted', data: { name: g.name, removedFrom: holders.length } });
   }
 
   // ---- roles ----
-  async listRoles(): Promise<Role[]> { return (await this.roles().query((r) => r.tenantId === this.ctx.tenantId)).sort((a, b) => a.name.localeCompare(b.name)); }
-  async createRole(input: { name: string; permissions: string[] }, actor: string): Promise<Role> {
-    const name = (input.name || '').trim();
+  /** This workspace's roles: its own Role rows plus every built-in role it has not customised yet (those are
+   *  virtual, id `builtin:<name>`, until someone edits them). `userCount` = local users, `memberCount` = team seats. */
+  async listRoles(): Promise<RoleInfo[]> {
+    const rows = await this.roles().query((r) => r.tenantId === this.ctx.tenantId);
+    const users = await this.users().query((u) => u.tenantId === this.ctx.tenantId);
+    const seats = await this.ctx.store.repo<TenantMember>(Collections.tenantMembers).query((m) => m.tenantId === this.ctx.tenantId && (m.status === 'active' || m.status === 'invited'));
+    const info = (r: Role, virtual: boolean): RoleInfo => ({
+      ...r, builtIn: r.name in DEFAULT_ROLES, overridden: r.name in DEFAULT_ROLES && !virtual && [...r.permissions].sort().join() !== [...DEFAULT_ROLES[r.name]!].sort().join(), protected: r.name === 'admin',
+      userCount: users.filter((u) => u.roles.includes(r.name)).length, memberCount: seats.filter((m) => m.role === r.name).length,
+    });
+    const have = new Set(rows.map((r) => r.name));
+    const virtuals = this.ctx.tenantId === 'all' ? [] : Object.entries(DEFAULT_ROLES).filter(([n]) => !have.has(n)).map(([name, permissions]): Role => ({ id: `builtin:${name}`, tenantId: this.ctx.tenantId, name, permissions: [...permissions] }));
+    return [...rows.map((r) => info(r, false)), ...virtuals.map((r) => info(r, true))].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  private checkPermissions(input: unknown, grantable?: string[]): string[] {
+    if (!Array.isArray(input)) throw validation('permissions must be a list');
+    const perms = [...new Set(input as unknown[])] as string[];
+    for (const p of perms) {
+      const bad = permissionProblem(p);
+      if (bad) throw validation(bad);
+      if (grantable && !permissionGrants(grantable, p)) throw forbidden(`You cannot grant "${p}": you do not hold it yourself`);
+    }
+    if (perms.includes('*') && perms.length > 1) return ['*'];
+    return perms.sort();
+  }
+  async createRole(input: { name: string; permissions: string[] }, actor: string, grantable?: string[]): Promise<Role> {
+    this.needWorkspace();
+    const name = (typeof input?.name === 'string' ? input.name : '').trim();
     if (!name) throw validation('name is required');
-    if ((await this.roles().query((r) => r.tenantId === this.ctx.tenantId && r.name === name)).length) throw conflict(`role "${name}" already exists`);
-    const r: Role = { id: this.ctx.newId(), tenantId: this.ctx.tenantId, name, permissions: input.permissions || [] };
+    if (!ROLE_NAME.test(name)) throw validation('role name must be 2–40 characters: start with a letter, then letters, digits, space, dot, dash or underscore');
+    if (RESERVED_ROLES.includes(name.toLowerCase())) throw validation(`"${name}" is reserved`);
+    const permissions = this.checkPermissions(input.permissions ?? [], grantable);
+    if ([...await this.roleNames()].some((n) => n.toLowerCase() === name.toLowerCase())) throw conflict(`role "${name}" already exists`);
+    const r: Role = { id: this.ctx.newId(), tenantId: this.ctx.tenantId, name, permissions };
     await this.roles().put(r);
-    await this.ctx.audit({ actor, kind: 'role.created', data: { name } });
+    await this.ctx.audit({ actor, kind: 'role.created', data: { name, permissions } });
     return r;
   }
-  async updateRole(id: string, permissions: string[], actor: string): Promise<Role> {
-    const r = await this.roles().get(id);
-    if (!r || r.tenantId !== this.ctx.tenantId) throw notFound('Role');
+  /** Replace a role's permissions. Editing a built-in role the first time stores this workspace's own copy of it. */
+  async updateRole(id: string, permissions: string[], actor: string, grantable?: string[]): Promise<Role> {
+    this.needWorkspace();
+    let r: Role | undefined;
+    if (id.startsWith('builtin:')) {
+      const name = id.slice('builtin:'.length);
+      if (!(name in DEFAULT_ROLES)) throw notFound('Role');
+      r = (await this.roles().query((x) => x.tenantId === this.ctx.tenantId && x.name === name))[0]
+        ?? { id: this.ctx.newId(), tenantId: this.ctx.tenantId, name, permissions: [...DEFAULT_ROLES[name]!] };
+    } else {
+      r = await this.roles().get(id);
+      if (!r || r.tenantId !== this.ctx.tenantId) throw notFound('Role');
+    }
     if (r.name === 'admin') throw forbidden('the admin role\'s permissions cannot be changed');
-    r.permissions = permissions;
+    r.permissions = this.checkPermissions(permissions, grantable);
     await this.roles().put(r);
-    await this.ctx.audit({ actor, kind: 'role.updated', data: { roleId: id } });
+    await this.ctx.audit({ actor, kind: 'role.updated', data: { roleId: r.id, name: r.name, permissions: r.permissions } });
     return r;
   }
-  async deleteRole(id: string, actor: string): Promise<void> {
+  /** Delete a custom role, or reset a customised built-in one to its default permissions. */
+  async deleteRole(id: string, actor: string): Promise<{ reset?: boolean }> {
+    this.needWorkspace();
+    if (id.startsWith('builtin:')) throw validation('Built-in roles cannot be deleted — they are already at their defaults');
     const r = await this.roles().get(id);
     if (!r || r.tenantId !== this.ctx.tenantId) throw notFound('Role');
     if (r.name === 'admin') throw forbidden('the admin role cannot be deleted');
+    const builtIn = r.name in DEFAULT_ROLES;
+    if (!builtIn) {
+      const info = (await this.listRoles()).find((x) => x.id === id);
+      if (info && (info.userCount || info.memberCount)) throw conflict(`role "${r.name}" is still assigned to ${info.userCount} user(s) and ${info.memberCount} team member(s) — reassign them first`);
+    }
     await this.roles().delete(id);
-    await this.ctx.audit({ actor, kind: 'role.deleted', data: { name: r.name } });
+    await this.ctx.audit({ actor, kind: builtIn ? 'role.reset' : 'role.deleted', data: { name: r.name } });
+    return builtIn ? { reset: true } : {};
   }
 }
+
+export type RoleInfo = Role & { builtIn: boolean; overridden: boolean; protected: boolean; userCount: number; memberCount: number };
+const ROLE_NAME = /^[A-Za-z][A-Za-z0-9 _.-]{1,39}$/;
+const GROUP_NAME = /^[A-Za-z0-9][A-Za-z0-9 _.@-]{0,59}$/;
+const RESERVED_ROLES = ['owner', 'system_admin'];
