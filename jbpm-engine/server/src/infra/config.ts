@@ -86,8 +86,9 @@ export interface OidcConfig {
 }
 
 const env = process.env;
-/** The only system administrator. Always granted, never anyone else — not the first member, not the local `admin`. */
-export const PLATFORM_ADMIN_EMAIL = 'arjunkumargupta108@gmail.com';
+/** The only system administrator. Always granted, never anyone else — not the first member, not the local `admin`.
+ *  Set PLATFORM_ADMIN_EMAIL (required in production); the fallback is for local development and tests only. */
+export const PLATFORM_ADMIN_EMAIL = (process.env.PLATFORM_ADMIN_EMAIL || 'arjunkumargupta108@gmail.com').trim().toLowerCase();
 const isProduction = env.NODE_ENV === 'production';
 const csv = (v?: string) => (v || '').split(',').map((h) => h.trim()).filter(Boolean);
 const pick = (...names: string[]) => names.map((n) => env[n]?.trim()).find(Boolean);
@@ -170,6 +171,7 @@ export function assertProductionConfig(c: Config = config): void {
   if (c.localLogin && c.adminInitialPassword === 'admin-change-me') {
     problems.push('ADMIN_INITIAL_PASSWORD must be changed (or disable local login with AUTH_LOCAL_LOGIN=false)');
   }
+  if (!process.env.PLATFORM_ADMIN_EMAIL?.trim()) problems.push('PLATFORM_ADMIN_EMAIL must be set (the verified SSO identity that administers the platform)');
   if (c.oidc.issuer && !c.oidc.clientId) problems.push('OIDC_CLIENT_ID is required when OIDC_ISSUER is set');
   if (c.oidc.issuer && !/^https:\/\//.test(c.oidc.issuer)) problems.push('OIDC_ISSUER must be an https URL in production');
   if (!c.oidc.issuer && !c.localLogin) problems.push('No sign-in method configured: set OIDC_ISSUER or enable AUTH_LOCAL_LOGIN');

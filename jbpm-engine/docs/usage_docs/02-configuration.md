@@ -57,6 +57,7 @@ effective value = min( workspace setting , per-workspace platform cap , global p
 
 | `WS_PATH` | `/ws` | WebSocket path for live UI updates (node/task/instance events) |
 | `DEFAULT_TENANT` | `default` | The workspace a request resolves to when it sends no `x-tenant-id` (the caller still has to be a member) |
+| `PLATFORM_ADMIN_EMAIL` | `arjunkumargupta108@gmail.com` (dev/test only) | The one platform administrator: a verified SSO identity, always seeded as `system_admin`. **Required in production** (start-up refuses without it) |
 | `OIDC_ISSUER` (alias `IDS_ISSUER_URL`) | *(unset = SSO off)* | Identity Server issuer, e.g. `https://ids.fabrixly.com/oidc` (discovery at `/.well-known/openid-configuration`). Must be https in production |
 | `OIDC_CLIENT_ID` (alias `IDS_CLIENT_ID`) | *(unset)* | Registered client id (`zero-orkestr`) |
 | `OIDC_CLIENT_SECRET` (alias `IDS_CLIENT_SECRET`) | *(unset = public client, PKCE only)* | Client secret, sent as `client_secret_basic`. **Secret — environment/secret store only, never committed** |

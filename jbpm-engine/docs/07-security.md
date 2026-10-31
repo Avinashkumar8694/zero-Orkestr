@@ -27,7 +27,7 @@
   `usage_docs/02-configuration.md` for the `OIDC_*`/`IDS_*` variables.
 - **Workspaces (multi-tenancy)**: every request is scoped by `x-tenant-id` and the caller must be an
   **active member** of that workspace (`requireWorkspaceAccess`), else 403 — an explicit workspace is
-  never silently swapped. The ONE platform administrator, `arjunkumargupta108@gmail.com` (`PLATFORM_ADMIN_EMAIL` in `infra/config.ts`, fixed in code, always seeded as `system_admin` of the default workspace, recognised on a *verified* SSO email), may use any workspace and the `all` platform view; nobody else can — not a `system_admin` role on another seat, not the first member, not the local `admin`. A membership created ahead of time
+  never silently swapped. The ONE platform administrator (`PLATFORM_ADMIN_EMAIL`, an environment variable, required in production) always seeded as `system_admin` of the default workspace, recognised on a *verified* SSO email), may use any workspace and the `all` platform view; nobody else can — not a `system_admin` role on another seat, not the first member, not the local `admin`. A membership created ahead of time
   (signup, invitation, the platform-admin seed) carries a placeholder `userId` and is **bound to the
   caller's `sub` on the first sign-in with that email *verified*** (`modules/tenants/identity.ts`);
   a bound seat is never re-bound, an email alone never matches. With SSO on, `POST /tenants/signup`
