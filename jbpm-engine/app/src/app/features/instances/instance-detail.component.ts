@@ -105,7 +105,7 @@ interface DocRow { variable: string; filename: string; url?: string; mimeType?: 
                     <tr><td class="muted">Started</td><td>{{ inst()!.startedAt | slice:0:19 }} ({{ ago(inst()!.startedAt) }})</td></tr>
                     <tr><td class="muted">Ended</td><td>{{ inst()!.endedAt ? (inst()!.endedAt! | slice:0:19) : '—' }}</td></tr>
                     <tr><td class="muted">Correlation key</td><td>{{ inst()!.correlationKey || '—' }}</td></tr>
-                    <tr><td class="muted">Deployment</td><td><a class="lnk" [routerLink]="['/deployments']" [queryParams]="{id: inst()!.deploymentId}">{{ version(inst()!) }}</a></td></tr>
+                    <tr><td class="muted">Deployment</td><td><a class="lnk" [routerLink]=\"['/deployments', inst()!.deploymentId]\">{{ version(inst()!) }}</a></td></tr>
                   </tbody></table>
 
                   <div class="section-title">Open tasks on this instance</div>

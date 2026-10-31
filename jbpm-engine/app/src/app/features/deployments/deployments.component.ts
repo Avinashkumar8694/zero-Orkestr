@@ -3,17 +3,15 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { SlicePipe } from '@angular/common';
 import { DeploymentApiService } from '../../core/api/deployment-api.service';
-import { InstanceApiService } from '../../core/api/instance-api.service';
 import { WorkflowApiService } from '../../core/api/workflow-api.service';
 import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
-import { ToastService } from '../../shared/toast.service';
-import type { Deployment, DeploymentProcessDef, Workflow } from '../../core/models';
 import { IconComponent } from '../../shared/icon.component';
+import type { Deployment, Workflow } from '../../core/models';
 
-// Top-level page (like Tasks) — a deployment is an immutable snapshot of one project's version, but
-// browsing/managing deployments is a cross-project concern (jBPM's own Deploy view works the same way:
-// one page for every deployment unit, not one nested under each project). Arriving from a project's
-// header link with ?workflowId=X pre-filters to that project without being a different page.
+// Page 1 of 2. A full-width, filterable overview of every deployment, grouped by environment; picking one opens its own
+// page (deployment-detail.component.ts) — the lifecycle actions, process definitions and release history deserve a whole
+// screen rather than a cramped panel beside the list. Arriving from a project's header link with ?workflowId=X pre-filters
+// to that project.
 @Component({
   selector: 'app-deployments',
   standalone: true,
@@ -22,194 +20,142 @@ import { IconComponent } from '../../shared/icon.component';
     <div class="page">
       <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Deployments' }]" /></div>
       <header class="pagehead">
-        <h1>Deployments</h1>
+        <div>
+          <h1>Deployments</h1>
+          <p class="muted sub">Immutable releases of your projects, by environment. Open one to manage its lifecycle, start processes or roll back.</p>
+        </div>
         <span class="spacer"></span>
-        <select class="proj-filter" [ngModel]="projectFilter()" (ngModelChange)="setProjectFilter($event)">
-          <option value="">All projects</option>
-          @for (w of workflows(); track w.id) { <option [value]="w.id">{{ w.name }}</option> }
-        </select>
         <button class="btn" (click)="reload()"><app-icon name="refresh" [size]="14" /> Refresh</button>
       </header>
 
-      @if (loading()) {
-        <div class="split">
-          <div class="card"><div class="skeleton skeleton-line" style="width:60%"></div><div class="skeleton skeleton-line" style="width:80%"></div><div class="skeleton skeleton-line" style="width:40%"></div></div>
-          <div class="card"><div class="skeleton skeleton-card"></div></div>
+      @if (!loading() && deployments().length) {
+        <div class="stats">
+          <div class="card stat"><span class="n ok">{{ count('active') }}</span><span class="l">Active</span></div>
+          <div class="card stat"><span class="n">{{ count('inactive') }}</span><span class="l">Inactive</span></div>
+          <div class="card stat"><span class="n">{{ count('archived') }}</span><span class="l">Archived</span></div>
+          <div class="card stat"><span class="n">{{ envs().length }}</span><span class="l">Environments</span></div>
         </div>
+      }
+
+      <div class="filterbar">
+        <select class="proj-filter" [ngModel]="projectFilter()" (ngModelChange)="setProjectFilter($event)" aria-label="Project">
+          <option value="">All projects</option>
+          @for (w of workflows(); track w.id) { <option [value]="w.id">{{ w.name }}</option> }
+        </select>
+        <div class="chips" role="group" aria-label="Environment">
+          <button class="chip" [class.on]="env() === ''" (click)="env.set('')">All environments</button>
+          @for (e of envs(); track e) { <button class="chip" [class.on]="env() === e" (click)="env.set(e)">{{ e }}</button> }
+        </div>
+        <div class="chips" role="group" aria-label="Status">
+          @for (s of statuses; track s.key) { <button class="chip" [class.on]="status() === s.key" (click)="status.set(s.key)">{{ s.label }}</button> }
+        </div>
+      </div>
+
+      @if (loading()) {
+        <div class="card pad"><div class="skeleton skeleton-line" style="width:60%"></div><div class="skeleton skeleton-line" style="width:80%"></div><div class="skeleton skeleton-line" style="width:40%"></div></div>
+      } @else if (error()) {
+        <div class="card"><div class="empty-state"><div class="es-icon"><app-icon name="warning" [size]="24" /></div><h3>Could not load deployments</h3><p>{{ error() }}</p><button class="btn" (click)="reload()">Retry</button></div></div>
       } @else if (deployments().length === 0) {
-        <div class="empty-state">
+        <div class="card"><div class="empty-state">
           <div class="es-icon"><app-icon name="deployments" [size]="24" /></div>
           <h3>No deployments yet</h3>
           <p>{{ projectFilter() ? 'This project has no deployments yet.' : "Publish a version and deploy it from a project's builder to see it here." }}</p>
-        </div>
+        </div></div>
+      } @else if (grouped().length === 0) {
+        <div class="card"><div class="empty-state"><div class="es-icon"><app-icon name="search" [size]="24" /></div><h3>Nothing matches these filters</h3><p>Try another environment or status.</p><button class="btn" (click)="env.set(''); status.set('')">Clear filters</button></div></div>
       } @else {
-        <div class="split">
-          <div class="list card">
-            @for (grp of grouped(); track grp.env) {
-              <div class="env-h">{{ grp.env }} <span class="count">{{ grp.items.length }}</span></div>
-              <table>
-                <tbody>
-                  @for (d of grp.items; track d.id) {
-                    <tr (click)="select(d)" [class.sel]="sel()?.id === d.id">
-                      <td><span class="badge" [class.active]="d.status==='active'" [class.inactive]="d.status==='inactive'" [class.archived]="d.status==='archived'">{{ d.status }}</span></td>
-                      <td><a [routerLink]="['/projects', d.workflowId]" (click)="$event.stopPropagation()">{{ projectName(d.workflowId) }}</a></td>
-                      <td class="muted">{{ d.versionLabel || ('v' + (d.versionNumber ?? '?')) }}</td>
-                      <td class="muted mono">{{ d.deployedAt | slice:0:10 }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            }
-          </div>
-
-          <!-- DETAIL -->
-          @if (sel(); as d) {
-            <div class="detail card">
-              <div class="d-head">
-                <div><a [routerLink]="['/projects', d.workflowId]">{{ projectName(d.workflowId) }}</a> · {{ d.environment }} · {{ d.versionLabel || ('v' + (d.versionNumber ?? '?')) }}
-                  <span class="badge" [class.active]="d.status==='active'" [class.inactive]="d.status==='inactive'" [class.archived]="d.status==='archived'">{{ d.status }}</span></div>
-                <span class="spacer"></span>
-                @if (d.status !== 'active') { <button class="btn" (click)="activate(d)">Activate</button> }
-                @if (d.status === 'active') { <button class="btn" (click)="undeploy(d)">Undeploy</button> }
-                @if (d.status !== 'archived') { <button class="btn danger" (click)="archive(d)">Archive</button> }
-              </div>
-
-              <div class="tabbody">
-                <table class="kv"><tbody>
-                  <tr><td class="k">Deployed</td><td class="mono">{{ d.deployedAt | slice:0:19 }} by {{ d.deployedBy }}</td></tr>
-                  <tr><td class="k">Tags</td><td>@for (t of d.tags; track t) { <span class="badge">{{ t }}</span> } @if (!d.tags.length) { <span class="muted">—</span> }</td></tr>
-                </tbody></table>
-
-                <h3 class="sec-h">Process definitions in this container</h3>
-                @if (defsLoading()) {
-                  <div class="skeleton skeleton-line" style="width:100%"></div>
-                } @else if (defs().length === 0) {
-                  <p class="muted pad">No process definitions found in this deployment.</p>
-                } @else {
-                  <table>
-                    <thead><tr><th>Id</th><th>Name</th><th>Nodes</th><th></th></tr></thead>
-                    <tbody>
-                      @for (pd of defs(); track pd.id) {
-                        <tr>
-                          <td class="mono">{{ pd.id }}</td><td>{{ pd.name }}</td><td class="muted">{{ pd.nodes }}</td>
-                          <td class="ta-r">
-                            <!-- jBPM's "New Process Instance" — the definition list is where operators start
-                                 work from, so "Startable: Yes" as dead text was a missing core action. -->
-                            @if (pd.startable && d.status === 'active') {
-                              <button class="btn sm primary" (click)="startInstance(d, pd)" title="Start a new instance of this process">
-                                <app-icon name="play" [size]="12" /> Start
-                              </button>
-                            } @else {
-                              <span class="muted sm">{{ pd.startable ? 'deployment inactive' : 'not startable' }}</span>
-                            }
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
+        @for (grp of grouped(); track grp.env) {
+          <section class="card envcard">
+            <div class="env-h"><span class="envname">{{ grp.env }}</span><span class="count">{{ grp.items.length }}</span></div>
+            <table>
+              <thead><tr><th>Status</th><th>Project</th><th>Version</th><th>Deployed</th><th>By</th><th>Tags</th><th></th></tr></thead>
+              <tbody>
+                @for (d of grp.items; track d.id) {
+                  <tr class="clickable" tabindex="0" (click)="open(d)" (keydown.enter)="open(d)">
+                    <td><span class="badge" [class.active]="d.status==='active'" [class.inactive]="d.status==='inactive'" [class.archived]="d.status==='archived'">{{ d.status }}</span></td>
+                    <td><a class="proj" [routerLink]="['/deployments', d.id]" (click)="$event.stopPropagation()">{{ projectName(d.workflowId) }}</a></td>
+                    <td class="muted">{{ d.versionLabel || ('v' + (d.versionNumber ?? '?')) }}</td>
+                    <td class="muted mono">{{ d.deployedAt | slice:0:10 }}</td>
+                    <td class="muted">{{ d.deployedBy }}</td>
+                    <td>@for (t of d.tags; track t) { <span class="badge">{{ t }}</span> } @if (!d.tags.length) { <span class="muted">—</span> }</td>
+                    <td class="go"><app-icon name="chevronRight" [size]="16" /></td>
+                  </tr>
                 }
-
-                <h3 class="sec-h">Rollback</h3>
-                @if (rollbackTargets().length === 0) {
-                  <p class="muted">No other deployment in "{{ d.environment }}" to roll back to.</p>
-                } @else {
-                  <div class="row">
-                    <select #rb>
-                      @for (t of rollbackTargets(); track t.id) { <option [value]="t.id">{{ t.versionLabel || ('v' + (t.versionNumber ?? '?')) }} · {{ t.deployedAt | slice:0:10 }}</option> }
-                    </select>
-                    <button class="btn" (click)="rollback(d, rb.value)">Rollback to selected</button>
-                  </div>
-                }
-              </div>
-            </div>
-          } @else {
-            <div class="detail card">
-              <div class="empty-state">
-                <div class="es-icon"><app-icon name="search" [size]="24" /></div>
-                <h3>No deployment selected</h3>
-                <p>Select a deployment on the left to see its process definitions and lifecycle actions.</p>
-              </div>
-            </div>
-          }
-        </div>
+              </tbody>
+            </table>
+          </section>
+        }
       }
     </div>
   `,
   styles: [`
-    .ta-r { text-align: right; }
-    .page { padding: 20px 24px; }
+    .page { padding: 8px 22px 28px; }
     .crumbwrap { margin-bottom: 8px; }
-    .pagehead { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-    h1 { font-size: 19px; margin: 0; }
-    .proj-filter { max-width: 200px; }
-    .split { display: grid; grid-template-columns: minmax(360px, 480px) 1fr; gap: 16px; align-items: start; }
-    .env-h { padding: 10px 14px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--border); }
-    .list tr { cursor: pointer; } .list tbody tr:hover { background: var(--surface-2); } .list tr.sel td { background: var(--primary-50); }
-    .list td a { color: var(--primary); } .list td a:hover { text-decoration: underline; }
+    .pagehead { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+    .sub { margin-top: 4px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; margin-bottom: 16px; }
+    .stat { padding: 16px 20px; display: flex; flex-direction: column-reverse; gap: 4px; }
+    .stat .n { font-size: var(--text-2xl); line-height: 1.1; font-weight: 700; letter-spacing: -.03em; color: var(--text); } .stat .n.ok { color: var(--green); }
+    .stat .l { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+    .filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .proj-filter { max-width: 240px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px; background: var(--surface); border-radius: var(--radius-pill); box-shadow: var(--shadow-card); }
+    .chip { border: 0; background: transparent; padding: 6px 14px; border-radius: var(--radius-pill); font-size: 13px; font-weight: 650; color: var(--text-secondary); cursor: pointer; text-transform: capitalize; }
+    .chip:hover { color: var(--primary); background: var(--primary-50); }
+    .chip.on { background: var(--grad-brand); color: #fff; }
+    .envcard { margin-bottom: 16px; overflow: hidden; }
+    .env-h { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+    .envname { font-weight: 800; letter-spacing: .06em; text-transform: uppercase; font-size: 12px; color: var(--primary); }
+    .count { font-size: 12px; font-weight: 700; padding: 1px 9px; border-radius: var(--radius-pill); background: var(--primary-50); color: var(--primary); }
+    tr.clickable { cursor: pointer; } tr.clickable:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+    .proj { color: var(--primary); font-weight: 650; } .proj:hover { text-decoration: underline; }
+    .go { width: 40px; text-align: right; color: var(--muted); } tr.clickable:hover .go { color: var(--primary); }
     .badge + .badge { margin-left: 4px; }
-    .mono { font-family: var(--font-mono); font-size: 12px; }
-    .d-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-    .d-head a { color: var(--primary); } .d-head a:hover { text-decoration: underline; }
-    .tabbody { padding: 14px 16px; }
-    .kv { width: 100%; margin-bottom: 18px; } .kv td { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: top; } .kv .k { color: var(--muted); width: 30%; }
-    .sec-h { font-size: 13px; margin: 0 0 10px; }
-    .pad { padding: 4px 0 16px; }
-    .row { display: flex; gap: 8px; align-items: center; }
-    select { border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
-    .btn.danger { color: var(--red); border-color: var(--border-strong); } .btn.danger:hover { background: var(--red-bg); }
+    .mono { font-family: var(--font-mono); font-size: 12.5px; }
+    .pad { padding: 18px 20px; }
+    @media (max-width: 900px) { .page { padding: 4px 12px 24px; } .chips { border-radius: var(--radius); } .proj-filter { max-width: 100%; width: 100%; } }
   `],
 })
 export class DeploymentsComponent {
   private api = inject(DeploymentApiService);
   private wfApi = inject(WorkflowApiService);
-  private toast = inject(ToastService);
   private route = inject(ActivatedRoute);
-  private instApi = inject(InstanceApiService);
   private router = inject(Router);
 
+  statuses = [{ key: '', label: 'Any status' }, { key: 'active', label: 'Active' }, { key: 'inactive', label: 'Inactive' }, { key: 'archived', label: 'Archived' }];
   workflows = signal<Workflow[]>([]);
   deployments = signal<Deployment[]>([]);
   loading = signal(true);
-  sel = signal<Deployment | null>(null);
-  defs = signal<DeploymentProcessDef[]>([]);
-  defsLoading = signal(false);
+  error = signal('');
+  env = signal('');
+  status = signal('');
   projectFilter = signal<string>(this.route.snapshot.queryParamMap.get('workflowId') || '');
 
   private wfNames = computed(() => new Map(this.workflows().map((w) => [w.id, w.name])));
   projectName(id: string) { return this.wfNames().get(id) || id; }
-
+  envs = computed(() => [...new Set(this.deployments().map((d) => d.environment))].sort());
+  count(status: string) { return this.deployments().filter((d) => d.status === status).length; }
   grouped = computed(() => {
     const byEnv = new Map<string, Deployment[]>();
-    for (const d of this.deployments()) { (byEnv.get(d.environment) || byEnv.set(d.environment, []).get(d.environment)!).push(d); }
-    return [...byEnv.entries()].map(([env, items]) => ({ env, items }));
+    for (const d of this.deployments()) {
+      if (this.env() && d.environment !== this.env()) continue;
+      if (this.status() && d.status !== this.status()) continue;
+      (byEnv.get(d.environment) || byEnv.set(d.environment, []).get(d.environment)!).push(d);
+    }
+    return [...byEnv.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([env, items]) => ({ env, items }));
   });
-  rollbackTargets = computed(() => { const d = this.sel(); if (!d) return []; return this.deployments().filter((x) => x.environment === d.environment && x.workflowId === d.workflowId && x.id !== d.id); });
 
   constructor() {
     this.wfApi.listWorkflows().subscribe((ws) => this.workflows.set(ws));
     this.reload();
   }
   reload() {
-    this.loading.set(true);
-    this.api.listDeploymentsGlobal({ workflowId: this.projectFilter() || undefined }).subscribe((d) => { this.deployments.set(d); this.loading.set(false); });
-  }
-  setProjectFilter(id: string) { this.projectFilter.set(id); this.sel.set(null); this.reload(); }
-  select(d: Deployment) { this.sel.set(d); this.defsLoading.set(true); this.api.definitions(d.id).subscribe((defs) => { this.defs.set(defs); this.defsLoading.set(false); }); }
-  private refreshAfterAction(id: string) { this.reload(); this.api.getDeployment(id).subscribe((d) => this.select(d)); }
-  private onActionError(e: any) { this.toast.error(e?.error?.error?.message || 'That action could not be completed'); }
-  activate(d: Deployment) { this.api.activate(d.id).subscribe({ next: () => this.refreshAfterAction(d.id), error: (e) => this.onActionError(e) }); }
-  undeploy(d: Deployment) { this.api.undeploy(d.id).subscribe({ next: () => this.refreshAfterAction(d.id), error: (e) => this.onActionError(e) }); }
-  archive(d: Deployment) { this.api.archive(d.id).subscribe({ next: () => this.refreshAfterAction(d.id), error: (e) => this.onActionError(e) }); }
-  /** jBPM's "New Process Instance": start from a deployed definition, then jump straight to the
-   *  new instance's live diagram so the user sees it running rather than a silent toast. */
-  startInstance(d: Deployment, pd: DeploymentProcessDef) {
-    this.instApi.startInstance({ workflowId: d.workflowId, processId: pd.id, deploymentId: d.id }).subscribe({
-      next: (inst) => {
-        this.toast.success(`Instance started: \u2026${inst.id.slice(-7)}`);
-        this.router.navigate(['/instances'], { queryParams: { id: inst.id } });
-      },
-      error: (e) => this.onActionError(e),
+    this.loading.set(true); this.error.set('');
+    this.api.listDeploymentsGlobal({ workflowId: this.projectFilter() || undefined }).subscribe({
+      next: (d) => { this.deployments.set(d); this.loading.set(false); },
+      error: (e) => { this.loading.set(false); this.error.set(e?.error?.error?.message || 'The server did not answer'); },
     });
   }
-  rollback(d: Deployment, toDeploymentId: string) { if (!toDeploymentId) return; this.api.rollback(d.id, { environment: d.environment, toDeploymentId }).subscribe({ next: () => this.reload(), error: (e) => this.onActionError(e) }); }
+  setProjectFilter(id: string) { this.projectFilter.set(id); this.env.set(''); this.reload(); }
+  open(d: Deployment) { this.router.navigate(['/deployments', d.id]); }
 }

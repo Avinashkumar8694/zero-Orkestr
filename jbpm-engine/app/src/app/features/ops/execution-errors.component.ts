@@ -130,7 +130,7 @@ const TYPES = ['process', 'task', 'job', 'integration'] as const;
                 <tr><td class="muted">Process</td><td>{{ e.processId || '—' }}</td></tr>
                 <tr><td class="muted">Node</td><td>{{ e.nodeId || '—' }} @if (e.nodeName) { · "{{ e.nodeName }}" }</td></tr>
                 <tr><td class="muted">Node type</td><td>{{ e.nodeType || '—' }}</td></tr>
-                <tr><td class="muted">Deployment</td><td>@if (e.deploymentId) { <a class="ident" [routerLink]="['/deployments']" [queryParams]="{id: e.deploymentId}">{{ shortId(e.deploymentId) }}</a> } @else { <span class="muted">—</span> }</td></tr>
+                <tr><td class="muted">Deployment</td><td>@if (e.deploymentId) { <a class="ident" [routerLink]=\"['/deployments', e.deploymentId]\">{{ shortId(e.deploymentId) }}</a> } @else { <span class="muted">—</span> }</td></tr>
                 <tr><td class="muted">Occurrences</td><td>{{ e.occurrences }}</td></tr>
               </tbody>
             </table>

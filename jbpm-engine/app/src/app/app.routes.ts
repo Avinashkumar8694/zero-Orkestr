@@ -39,6 +39,7 @@ export const routes: Routes = [
       // always belongs to one project, but browsing them is a cross-project concern, matching real
       // jBPM's Deploy/Manage menus. Project header links pass ?workflowId= to pre-filter.
       { path: 'deployments', loadComponent: () => import('./features/deployments/deployments.component').then((m) => m.DeploymentsComponent) },
+      { path: 'deployments/:id', loadComponent: () => import('./features/deployments/deployment-detail.component').then((m) => m.DeploymentDetailComponent) },
       { path: 'instances', loadComponent: () => import('./features/instances/instances.component').then((m) => m.InstancesComponent) },
       // Start New Instance is its own page (jBPM's "New Process Instance" flow), not a modal —
       // it must come before instances/:id or "start" would be read as an instance id.
