@@ -104,3 +104,10 @@ export const GENERAL: UiSection = { title: 'General', fields: [
   { key: 'name', label: 'Name', widget: 'text' },
   { key: 'documentation', label: 'Documentation', widget: 'textarea', placeholder: 'Notes for this node' },
 ] };
+
+/** jBPM's "Is Async" (drools:customAsync), shared by every node type that can run in the background. */
+export const EXECUTION: UiSection = { title: 'Execution', fields: [
+  { key: 'async', label: 'Run in the background (async)', widget: 'bool', help: 'The instance is saved and the caller is released; a worker runs this node. Use for slow scripts, calls and integrations so the start request never waits.' },
+  { key: 'asyncRetries', label: 'Async retries', widget: 'number', placeholder: '3', help: 'Extra attempts when the worker cannot run the node (infrastructure failure). A script or HTTP error is not retried here: it follows the error handling of the process.' },
+  { key: 'asyncRetryDelay', label: 'Async retry delay', widget: 'text', placeholder: 'PT10S', help: 'ISO-8601 duration; each further attempt waits this long times the attempt number.' },
+] };

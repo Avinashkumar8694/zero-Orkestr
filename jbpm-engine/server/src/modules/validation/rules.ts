@@ -3,6 +3,8 @@
 // Errors block publish/deploy; warnings are advisory. See docs/08 + docs/09.
 import type { EngineFlow, EngineNode, EngineProcess } from '../../sdk/index.ts';
 import { NODE_DEF_BY_TYPE } from '../../engine/nodes/index.ts';
+import { ASYNC_CAPABLE } from '../../engine/async-kick.ts';
+import { parseDuration } from '../../engine/duration.ts';
 import { validateJavaSupport } from '../../engine/java-compat.ts';
 import { validateJava } from '../../engine/java-sidecar.ts';
 
@@ -40,6 +42,7 @@ export const REMEDIES: Record<string, string> = {
   'condition-lang': 'Set flow condition language to "js" or "java".',
   'node-name': 'Provide a descriptive name for this activity in properties.',
   'java-support': 'Review and fix Java syntax errors. Recommendation: Replace this node with a fresh node from the palette if internal code cannot be resolved.',
+  'async-config': 'Async applies to script, service/HTTP, work-item, rule, send, call, for-each and sub-process nodes. Retries are 0–20; the delay is an ISO-8601 duration such as PT30S.',
   'unsupported-construct': 'Recommendation: Replace this unsupported construct with a standard BPMN 2.0 Task, Gateway, or Sub-process from the palette.',
 };
 
@@ -106,6 +109,18 @@ const P = (rule: string, severity: Severity, message: string, extra: Partial<Pro
 const deg = (ctx: GraphCtx, id: string) => ({ in: (ctx.incoming.get(id) || []).length, out: (ctx.outgoing.get(id) || []).length });
 
 export const RULES: Rule[] = [
+  { id: 'async-config', description: 'Async (background) execution settings must be valid and on a node that can run in the background', run: (c) => {
+    const out: Problem[] = [];
+    for (const n of c.nodes) {
+      const a = n as any;
+      if (a.async === undefined && a.asyncRetries === undefined && a.asyncRetryDelay === undefined) continue;
+      if (a.async === true && !ASYNC_CAPABLE.has(n.type)) out.push(P('async-config', 'warning', `"${label(n)}" (${n.type}) cannot run in the background — async is ignored`, { nodeId: n.id }));
+      if (a.asyncRetries !== undefined && !(Number.isInteger(a.asyncRetries) && a.asyncRetries >= 0 && a.asyncRetries <= 20)) out.push(P('async-config', 'error', `"${label(n)}": async retries must be a whole number from 0 to 20`, { nodeId: n.id }));
+      if (a.asyncRetryDelay !== undefined && a.asyncRetryDelay !== '' && !parseDuration(String(a.asyncRetryDelay))) out.push(P('async-config', 'error', `"${label(n)}": async retry delay must be an ISO-8601 duration such as PT30S`, { nodeId: n.id }));
+    }
+    return out;
+  } },
+
   { id: 'start-exists', description: 'Process must have at least one start node', run: (c) => c.starts.length ? [] : [P('start-exists', 'error', 'Process has no start node')] },
   { id: 'end-exists', description: 'Process must have at least one end node', run: (c) => c.ends.length ? [] : [P('end-exists', 'error', 'Process has no end node')] },
   { id: 'single-start', description: 'Prefer a single start node', run: (c) => c.starts.length > 1 ? [P('single-start', 'warning', `Process has ${c.starts.length} start nodes`)] : [] },

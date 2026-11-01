@@ -112,9 +112,11 @@ export type TokenState = 'active' | 'waiting';
 // tracks one). No `ref` — siblings are found by querying for Instance.parentTokenId === this token's
 // id (see execution-engine.ts's tryResumeParent/tryFailParent), so nothing about which children are
 // still outstanding needs to be stored on the token itself.
-export interface WaitSpec { kind: 'timer' | 'task' | 'message' | 'signal' | 'condition' | 'child' | 'multiInstance'; ref?: string; dueAt?: string; }
+export interface WaitSpec { kind: 'timer' | 'task' | 'message' | 'signal' | 'condition' | 'child' | 'multiInstance' | 'async'; ref?: string; dueAt?: string; }
 export interface Token {
   id: string; nodeId: string; state: TokenState; scopeId?: string; waitFor?: WaitSpec; enteredAt: string;
+  /** set when an async job released this token: the node now runs for real (it is not parked a second time) */
+  asyncReady?: boolean;
 }
 export interface NodeVisit { tokenId: string; nodeId: string; type: string; enteredAt: string; exitedAt?: string; outcome?: string; }
 export interface Instance extends Entity {
@@ -164,8 +166,11 @@ export interface Task extends Entity {
 
 export interface TimerJob extends Entity {
   id: string; tenantId: string; instanceId: string; tokenId: string; nodeId: string;
-  kind: 'duration' | 'cycle' | 'date' | 'start';
+  kind: 'duration' | 'cycle' | 'date' | 'start' | 'async';
   dueAt: string; cycle?: string; fired: number;
+  // kind 'async' (jBPM's "Is Async" / a background start): run the parked token's node in the worker. A job that could not
+  // run (store/lock/engine exception — not a business error, which follows the normal error model) is retried.
+  attempts?: number; maxAttempts?: number; retryDelayMs?: number; lastError?: string;
   status: 'scheduled' | 'fired' | 'cancelled';
   // kind 'start' (timer/cron start event): begin a new instance instead of resuming a token.
   deploymentId?: string; processId?: string;

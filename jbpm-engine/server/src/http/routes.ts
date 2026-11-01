@@ -329,7 +329,16 @@ export function buildRoutes(): Router {
   }));
 
   // --- instances (runtime) ---
-  r.post('/instances', perm('workflow:run'), startLimiter, asyncHandler(async (req, res) => res.status(201).json(await new InstanceService(ctxOf(req), emit).start(req.body, actorOf(req)))));
+  // Starting is synchronous by default (the response is the instance after its first run to a wait/end). `async: true` in the body,
+  // or the standard `Prefer: respond-async` header, starts it in the background: 202 + the instance id straight away, the first
+  // node runs in the worker, and the caller follows the instance (GET /instances/:id, events) — nobody has to wait.
+  r.post('/instances', perm('workflow:run'), startLimiter, asyncHandler(async (req, res) => {
+    const background = req.body?.async === true || /\brespond-async\b/i.test(String(req.headers.prefer || ''));
+    const inst = await new InstanceService(ctxOf(req), emit).start({ ...req.body, async: background }, actorOf(req));
+    if (!background) return res.status(201).json(inst);
+    res.setHeader('Location', `/api/instances/${inst.id}`); res.setHeader('Preference-Applied', 'respond-async');
+    res.status(202).json(inst);
+  }));
   r.get('/instances', perm('workflow:view'), asyncHandler(async (req, res) => {
     const ctx = ctxOf(req);
     const instService = new InstanceService(ctx);

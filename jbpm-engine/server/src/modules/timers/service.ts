@@ -93,6 +93,23 @@ export class TimerService {
               // cron/cycle start; it should just skip this occurrence and try again next time.
               try { await this.instances.startScheduled(job); }
               finally { if (job.cycle) await this.reschedule(job, nowIso); }
+            } else if (job.kind === 'async') {
+              // a background node/start. A thrown exception is an infrastructure failure (not a business error — those follow the
+              // normal error model inside the engine), so the job is retried with a delay until its attempts are used up.
+              job.attempts = (job.attempts ?? 0) + 1;
+              try { await this.instances.fireAsync(job); }
+              catch (e) {
+                job.lastError = (e as Error).message;
+                if (job.attempts < (job.maxAttempts ?? 1)) {
+                  job.status = 'scheduled'; job.dueAt = new Date(Date.parse(nowIso) + (job.retryDelayMs ?? 10_000) * job.attempts).toISOString();
+                } else {
+                  const inst = await this.instances.get(job.instanceId).catch(() => null);
+                  if (inst && inst.status !== 'completed' && inst.status !== 'aborted' && inst.status !== 'failed') {
+                    await this.instances.failAsync(inst, job.nodeId, `async job failed after ${job.attempts} attempt(s): ${job.lastError}`).catch(() => {});
+                  }
+                }
+              }
+              await this.repo().put(job);
             } else {
               const inst = await this.instances.fireTimer(job);
               // A non-interrupting boundary timer doesn't remove its host token — if it's also declared

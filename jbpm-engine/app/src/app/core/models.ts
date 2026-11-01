@@ -160,7 +160,8 @@ export interface ErrorSummary { total: number; unacknowledged: number; last24h: 
 
 export interface TimerJob {
   id: string; instanceId: string; tokenId: string; nodeId: string;
-  kind: 'duration' | 'cycle' | 'date' | 'start';
+  kind: 'duration' | 'cycle' | 'date' | 'start' | 'async';
+  attempts?: number; maxAttempts?: number; lastError?: string;
   dueAt: string; cycle?: string; fired: number;
   status: 'scheduled' | 'fired' | 'cancelled';
   deploymentId?: string; processId?: string;
