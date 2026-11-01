@@ -1,6 +1,6 @@
 // User task — creates a Task work item and waits until it is completed (which resumes the token).
 import type { NodeHandler } from '../types.ts';
-import { Collections, type Task, type TimerJob } from '../../../domain.ts';
+import { Collections, type Task, type TaskComment, type TimerJob } from '../../../domain.ts';
 import { computeDue, parseDelay } from '../../duration.ts';
 import { DEADLINE_TYPES, parseDeadlines } from '../../deadlines.ts';
 import { SettingsService } from '../../../modules/settings/service.ts';
@@ -12,6 +12,14 @@ function mapTaskInputs(n: any, vars: Record<string, unknown>): Record<string, un
   for (const [tv, spec] of Object.entries(n.inputs || {})) out[tv] = typeof spec === 'string' && spec.startsWith('$') ? vars[spec.slice(1)] : spec;
   return out;
 }
+
+const list = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : typeof v === 'string' ? v.split(',').map((x) => x.trim()).filter(Boolean) : []);
+/** $variable or ${variable} placeholders filled from the process variables */
+const resolveText = (v: unknown, vars: Record<string, unknown>): string => {
+  const s = String(v ?? '');
+  if (s.startsWith('$') && !s.startsWith('${')) return String(vars[s.slice(1)] ?? '');
+  return s.replace(/\$\{([^}]+)\}/g, (_, name) => String(vars[name.trim()] ?? ''));
+};
 
 export const handler: NodeHandler = async (c) => {
   const n = c.node;
@@ -30,10 +38,16 @@ export const handler: NodeHandler = async (c) => {
     tokenId: c.inst.tokens.find((t) => t.nodeId === n.id)!.id, nodeId: n.id,
     name: n.name || n.form || 'Task', formName: n.form, group: n.group || n.assignee,
     businessAdmin: n.businessAdmin, excludedOwners: n.excludedOwners, priority: n.priority,
-    status: 'created', inputs: mapTaskInputs(n, c.inst.variables), createdAt: now,
+    ...(list(n.actors).length ? { actors: list(n.actors) } : {}), ...(list(n.groups).length ? { groups: list(n.groups) } : {}),
+    ...(list(n.businessAdminGroups).length ? { businessAdminGroups: list(n.businessAdminGroups) } : {}), ...(list(n.stakeholders).length ? { stakeholders: list(n.stakeholders) } : {}),
+    ...(n.locale ? { locale: String(n.locale) } : {}), createdBy: n.createdBy ? String(n.createdBy) : (c.inst.startedBy || 'system'),
+    status: 'created', inputs: { ...mapTaskInputs(n, c.inst.variables), ...(n.content ? { Content: resolveText(n.content, c.inst.variables) } : {}) }, createdAt: now,
     ...(dueAt ? { dueAt } : {}),
   };
   await c.app.store.repo<Task>(Collections.tasks).put(task);
+  if (typeof n.comment === 'string' && n.comment.trim()) {
+    await c.app.store.repo<TaskComment>(Collections.comments).put({ id: c.app.newId(), tenantId: c.app.tenantId, taskId: task.id, author: task.createdBy || 'system', body: resolveText(n.comment, c.inst.variables).trim(), at: now });
+  }
   // jBPM deadlines: one job per (component, expiry); the worker acts only if the task is still in the watched state
   for (const type of DEADLINE_TYPES) {
     const { deadlines } = parseDeadlines(n[type], type);     // an unreadable text never blocks the task (validation flags it at publish)

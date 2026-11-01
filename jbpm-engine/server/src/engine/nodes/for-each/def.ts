@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, EXECUTION, SLA } from '../def-types.ts';
+import { type NodeDef, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
 export const def: NodeDef = {
   engineType: 'forEach',
   palette: [{ key: 'forEach', label: 'Multi-Instance', category: 'Sub-process', icon: '⇶', color: '#4f46e5', engineType: 'forEach', defaults: { type: 'forEach', process: '', over: 'items' } }],
@@ -10,8 +10,9 @@ export const def: NodeDef = {
     { key: 'collectInto', label: 'Collect results into', widget: 'varRef', varSource: 'own', help: 'This process\'s variable to collect every child\'s item result into, as an array. Pick an existing one to overwrite, or type a new name.' },
     { key: 'itemResult', label: 'Item result variable', widget: 'varRef', varSource: 'called', help: 'Which variable on the CHILD process holds its one result — read back into "Collect results into" above.' },
     { key: 'parallel', label: 'Run in parallel', widget: 'bool' },
+    { key: 'completionCondition', label: 'Completion condition', widget: 'textarea', placeholder: 'completed >= 2', help: 'Stop early when true; the remaining items are aborted. Sees completed, total, results (the itemResult of each finished item) and the process variables.' },
     { key: 'pass', label: 'Pass-through variables', widget: 'stringlist', varSource: 'own', help: 'This process\'s own variables to copy into every child run unchanged.' },
-  ] }, EXECUTION, SLA],
+  ] }, EXECUTION, SLA, ADVANCED],
   diagram: { icon: 'projects', color: '#4f46e5', shape: 'rectangle' },
   typeLabel: 'Multi-instance',
 };

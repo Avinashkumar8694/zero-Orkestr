@@ -11,6 +11,7 @@
 // silently dropping that item's result.
 import type { NodeHandler, HandlerResult } from '../types.ts';
 import type { Instance } from '../../../domain.ts';
+import { evalCondition } from '../../sandbox.ts';
 
 export function buildMultiInstanceResult(children: Instance[], total: number, n: any): HandlerResult {
   const failed = children.find((child) => child.status === 'failed' || child.status === 'aborted');
@@ -18,6 +19,21 @@ export function buildMultiInstanceResult(children: Instance[], total: number, n:
   if (children.length < total || children.some((child) => child.status !== 'completed')) return { wait: { kind: 'multiInstance' }, outcome: `multiInstance:${children.length}/${total}` };
   const results = n.itemResult ? children.map((child) => child.variables[n.itemResult]) : [];
   return { vars: n.collectInto ? { [n.collectInto]: results } : {}, outcome: `multiInstance:${total}` };
+}
+
+/** jBPM "completion condition": true once the items finished so far satisfy the expression — the rest are not needed.
+ *  The expression sees `completed`, `total`, `results` (itemResult of each finished item) and the process variables. */
+export async function completionReached(n: any, children: Instance[], total: number, vars: Record<string, unknown>): Promise<boolean> {
+  if (!n.completionCondition) return false;
+  const done = children.filter((child) => child.status === 'completed');
+  if (!done.length) return false;
+  const results = n.itemResult ? done.map((child) => child.variables[n.itemResult]) : [];
+  return evalCondition(String(n.completionCondition), 'js', { ...vars, completed: done.length, total, results });
+}
+/** the variables a multi-instance node writes, from the items that finished */
+export function collectCompleted(children: Instance[], n: any): Record<string, unknown> {
+  const done = children.filter((child) => child.status === 'completed');
+  return n.collectInto ? { [n.collectInto]: n.itemResult ? done.map((child) => child.variables[n.itemResult]) : [] } : {};
 }
 
 export const handler: NodeHandler = async (c) => {
@@ -34,7 +50,13 @@ export const handler: NodeHandler = async (c) => {
     if (n.as) childVars[n.as] = item;
     return c.startChild(resolved.dep, resolved.processId, childVars, parentToken.id);
   };
-  if (n.parallel) return buildMultiInstanceResult(await Promise.all(items.map(runOne)), items.length, n);
+  // early finish: enough items are done — abort the rest and move on with what we have (their abort cannot disturb this node: it is still running)
+  const finishEarly = async (kids: Instance[]): Promise<HandlerResult | undefined> => {
+    if (kids.some((k) => k.status === 'failed' || k.status === 'aborted') || !(await completionReached(n, kids, items.length, c.inst.variables))) return undefined;
+    for (const k of kids) if (k.status === 'running' || k.status === 'waiting' || k.status === 'suspended') await c.abort(k.id);
+    return { vars: collectCompleted(kids, n), outcome: `multiInstance:early ${kids.filter((k) => k.status === 'completed').length}/${items.length}` };
+  };
+  if (n.parallel) { const kids = await Promise.all(items.map(runOne)); return (await finishEarly(kids)) ?? buildMultiInstanceResult(kids, items.length, n); }
   // Sequential: keep starting the next item synchronously as long as each one keeps completing —
   // the common case (no per-item wait) then behaves exactly as before, settling in this same call.
   // Stop the moment one doesn't finish outright (waits or fails); execution-engine.ts's
@@ -43,6 +65,7 @@ export const handler: NodeHandler = async (c) => {
   for (const item of items) {
     started.push(await runOne(item));
     if (started.at(-1)!.status !== 'completed') break;
+    if (n.completionCondition) { const early = await finishEarly(started); if (early) return early; }
   }
   return buildMultiInstanceResult(started, items.length, n);
 };

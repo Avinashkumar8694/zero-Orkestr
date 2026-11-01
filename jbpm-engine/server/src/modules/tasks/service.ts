@@ -19,9 +19,16 @@ export class TaskService {
   /** Once a task is claimed, only its owner (or the task's businessAdmin, or a workspace admin) may work on it —
    *  otherwise any member with task:manage could complete, release or hand off a colleague's task. An unclaimed task
    *  (no assignee) stays open to whoever passes assertOwnable. */
-  private assertOwnerOrAdmin(t: Task, user: string): void {
+  private async assertOwnerOrAdmin(t: Task, user: string): Promise<void> {
     if (this.adminOverride || t.businessAdmin === user || !t.assignee || t.assignee === user) return;
+    if (await this.inAdminGroup(t, user)) return;
     throw forbidden(`task is assigned to ${t.assignee}`);
+  }
+  /** a member of one of the task's business-administrator groups (only registered users have group memberships) */
+  private async inAdminGroup(t: Task, user: string): Promise<boolean> {
+    if (!t.businessAdminGroups?.length) return false;
+    const u = await this.lookupUser(user);
+    return !!u && t.businessAdminGroups.some((g) => u.groups.includes(g));
   }
   private async lookupUser(username: string): Promise<User | undefined> {
     return (await this.ctx.store.repo<User>(Collections.users).query((u) => u.tenantId === this.ctx.tenantId && u.username === username))[0];
@@ -35,11 +42,16 @@ export class TaskService {
    *  unaffected, so adding real IAM enforcement here doesn't retroactively break every caller that
    *  predates user provisioning. */
   private async assertOwnable(t: Task, user: string): Promise<void> {
-    if (t.businessAdmin === user) return;
+    if (t.businessAdmin === user || (await this.inAdminGroup(t, user))) return;
     if (t.excludedOwners?.includes(user)) throw forbidden(`${user} is excluded from this task`);
-    if (!t.group || t.assignee === user) return;
+    if (t.assignee === user || t.actors?.includes(user)) return;
+    const groups = [...new Set([t.group, ...(t.groups ?? [])].filter((g): g is string => !!g))];
+    if (!groups.length && !t.actors?.length) return;                    // an open task, as before
     const actingUser = await this.lookupUser(user);
-    if (actingUser && !actingUser.groups.includes(t.group)) throw forbidden(`${user} is not a member of group "${t.group}"`);
+    // Offered to named actors: the caller must be one of them, or a registered member of a listed group. Nobody unregistered gets in by luck.
+    if (t.actors?.length && !(actingUser && groups.some((g) => actingUser.groups.includes(g)))) throw forbidden(`${user} is not one of this task's actors or group members`);
+    // Group-only tasks keep the long-standing rule: only a REAL registered account is checked (pre-IAM actor strings are unaffected).
+    if (groups.length && actingUser && !groups.some((g) => actingUser.groups.includes(g))) throw forbidden(`${user} is not a member of group "${groups.join('" or "')}"`);
   }
 
   /** Every task action ultimately depends on its instance still being able to accept a resume — even
@@ -68,7 +80,7 @@ export class TaskService {
     const all = (await this.repo().query((t) =>
       t.tenantId === this.ctx.tenantId &&
       (!filter.assignee || t.assignee === filter.assignee) &&
-      (!filter.group || t.group === filter.group) &&
+      (!filter.group || t.group === filter.group || !!t.groups?.includes(filter.group)) &&
       inList(filter.status, t.status) &&
       (!filter.overdue || (!!t.dueAt && t.dueAt < now && t.status !== 'completed' && t.status !== 'skipped')) &&
       (!q || t.name.toLowerCase().includes(q) || t.id.toLowerCase().includes(q) || (t.assignee || '').toLowerCase().includes(q) || (t.group || '').toLowerCase().includes(q))))
@@ -95,7 +107,7 @@ export class TaskService {
 
   async release(id: string, user: string): Promise<Task> {
     const t = await this.get(id);
-    this.assertOwnerOrAdmin(t, user);
+    await this.assertOwnerOrAdmin(t, user);
     await this.assertInstanceActionable(t);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
     if (t.status !== 'reserved' && t.status !== 'inprogress') throw conflict(`task is ${t.status}, not releasable`);
@@ -153,7 +165,7 @@ export class TaskService {
   async complete(id: string, outputs: Record<string, unknown>, user: string): Promise<Task> {
     const t = await this.get(id);
     await this.assertOwnable(t, user);
-    this.assertOwnerOrAdmin(t, user);
+    await this.assertOwnerOrAdmin(t, user);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
     // Refuse before mutating the task if the instance can't accept it (e.g. suspended/aborted), so a
     // failed resume can't leave the task completed but the instance un-advanced.
@@ -305,7 +317,7 @@ export class TaskService {
   async saveOutputs(id: string, outputs: Record<string, unknown>, user: string): Promise<Task> {
     const t = await this.get(id);
     await this.assertOwnable(t, user);
-    this.assertOwnerOrAdmin(t, user);
+    await this.assertOwnerOrAdmin(t, user);
     await this.assertInstanceActionable(t);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
     t.outputs = outputs;
@@ -319,7 +331,7 @@ export class TaskService {
     const t = await this.get(id);
     const target = (to || '').trim();
     if (!target) throw validation('target user is required');
-    this.assertOwnerOrAdmin(t, user);
+    await this.assertOwnerOrAdmin(t, user);
     await this.assertInstanceActionable(t);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
     if (t.excludedOwners?.includes(target)) throw conflict(`${target} is excluded from this task`);
@@ -350,7 +362,7 @@ export class TaskService {
     const targetUser = (to?.user || '').trim();
     const targetGroup = (to?.group || '').trim();
     if (!targetUser && !targetGroup) throw validation('a target user or group is required');
-    this.assertOwnerOrAdmin(t, user);
+    await this.assertOwnerOrAdmin(t, user);
     await this.assertInstanceActionable(t);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
 

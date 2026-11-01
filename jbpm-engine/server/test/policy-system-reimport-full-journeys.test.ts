@@ -1,4 +1,6 @@
-import { test } from 'node:test';
+import { test, before, after } from 'node:test';
+import net from 'node:net';
+import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,6 +47,19 @@ function createMockApp(): AppContext {
     },
   } as unknown as AppContext;
 }
+
+// The journeys call the mock integration server (mock_server, port 3010). Use one that is already running, otherwise start it for the
+// duration of this file and stop it afterwards.
+let mockServer: import('node:child_process').ChildProcess | undefined;
+const mockUp = () => new Promise<boolean>((res) => { const s = net.connect(3010, '127.0.0.1'); s.once('connect', () => { s.destroy(); res(true); }); s.once('error', () => res(false)); });
+before(async () => {
+  if (await mockUp()) return;
+  const dir = path.resolve(rootDir, 'mock_server');
+  if (!fs.existsSync(path.join(dir, 'node_modules'))) return;       // prepare-tests.sh installs it; without it the journeys report the connection failure
+  mockServer = spawn(process.execPath, ['server.js'], { cwd: dir, stdio: 'ignore' });
+  for (let n = 0; n < 50 && !(await mockUp()); n++) await new Promise((r) => setTimeout(r, 100));
+});
+after(() => { mockServer?.kill(); });
 
 function loadPolicySystemKjarFiles(): Record<string, string> {
   const basePath = path.resolve(rootDir, 'extracted_projects/policy_system');
@@ -186,7 +201,7 @@ test('Journey 2: Policy Management Orchestrator routes scenarios to child subpro
     const children = await app.store.repo<Instance>('instances').query((i) => i.parentInstanceId === instId);
     const storedParent = await app.store.repo<Instance>('instances').get(instId);
     assert.ok(storedParent, `Parent instance for ${sc.type} should exist`);
-    assert.ok(storedParent?.status === 'waiting' || storedParent?.status === 'completed', `Parent status was "${storedParent?.status}" for ${sc.type}`);
+    assert.ok(storedParent?.status === 'waiting' || storedParent?.status === 'completed', `Parent status was "${storedParent?.status}" for ${sc.type}: ${storedParent?.error?.message} / children: ${JSON.stringify(children.map((ch) => ({ s: ch.status, e: ch.error })))}`);
 
     assert.equal(children.length, 1, `Call Activity should spawn exactly 1 child for ${sc.type}`);
     assert.equal(children[0].processId, sc.targetProcess, `Spawned child should match target ${sc.targetProcess}`);

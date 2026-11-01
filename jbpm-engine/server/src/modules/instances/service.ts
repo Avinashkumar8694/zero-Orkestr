@@ -15,7 +15,8 @@ export function makeResolveCalled(ctx: AppContext) {
   return async (processId: string): Promise<{ dep: Deployment; processId: string } | undefined> => {
     const deps = await ctx.store.repo<Deployment>(Collections.deployments).query((d) => d.tenantId === ctx.tenantId && d.status === 'active');
     for (const dep of deps) {
-      const p = (dep.engine?.processes || []).find((x) => x.id === processId);
+      // the id first, then the process NAME (jBPM's "called element by name")
+      const p = (dep.engine?.processes || []).find((x) => x.id === processId) ?? (dep.engine?.processes || []).find((x) => x.name === processId);
       if (p) return { dep, processId: p.id! };
     }
     return undefined;
@@ -299,6 +300,13 @@ export class InstanceService {
       throw conflict('editing variables on a running/waiting instance is disabled by system settings; suspend it first');
     }
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw validation('expected an object of variable name → value');
+    {   // `readonly` variables (jBPM tag): once set they cannot be changed
+      const dep = await this.deployments.get(i.deploymentId).catch(() => undefined);
+      const proc = dep?.engine.processes.find((x) => x.id === i.processId) ?? dep?.engine.processes[0];
+      for (const v of proc?.vars ?? []) {
+        if ((v as any).tags?.includes?.('readonly') && v.name in patch && i.variables[v.name] !== undefined && JSON.stringify(i.variables[v.name]) !== JSON.stringify(patch[v.name])) throw conflict(`variable "${v.name}" is read-only and was already set`);
+      }
+    }
     const changes = Object.entries(patch)
       .filter(([k, v]) => JSON.stringify(i.variables[k]) !== JSON.stringify(v))
       .map(([k, v]) => ({ name: k, from: i.variables[k], to: v }));

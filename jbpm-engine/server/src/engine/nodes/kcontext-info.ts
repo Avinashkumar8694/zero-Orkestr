@@ -39,7 +39,7 @@ export function activeNodeInstancesOf(c: HandlerCtx): ActiveNodeInstance[] {
  *  see sandbox.ts's KContextInfo for what each field backs. */
 export function kcontextInfoOf(c: HandlerCtx) {
   return {
-    tenantId: c.app.tenantId, env: c.dep.env, instanceId: c.inst.id, nodeInstanceId: c.tokenId, nodeId: c.node.id, nodeName: c.node.name,
+    tenantId: c.app.tenantId, env: c.dep.env, instanceId: c.inst.id, nodeInstanceId: c.tokenId, nodeId: c.node.id, nodeName: c.node.name, declaredVars: (c.proc.vars || []).map((v) => v.name), nodeMeta: c.node.metaData && typeof c.node.metaData === 'object' ? c.node.metaData : undefined,
     processId: c.proc.id, processName: c.proc.name, correlationKey: c.inst.correlationKey,
     parentInstanceId: c.inst.parentInstanceId, state: c.inst.status, activeNodeInstances: activeNodeInstancesOf(c),
   };

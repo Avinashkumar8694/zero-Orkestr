@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, EXECUTION, SLA } from '../def-types.ts';
+import { type NodeDef, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
 
 export const def: NodeDef = {
   engineType: 'script',
@@ -7,7 +7,7 @@ export const def: NodeDef = {
   schema: [GENERAL, { title: 'Script (JavaScript / Java)', fields: [
     { key: 'lang', label: 'Language dialect', widget: 'select', options: ['js', 'java'], help: 'JavaScript (Node.js engine) or Java (JVM sidecar).' },
     { key: 'code', label: 'Script body', widget: 'code', placeholder: 'vars.status = "APPROVED";\n// or direct variables:\namount = amount * 1.1;', help: 'Direct JS variables (vars.x, bare x = val) or kcontext.' },
-  ] }, EXECUTION, SLA],
+  ] }, EXECUTION, SLA, ADVANCED],
   diagram: { icon: 'code', color: '#0891b2', shape: 'rectangle' },
   typeLabel: 'Script task',
   docs: {

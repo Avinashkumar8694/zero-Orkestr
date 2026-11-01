@@ -71,6 +71,7 @@ const isBoundary = (n: EngineNode) => n.type === 'boundary';
 // sub-process is specifically exempt from (it has no incoming/outgoing flow by design; see boundary/
 // handler.ts's own isErrorCatch, which already gets this right via hasOwnProperty).
 const isEventSub = (n: EngineNode) => n.type === 'subprocess' && !!(n as any).on && Object.prototype.hasOwnProperty.call((n as any).on, 'error');
+const isAdHoc = (c: GraphCtx) => (c.process as any).adHoc === true;
 const label = (n: EngineNode) => n.name || n.id || n.type;
 
 function buildCtx(process: EngineProcess): GraphCtx {
@@ -219,7 +220,7 @@ export const RULES: Rule[] = [
   { id: 'node-connected', description: 'Activities/gateways/events must be connected (no floating nodes)', run: (c) => {
     const out: Problem[] = [];
     for (const n of c.nodes) {
-      if (isStart(n) || isEnd(n) || isEventSub(n)) continue;
+      if (isStart(n) || isEnd(n) || isEventSub(n) || (n as any).isForCompensation === true || (isAdHoc(c) && (n as any).autoStart === true)) continue;   // a compensation handler is reached through its boundary; an ad-hoc autostart node needs no incoming flow
       const d = deg(c, n.id!);
       if (isBoundary(n)) { if (d.out === 0) out.push(P('node-connected', 'error', `Boundary "${label(n)}" has no outgoing (handler) connection`, { nodeId: n.id })); continue; }
       if (d.in === 0 && d.out === 0) out.push(P('node-connected', 'error', `Node "${label(n)}" is not connected`, { nodeId: n.id }));
@@ -232,7 +233,7 @@ export const RULES: Rule[] = [
   { id: 'reachable', description: 'Every node must be reachable from a start', run: (c) => {
     const out: Problem[] = [];
     for (const n of c.nodes) {
-      if (isStart(n) || isEventSub(n)) continue;
+      if (isStart(n) || isEventSub(n) || (n as any).isForCompensation === true || (isAdHoc(c) && (n as any).autoStart === true)) continue;
       const d = deg(c, n.id!);
       if ((d.in > 0 || d.out > 0) && !c.reachable.has(n.id!)) out.push(P('reachable', 'error', `Node "${label(n)}" is not reachable from a start`, { nodeId: n.id }));
     }

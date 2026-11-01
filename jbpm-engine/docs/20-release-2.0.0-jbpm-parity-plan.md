@@ -24,11 +24,10 @@ Branch: `release/2.0.0` (built on top of the async / node-properties / analytics
 | R9 | **Bounded memory.** A request may not load a whole collection to answer a question about a few rows; every result, scan, join and history has a hard cap enforced *while fetching*, not after. | §9 foundations F1, F2, F4; memory tests (§5.9). |
 
 ### Baseline to protect (measured on this branch)
-* Server suite: **522 pass / 30 fail**; the 30 are environmental (Java sidecar needs a JVM; kjar journeys) and must stay exactly those
-  30 — any *new* failure is a regression.
+* Server suite via `npm test`: **584 pass / 0 fail**. `npm test` first runs `scripts/prepare-tests.sh`, which compiles the Java sidecar (any JDK 17+, Homebrew's `openjdk@17/21` is found automatically — the macOS `/usr/bin/javac` stub is skipped), extracts the policy kjar from the zip in the repo root into `extracted_projects/policy_system`, and installs the mock integration server's dependencies; the journey tests start and stop that mock server themselves. (Earlier notes called 30 failures "environmental": they were exactly these three missing preparations, now automated. Any failure is a regression.)
 * bpmn-sdk suite: **195 pass / 0 fail**.
 * Angular production build: clean.
-* The real project `policy_system_node_project.json` (23 processes, ~365 nodes): validates the same before and after (§5.1).
+* The real project `policy_system_node_project.json` (23 processes, ~365 nodes): validates the same before and after (`test/golden.test.ts`), and its 5 end-to-end journeys run.
 
 ---
 
@@ -264,7 +263,7 @@ exactly-once test (if it uses jobs), the subscription invariant (if it listens),
 |---|---|---|
 | 0 | compat harness, golden fixtures | **done** — `test/golden.test.ts` (23 real processes + 16 flow traces), `test/flow-kit.ts` |
 | 0b | F1 indexed store · F2 signal delivery · F3 instance lock · F4 bounded analytics · F5 bounded tick · F6 size guards | **done** — see §9.6 |
-| 1 | G01 G02 G03 G05 G05b G06 G07 G08 G09 G10 G11 G12 G13 G14 G15 G16 | not started |
+| 1 | G01 G02 G03 G05 G05b G06 G07 G08 G09 G10 G11 G12 G13 G14 G15 G16 | **done** (see §10) |
 | 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | not started |
 | 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | not started |
 | 4 | S01–S08 | not started |
@@ -369,3 +368,25 @@ principles true, and how every gap behaves.
 * F3: `rev` absent on old rows is read as 0; the lease adds no behaviour change on a single replica beyond a tiny in-process lock.
 * F4: same query language and results (verified by the analytics golden tests); only the execution strategy changes.
 * F5, F6: limits are configurable and default to values far above current usage; F6's compaction only touches instances over the limit.
+
+## 10. Phase 1 — what was built, and where it differs from the plan
+All in `test/phase1.test.ts` (12 tests) with the golden fixtures unchanged. Property reference: [21-jbpm-properties-reference.md](21-jbpm-properties-reference.md).
+
+| Gap | Result |
+|---|---|
+| G01 G02 G03 | done: `actors`, `groups`, `businessAdminGroups`, `stakeholders`, `comment`, `content`, `locale`, `createdBy` on user tasks; ownership checks tightened for tasks that use them (an unregistered stranger cannot claim a task offered to named actors); legacy single-group tasks behave exactly as before |
+| G05 G05b | done: `onChildFailure` = `fail` (default) / `continue` / `abort`, both when the child fails during the call and when it fails later; `errorVar`; the `process` field accepts a process **id or name** |
+| G06 | done: flow `priority` (lowest number first; unprioritised flows keep drawn order after prioritised ones) |
+| G07 | done: for-each `completionCondition` (sees `completed`, `total`, `results`, variables); remaining items aborted without raising an error into the parent |
+| G08 | done: variable tags `required` (start refused, 422) and `readonly` (scripts and API edits refused; a script's change is undone) |
+| G09 G10 | done: process `slaDueDate` (pending → met / violated, audit + notification) and `description` template (`#{var}`) |
+| G11 | the `version` label and `adHoc` flag are stored with the process; `adHoc` drives G12 (no other runtime effect) |
+| G12 | done: `autoStart` nodes with no incoming flow start with an ad-hoc process; validation accepts them only in ad-hoc processes |
+| G13 | done: free `metaData` on every node, readable in JS scripts as `node.metaData` / `node.getMetaData(key)` (Java scripts do not see it: sidecar change deferred) |
+| G14 | done: `contentType` (JSON default, form-urlencoded supported), `authType` basic / bearer with `$var` / `${ENV}` values; an explicit header wins in any letter case |
+| G15 | done for `asyncDelay`; **`asyncPriority` dropped**: jobs already run oldest-due-first, and a delay covers the real need |
+| G16 | done: `isForCompensation` nodes are not reported as unconnected / unreachable |
+
+Also fixed on the way (found by running the real project journeys): a **declared process variable that has no value yet is now in scope as `null`** inside scripts (jBPM behaviour) instead of raising `ReferenceError`.
+
+Still for Phase 5 (UI): flow priority and the process-level properties (description, SLA, version, ad-hoc, variable tags) are honoured by the engine and the API but have no editor control yet (U01–U03).

@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, EXECUTION, SLA } from '../def-types.ts';
+import { type NodeDef, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
 export const def: NodeDef = {
   engineType: 'call',
   palette: [{ key: 'call', label: 'Call Activity', category: 'Sub-process', icon: '⇥', color: '#4f46e5', engineType: 'call', defaults: { type: 'call', process: '' } }],
@@ -9,7 +9,9 @@ export const def: NodeDef = {
     { key: 'outputs', label: 'Outputs (parentVar ← childVar)', widget: 'keyval', keySource: 'own', valueSource: 'called', help: 'Left = the variable to write on THIS process (pick an existing one to overwrite it, or type a new name). Right = the variable to read from the called process once it completes.' },
     { key: 'independent', label: 'Independent (don’t wait)', widget: 'bool', help: 'Fire-and-forget: the parent continues immediately and the child keeps running standalone even after the parent completes or aborts' },
     { key: 'waitForCompletion', label: 'Wait for completion', widget: 'bool', help: 'Untick for fire-and-forget: the parent continues at once and does not wait for the called process (jBPM waitForCompletion=false). Independent keeps the child alive after the parent ends.' },
-  ] }, EXECUTION, SLA],
+    { key: 'onChildFailure', label: 'When the called process fails', widget: 'select', options: ['fail', 'continue', 'abort'], help: 'fail (default): raise CALL_ERROR here, catchable by an error boundary · continue: carry on and store what happened in the variable below · abort: abort this process at once.' },
+    { key: 'errorVar', label: 'Store the failure in', widget: 'varRef', varSource: 'own', placeholder: 'callError', help: 'Used by "continue": { childInstanceId, childStatus, childError }.' },
+  ] }, EXECUTION, SLA, ADVANCED],
   diagram: { icon: 'arrowRight', color: '#4f46e5', shape: 'rectangle' },
   typeLabel: 'Call activity',
 };

@@ -39,6 +39,7 @@ with zero Java/KIE server required, and a one-click escape hatch to export to re
 | 18 | [Async execution & node properties](./18-async-and-node-properties.md) | Background starts, Is Async nodes, SLA, user-task deadlines, jBPM property gap analysis |
 | 19 | [Analytics builder & instance nodes](./19-analytics-builder.md) | Query-builder analytics published as slug APIs (joins, recursion, authorization), and the Case / Process instance flow nodes |
 | 20 | [Release 2.0.0 — jBPM parity plan & test plan](./20-release-2.0.0-jbpm-parity-plan.md) | Every remaining jBPM gap with design, risk, phases, exit gates and the full test plan |
+| 21 | [jBPM property reference](./21-jbpm-properties-reference.md) | Every supported node / process property, its default and behaviour |
 
 ## Tech stack (decided)
 

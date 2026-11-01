@@ -349,6 +349,8 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
       id: info.nodeInstanceId || '', nodeId: info.nodeId || '', name: info.nodeName || '',
       getId: function () { return info.nodeInstanceId || ''; },
       getNodeId: function () { return info.nodeId || ''; },
+      metaData: info.nodeMeta || {},
+      getMetaData: function (k) { var m = info.nodeMeta || {}; return m[k] === undefined ? null : m[k]; },
       getNodeName: function () { return info.nodeName || ''; }
     };
     var env = Object.assign({}, input.env || {});
@@ -370,6 +372,7 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
       G[k] = vars[k];
       bound[k] = vars[k];
     });
+    (info.declaredVars || []).forEach(function (k) { if (!hasOwn.call(G, k)) { G[k] = null; bound[k] = null; } });   // declared but empty: in scope as null
     var baseline = {};
     ownNames(G).forEach(function (k) { baseline[k] = true; });
 

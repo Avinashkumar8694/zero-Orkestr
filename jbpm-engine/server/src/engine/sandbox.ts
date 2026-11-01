@@ -69,6 +69,10 @@ interface KContextInfo {
   nodeInstanceId?: string;
   nodeId?: string;
   nodeName?: string;
+  /** the node's free metadata attributes (jBPM metaData), readable in scripts as node.metaData / node.getMetaData(key) */
+  nodeMeta?: Record<string, string>;
+  /** every declared process variable name: one that has no value yet is still a name in scope (jBPM: null), not a ReferenceError */
+  declaredVars?: string[];
   processId?: string;
   processName?: string;
   correlationKey?: string;

@@ -18,7 +18,7 @@ async function findAsync<T>(items: T[], pred: (item: T) => Promise<boolean>): Pr
 
 export const handler: NodeHandler = async (c): Promise<HandlerResult> => {
   const node = c.node;
-  const outs = c.outgoing(node.id);
+  const outs = [...c.outgoing(node.id)].sort((a, b) => ((a as any).priority ?? Infinity) - ((b as any).priority ?? Infinity) || 0);   // stable: equal / missing priority keep the drawn order
   const ins = c.incoming(node.id);
   const converging = ins.length > 1 && outs.length <= 1;
   // real jBPM's Java condition dialect binds every DECLARED process variable as a bare, typed local

@@ -18,9 +18,9 @@ export function kit(tenantId = 't1', opts: { copies?: boolean } = {}) {
   const store = opts.copies ? cloningStore(raw) : raw;
   let n = 0;
   const ctx = makeContext({ store, tenantId, clock: fakeClock(T0).clock, newId: () => `id${++n}` });
-  const deploy = async (name: string, nodes: any[], flows: any[], vars: any[] = []) => {
+  const deploy = async (name: string, nodes: any[], flows: any[], vars: any[] = [], procProps: Record<string, unknown> = {}) => {
     const wf = await new WorkflowService(ctx).create({ name }, 'a');
-    const draft = await new VersionService(ctx).saveDraft(wf.defaultBranchId, { id: wf.key, name: wf.name, processes: [{ id: `${wf.key}.process`, name: wf.name, package: 'com.acme', vars, nodes, flows }] } as any, 'a');
+    const draft = await new VersionService(ctx).saveDraft(wf.defaultBranchId, { id: wf.key, name: wf.name, processes: [{ id: `${wf.key}.process`, name: wf.name, package: 'com.acme', vars, nodes, flows, ...procProps }] } as any, 'a');
     const pub = await new VersionService(ctx).publish(draft.id, 'a');
     await new DeploymentService(ctx).deploy(pub.published.id, { environment: 'prod', activate: true }, 'a');
     return { wf, processId: `${wf.key}.process` };

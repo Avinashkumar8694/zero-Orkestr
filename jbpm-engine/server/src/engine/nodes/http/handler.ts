@@ -36,12 +36,21 @@ export const handler: NodeHandler = async (c) => {
   }
   // per-node `timeoutSeconds` (jBPM ConnectTimeout/ReadTimeout) wins; else the workspace setting; capped so a node cannot hold a worker forever
   const nodeTimeout = Number(n.timeoutSeconds);
+  // content type + credentials without hand-writing headers; values may be literals, $variable (process variable, then deployment env) or ${ENV}
+  const val = (v: unknown): string => {
+    if (typeof v !== 'string') return v == null ? '' : String(v);
+    if (v.startsWith('$') && !v.startsWith('${')) return String(c.inst.variables[v.slice(1)] ?? (c.dep.env || {})[v.slice(1)] ?? '');
+    return v.replace(/\$\{([^}]+)\}/g, (_, name) => String(c.inst.variables[name] ?? (c.dep.env || {})[name] ?? process.env[name] ?? ''));
+  };
+  const contentType = n.contentType ? String(n.contentType) : 'application/json';
+  const authHeader: Record<string, string> = n.authType === 'basic' ? { authorization: `Basic ${Buffer.from(`${val(n.username)}:${val(n.password)}`).toString('base64')}` }
+    : n.authType === 'bearer' ? { authorization: `Bearer ${val(n.token)}` } : {};
   const httpTimeout = nodeTimeout > 0 ? Math.min(nodeTimeout, 300) : (settings.httpTimeoutSeconds && settings.httpTimeoutSeconds > 0) ? settings.httpTimeoutSeconds : 10;
   try {
     const res = await fetch(url, {
       method,
-      headers: { 'content-type': 'application/json', ...(n.headers || {}) },
-      ...(method === 'GET' || method === 'HEAD' ? {} : { body: JSON.stringify(body) }),
+      headers: { 'content-type': contentType, ...authHeader, ...Object.fromEntries(Object.entries((n.headers || {}) as Record<string, string>).map(([k, v]) => [k.toLowerCase(), v])) },       // an explicit header always wins, whatever its case
+      ...(method === 'GET' || method === 'HEAD' ? {} : { body: /x-www-form-urlencoded/i.test(contentType) ? new URLSearchParams(Object.entries(body).map(([k, v]) => [k, String(v ?? '')] as [string, string])).toString() : JSON.stringify(body) }),
       signal: AbortSignal.timeout(httpTimeout * 1000),
     });
     if (!res.ok) {

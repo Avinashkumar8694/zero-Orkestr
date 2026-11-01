@@ -83,7 +83,7 @@ proves each claim. **Legend:** ✅ full · 🟡 partial · ⛔ not yet · ➖ No
 | User-task NotStarted/NotCompleted Reassign/Notify | jBPM deadline syntax, acts only while the task is in the watched state | ✅ (repeating expiries fire once) | node-properties tests |
 | Call activity `waitForCompletion` | separate from `independent` (legacy `independent:true` still fire-and-forget) | ✅ | node-properties tests |
 | Designer metaData in import / export | async, SLA, autostart, other metaData round-trip through bpmn-sdk | ✅ | bpmn-sdk async-sla-metadata test |
-| Variable tags, MI completion condition, process SLA/description/version/adHoc | — | ⛔ planned (doc 18 §7) | — |
+| Variable tags, MI completion condition, process SLA/description/version/adHoc, multi-owner tasks, flow priority, call failure policy, REST auth, metadata, autostart | see doc 21 | ✅ | phase1.test.ts |
 
 ## G. Human tasks
 | jBPM | This engine | Status | Evidence |

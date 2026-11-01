@@ -133,6 +133,10 @@ export interface Instance extends Entity {
   history: NodeVisit[];
   /** per-node count of visits dropped from `history` when it outgrew the cap (see engine/history-cap.ts); keeps join counting and the diagram right */
   historyCompacted?: Record<string, number>;
+  /** readable title rendered once at start from the process's `description` template (`#{var}` filled from the start variables) */
+  description?: string;
+  /** process-level SLA (the process's `slaDueDate`): pending -> met when it completes in time, violated when the job fires first */
+  sla?: NodeSla;
   error?: { nodeId: string; message: string; stack?: string; at: string };
   parentInstanceId?: string; parentTokenId?: string;
   // Set when spawned by a call activity with independent:true (fire-and-forget) — this child's
@@ -160,6 +164,11 @@ export interface Task extends Entity {
   name: string; formName?: string; group?: string; assignee?: string;
   /** may act on this task (reassign/claim/complete) regardless of group/assignee/excludedOwners. */
   businessAdmin?: string;
+  /** several users / groups offered the task (jBPM ActorId / GroupId lists); `group` and `assignee` above keep working */
+  actors?: string[]; groups?: string[];
+  /** groups whose members may reassign and manage the task; people who merely follow it (no right to claim or complete) */
+  businessAdminGroups?: string[]; stakeholders?: string[];
+  locale?: string; createdBy?: string;
   /** users who may NOT claim/complete this task even if they're in `group` (segregation of duties,
    *  e.g. the claim's own submitter can't also approve it) — not enforced against `businessAdmin`. */
   excludedOwners?: string[];

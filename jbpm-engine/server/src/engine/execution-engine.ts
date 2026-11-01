@@ -8,14 +8,16 @@ import { NODE_HANDLERS, CHILD_OUTPUT_MAPPERS, buildMultiInstanceResult, type Han
 import { varTypesOf, kcontextInfoOf, onActionOf, scriptLimitsOf } from './nodes/kcontext-info.ts';
 // Aliased (not `boundary`) since fireBoundary()'s own parameter below is already named `boundary`.
 import * as boundaryHandler from './nodes/boundary/handler.ts';
-import { computeDue, parseDuration, dueFrom } from './duration.ts';
+import { computeDue, parseDuration, parseDelay, dueFrom } from './duration.ts';
 import { kickWorker, ASYNC_CAPABLE } from './async-kick.ts';
 import { withInstanceLock, deferAfterLock } from './instance-lock.ts';
 import { findRows } from '../store/find.ts';
 import { compactHistory } from './history-cap.ts';
+import { evalCondition } from './sandbox.ts';
+import { completionReached, collectCompleted } from './nodes/for-each/handler.ts';
 import { runScript } from './sandbox.ts';
 import { config } from '../infra/config.ts';
-import { conflict, quotaExceeded } from '../infra/errors.ts';
+import { conflict, quotaExceeded, validation } from '../infra/errors.ts';
 import { SettingsService } from '../modules/settings/service.ts';
 import { NotificationService } from '../modules/notifications/service.ts';
 
@@ -77,6 +79,8 @@ export class ExecutionEngine {
       parentInstanceId: opts.parentInstanceId,
       isErrorHandler: opts.isErrorHandler,
     };
+    this.assertRequiredVars(p, inst.variables);
+    this.applyProcessProperties(p, inst, now);
     this.emit({ kind: 'instance.started', instanceId: inst.id });
     // Every instance is created here — a direct start, a scheduled/cron start, a call-activity or
     // multi-instance child, or a signal/message start-event peer instance (see startChild()/
@@ -95,12 +99,39 @@ export class ExecutionEngine {
     return inst;
   }
 
+  /** Variable tags (jBPM): `required` — the instance cannot start without a value for it. */
+  private assertRequiredVars(p: EngineProcess, vars: Record<string, unknown>): void {
+    const missing = (p.vars || []).filter((v) => (v as any).tags?.includes?.('required') && (vars[v.name] === undefined || vars[v.name] === null || vars[v.name] === '')).map((v) => v.name);
+    if (missing.length) throw validation(`required variable${missing.length > 1 ? 's' : ''} missing: ${missing.join(', ')}`, { missing });
+  }
+
+  /** Process-level properties applied once at start: description template, process SLA, ad-hoc autostart nodes. */
+  private applyProcessProperties(p: EngineProcess, inst: Instance, now: string): void {
+    const pp = p as any;
+    if (typeof pp.description === 'string' && pp.description.trim()) {
+      inst.description = pp.description.replace(/#\{\s*([\w.]+)\s*\}/g, (_: string, k: string) => String(k.split('.').reduce((c: any, x: string) => (c == null ? undefined : c[x]), inst.variables) ?? '')).slice(0, 300);
+    }
+    if (typeof pp.slaDueDate === 'string' && pp.slaDueDate.trim()) {
+      const dueAt = dueFrom(pp.slaDueDate, now, inst.variables);
+      if (dueAt) {
+        inst.sla = { dueAt, status: 'pending' };
+        void this.timerRepo().put({ id: this.ctx.newId(), tenantId: this.ctx.tenantId, instanceId: inst.id, tokenId: '', nodeId: '', kind: 'sla', dueAt, fired: 0, status: 'scheduled' });
+      }
+    }
+    if (pp.adHoc === true) {                                      // ad-hoc: nodes marked autoStart that nothing flows into begin on their own
+      for (const n of p.nodes as any[]) {
+        if (n.autoStart === true && n.type !== 'start' && !p.flows.some((f) => f.to === n.id)) inst.tokens.push({ id: this.ctx.newId(), nodeId: n.id, state: 'active', enteredAt: now });
+      }
+    }
+  }
+
   /** Advance every active token until the instance waits, completes, aborts, or fails. */
   async runToQuiescence(inst: Instance, dep: Deployment): Promise<Instance> {
     const p = this.proc(inst, dep);
     const nodes = this.nodeMap(p);
     const joins: Record<string, Set<string>> = {};
     let guard = 0;
+    const roVars = (p.vars || []).filter((v) => (v as any).tags?.includes?.('readonly')).map((v) => v.name);
     try {
       while (inst.status === 'running') {
         const token = inst.tokens.find((t) => t.state === 'active');
@@ -113,15 +144,25 @@ export class ExecutionEngine {
         inst.history.push(visit);
         this.emit({ kind: 'node.entered', instanceId: inst.id, nodeId: node.id!, tokenId: token.id });
 
+        const before: Record<string, string | undefined> = {};
+        for (const n of roVars) before[n] = inst.variables[n] === undefined ? undefined : JSON.stringify(inst.variables[n]);
         let result: HandlerResult;
         try { result = await this.handle(node, inst, p, joins, dep, token.id); }
         catch (e) { result = { error: (e as Error).message, errorCode: 'RUNTIME_ERROR' }; }
 
         if (result.vars) Object.assign(inst.variables, result.vars);
+        if (roVars.length) {                                       // `readonly` variables: set once; a later change is refused and undone
+          const changed = roVars.find((n) => before[n] !== undefined && JSON.stringify(inst.variables[n]) !== before[n]);
+          if (changed) {
+            for (const n of roVars) if (before[n] !== undefined) inst.variables[n] = JSON.parse(before[n]!);
+            result = { error: `variable "${changed}" is read-only and was already set`, errorCode: 'VARIABLE_READONLY' };
+          }
+        }
         visit.exitedAt = this.ctx.clock();
         visit.outcome = result.outcome || (result.wait ? 'waiting' : result.end || (result.error ? 'error' : 'done'));
         this.emit({ kind: 'node.exited', instanceId: inst.id, nodeId: node.id!, tokenId: token.id });
 
+        if (result.abort) { inst.tokens = []; inst.status = 'aborted'; break; }
         if (result.wait?.kind === 'async') {
           // jBPM "Is Async": park the token (the instance is saved), hand the node to the worker, and let the caller go
           token.state = 'waiting'; token.waitFor = result.wait; visit.outcome = 'queued';
@@ -204,6 +245,7 @@ export class ExecutionEngine {
         inst.status = inst.tokens.some((t) => t.state === 'waiting') ? 'waiting' : 'completed';
       }
       if (inst.status === 'completed' || inst.status === 'aborted' || inst.status === 'failed') inst.endedAt = this.ctx.clock();
+      if (inst.status === 'completed' && inst.sla?.status === 'pending') inst.sla = { ...inst.sla, status: 'met', at: this.ctx.clock() };
     } catch (err) {
       inst.status = 'failed';
       inst.error = { nodeId: '', message: (err as Error).message, stack: (err as Error).stack, at: this.ctx.clock() };
@@ -305,6 +347,19 @@ export class ExecutionEngine {
     // for the identical failure, just detected later (the child instead parked in a wait) — kept in
     // sync so a boundary/global catch sees the same code regardless of which path the child took.
     const callNode = p.nodes.find((n) => n.id === token.nodeId) as any;
+    const policy = callNode?.type === 'call' ? callNode.onChildFailure : undefined;
+    if (policy === 'continue') {                                  // carry on: record what happened, follow the normal outgoing flow
+      parent.variables[callNode.errorVar || 'callError'] = { childInstanceId: child.id, childStatus: child.status, childError: child.error ?? null };
+      for (const t of this.defaultTargets(p, callNode, parent)) parent.tokens.push({ id: this.ctx.newId(), nodeId: t, state: 'active', enteredAt: this.ctx.clock() });
+      parent.status = 'running';
+      await this.runToQuiescence(parent, pdep);
+      return;
+    }
+    if (policy === 'abort') {                                     // abort the parent at once (no error routing); the usual cleanup + upward notification follow
+      parent.tokens = []; parent.status = 'aborted';
+      await this.runToQuiescence(parent, pdep);
+      return;
+    }
     const prefix = callNode?.type === 'call' ? 'CALL' : 'SUBPROCESS';
     const code = `${prefix}_${child.status === 'aborted' ? 'ABORTED' : 'ERROR'}`;
     await this.failParentWith(parent, p, pdep, token.nodeId, code, `child instance ${child.status}: ${child.id}`);
@@ -401,6 +456,14 @@ export class ExecutionEngine {
         siblings = (await this.inst().query((i) => i.tenantId === this.ctx.tenantId && i.parentInstanceId === parent.id && i.parentTokenId === token.id))
           .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
       }
+    }
+    if (!siblings.some((s) => s.status === 'failed' || s.status === 'aborted') && await completionReached(n, siblings, items.length, parent.variables)) {
+      // early finish: the parent moves on with the results so far; the still-running items are aborted AFTER the parent's wait is gone,
+      // so their abort does not raise an error back into it
+      const leftovers = siblings.filter((s) => s.status === 'running' || s.status === 'waiting' || s.status === 'suspended');
+      await this.resumeToken(parent, pdep, token.id, collectCompleted(siblings, n));
+      for (const l of leftovers) { const fresh = await this.inst().get(l.id); if (fresh && (fresh.status === 'running' || fresh.status === 'waiting' || fresh.status === 'suspended')) await this.abortInstance(fresh); }
+      return;
     }
     const result = buildMultiInstanceResult(siblings, items.length, n);
     if (result.wait) return;   // still outstanding children — stay parked, nothing to do yet
@@ -598,12 +661,12 @@ export class ExecutionEngine {
   }
   /** Queue the worker job that runs a parked node. `node` carries the author's `asyncRetries` / `asyncRetryDelay`; a background
    *  start passes none and gets the workspace defaults. Due immediately: the worker (or the in-process kick) picks it up. */
-  private async scheduleAsync(inst: Instance, tokenId: string, nodeId: string, node: { asyncRetries?: unknown; asyncRetryDelay?: unknown } | undefined) {
+  private async scheduleAsync(inst: Instance, tokenId: string, nodeId: string, node: { asyncRetries?: unknown; asyncRetryDelay?: unknown; asyncDelay?: unknown } | undefined) {
     const settings = await new SettingsService(this.ctx).get().catch(() => null);
     const retries = Number.isInteger(node?.asyncRetries) ? Number(node!.asyncRetries) : (settings?.defaultJobRetries ?? 3);
     const retryDelayMs = node?.asyncRetryDelay !== undefined && node.asyncRetryDelay !== '' ? parseDuration(String(node.asyncRetryDelay)) || 10_000 : 10_000;
     await this.timerRepo().put({
-      id: this.ctx.newId(), tenantId: this.ctx.tenantId, instanceId: inst.id, tokenId, nodeId, kind: 'async', dueAt: this.ctx.clock(), fired: 0, status: 'scheduled',
+      id: this.ctx.newId(), tenantId: this.ctx.tenantId, instanceId: inst.id, tokenId, nodeId, kind: 'async', dueAt: node?.asyncDelay ? new Date(Date.parse(this.ctx.clock()) + (parseDelay(String(node.asyncDelay)) || 0)).toISOString() : this.ctx.clock(), fired: 0, status: 'scheduled',
       attempts: 0, maxAttempts: Math.max(1, retries + 1), retryDelayMs: Math.max(1000, retryDelayMs),
     });
     kickWorker();
@@ -639,6 +702,15 @@ export class ExecutionEngine {
   }
   /** The worker fired a node's SLA job. Violation is recorded and announced; the process itself carries on untouched. */
   async fireSla(inst: Instance, dep: Deployment, tokenId: string): Promise<Instance> {
+    if (!tokenId) {                                                         // the process-level SLA
+      if (inst.sla?.status !== 'pending') return inst;
+      inst.sla = { ...inst.sla, status: 'violated', at: this.ctx.clock() };
+      await this.inst().put(inst);
+      await this.ctx.audit({ actor: 'system', kind: 'instance.sla.violated', workflowId: inst.workflowId, instanceId: inst.id, data: { dueAt: inst.sla.dueAt } });
+      this.emit({ kind: 'instance.updated', instanceId: inst.id });
+      if (inst.startedBy && inst.startedBy !== 'system' && inst.startedBy !== 'timer') await new NotificationService(this.ctx).notify({ userId: inst.startedBy, kind: 'sla-breached', title: `SLA breached on instance ${inst.id}`, body: inst.description, link: `/instances/${inst.id}`, instanceId: inst.id }).catch(() => {});
+      return inst;
+    }
     if (!inst.tokens.some((t) => t.id === tokenId)) return inst;           // the node already ended another way
     if (!(await this.settleSla(inst, tokenId, 'violated'))) return inst;
     const node = this.nodeMap(this.proc(inst, dep)).get(inst.tokens.find((t) => t.id === tokenId)!.nodeId);

@@ -6,9 +6,9 @@
   "description": "BPM engine backend: Express API + token execution engine + stores",
   "main": "dist/index.js",
   "scripts": {
-    "build:sidecar": "JAVAC=$(which javac 2>/dev/null || echo /opt/homebrew/opt/openjdk@17/bin/javac); [ -x \"$JAVAC\" ] && [ -d ../java-runtime/src ] && mkdir -p ../java-runtime/out && \"$JAVAC\" -encoding UTF-8 -d ../java-runtime/out $(find ../java-runtime/src -name '*.java') || true",
+    "build:sidecar": "JAVAC=''; for c in \"$JAVA_HOME/bin/javac\" /opt/homebrew/opt/openjdk@17/bin/javac /opt/homebrew/opt/openjdk@21/bin/javac /usr/local/opt/openjdk@17/bin/javac \"$(which javac 2>/dev/null)\"; do [ -x \"$c\" ] && \"$c\" -version >/dev/null 2>&1 && JAVAC=\"$c\" && break; done; [ -n \"$JAVAC\" ] && [ -d ../java-runtime/src ] && mkdir -p ../java-runtime/out && \"$JAVAC\" -encoding UTF-8 -d ../java-runtime/out $(find ../java-runtime/src -name '*.java') || true",
     "predev": "npm run build:sidecar",
-    "pretest": "npm run build:sidecar",
+    "pretest": "sh ../scripts/prepare-tests.sh",
     "prebuild": "npm run build:sidecar",
     "prestart": "npm run build:sidecar",
     "dev": "tsx watch src/index.ts",

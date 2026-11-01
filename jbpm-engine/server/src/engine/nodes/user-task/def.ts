@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, SLA } from '../def-types.ts';
+import { type NodeDef, GENERAL, SLA, ADVANCED } from '../def-types.ts';
 
 export const def: NodeDef = {
   engineType: 'userTask',
@@ -9,12 +9,20 @@ export const def: NodeDef = {
     { key: 'assignee', label: 'Assignee (specific user)', widget: 'text' },
     { key: 'businessAdmin', label: 'Business administrator', widget: 'text' },
     { key: 'excludedOwners', label: 'Excluded owners', widget: 'stringlist' },
+    { key: 'actors', label: 'Actors (several users)', widget: 'stringlist', help: 'Every listed user may claim and complete the task. Combine with groups: either one is enough.' },
+    { key: 'groups', label: 'Groups (several)', widget: 'stringlist', help: 'Members of any listed group may claim the task (in addition to the single group above).' },
+    { key: 'businessAdminGroups', label: 'Business administrator groups', widget: 'stringlist', help: 'Members may reassign and manage the task.' },
+    { key: 'stakeholders', label: 'Stakeholders', widget: 'stringlist', help: 'People who follow the task; they get no right to claim or complete it.' },
   ] }, { title: 'Form & behavior', fields: [
     { key: 'form', label: 'Form name', widget: 'assetRef', assetKind: 'forms' },
     { key: 'priority', label: 'Priority', widget: 'number' },
     { key: 'dueDate', label: 'Due date / SLA', widget: 'text', placeholder: 'PT8H or 2026-01-01' },
     { key: 'skippable', label: 'Skippable', widget: 'bool' },
     { key: 'description', label: 'Task description', widget: 'textarea' },
+    { key: 'comment', label: 'Initial comment', widget: 'textarea', help: 'Becomes the first comment on the task.' },
+    { key: 'content', label: 'Content', widget: 'textarea', help: 'Extra data handed to the form (input "Content"); $variable allowed.' },
+    { key: 'locale', label: 'Locale', widget: 'text', placeholder: 'en-GB' },
+    { key: 'createdBy', label: 'Created by', widget: 'text', placeholder: 'defaults to whoever started the instance' },
   ] }, { title: 'Deadlines (reassign / notify)', fields: [
     { key: 'notStartedReassign', label: 'Not started — reassign', widget: 'textarea', placeholder: '[users:john|groups:Managers]@[4h]', help: 'If nobody has started the task after the delay, move it to these users / groups. Several rules: join with ^ .' },
     { key: 'notCompletedReassign', label: 'Not completed — reassign', widget: 'textarea', placeholder: '[groups:Escalations]@[2d]', help: 'If the task is still open after the delay, move it.' },
@@ -23,7 +31,7 @@ export const def: NodeDef = {
   ] }, { title: 'Data', fields: [
     { key: 'inputs', label: 'Task inputs (taskVar ← processVar)', widget: 'keyval', valueSource: 'ownRef', help: 'Left = the field name the form/UI sees on this task. Right = "$name" to copy one of this process\'s own variables in, or a literal value.' },
     { key: 'outputs', label: 'Task outputs (processVar ← taskVar)', widget: 'keyval', keySource: 'own', help: 'Left = the process variable to write (pick an existing one to overwrite it, or type a new name). Right = the field name submitted on this task.' },
-  ] }, SLA],
+  ] }, SLA, ADVANCED],
   diagram: { icon: 'user', color: '#2563eb', shape: 'rectangle' },
   typeLabel: 'User task',
   docs: {

@@ -16,7 +16,8 @@ export interface HandlerResult {
   error?: string;
   errorCode?: string;     // BPMN-style error code for error-boundary routing
   errorDetails?: Record<string, unknown>; // enriched error payload (HTTP status, body, headers, stack, etc.)
-  rethrow?: boolean;      // bubble up to outer/global error handler
+  rethrow?: boolean;
+  abort?: boolean;        // abort the whole instance (a call activity configured to abort its parent when the child fails)      // bubble up to outer/global error handler
 }
 
 /** Everything a node handler needs — the node + instance state plus engine capabilities. */

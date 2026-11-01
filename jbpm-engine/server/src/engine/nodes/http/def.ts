@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, EXECUTION, SLA } from '../def-types.ts';
+import { type NodeDef, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
 
 export const def: NodeDef = {
   engineType: 'http',
@@ -12,10 +12,15 @@ export const def: NodeDef = {
   ] }, { title: 'Response & Error Handling', fields: [
     { key: 'resultTo', label: 'Map response → variable (var ← JSONPath)', widget: 'keyval', keySource: 'own', help: 'Left = this process\'s variable to write (pick an existing one to overwrite it, or type a new name), e.g. verifierId ← $.verifierId.' },
     { key: 'throwError', label: 'Throw error on failure (Default: On)', widget: 'bool', help: 'When off, HTTP 4xx/5xx or network errors are written to errorVar (soft failure) instead of raising SERVICE_ERROR.' },
+    { key: 'contentType', label: 'Content type', widget: 'text', placeholder: 'application/json', help: 'Sent as the content-type header. application/x-www-form-urlencoded sends the body as a form.' },
+    { key: 'authType', label: 'Authentication', widget: 'select', options: ['none', 'basic', 'bearer'], help: 'Adds the Authorization header for you; an explicit header below still wins.' },
+    { key: 'username', label: 'User name (basic)', widget: 'text', placeholder: '$apiUser' },
+    { key: 'password', label: 'Password (basic)', widget: 'text', placeholder: '$apiPassword', help: 'Use $variable or ${ENV_NAME} so the secret is not stored in the diagram.' },
+    { key: 'token', label: 'Token (bearer)', widget: 'text', placeholder: '$apiToken' },
     { key: 'timeoutSeconds', label: 'Timeout (seconds)', widget: 'number', placeholder: 'workspace default', help: 'Cancel the call after this long (1–300). Empty uses the workspace HTTP timeout.' },
     { key: 'errorVar', label: 'Soft-failure variable (when Throw Error is Off)', widget: 'text', placeholder: 'serviceError', help: 'Variable name to store { httpStatus, url, responseBody, method } on soft failure.' },
     { key: 'exitScript', label: 'Exit script (hook)', widget: 'code', placeholder: '// raw response in resPayload', help: 'Optional post-processing script executed with resPayload bound.' },
-  ] }, EXECUTION, SLA],
+  ] }, EXECUTION, SLA, ADVANCED],
   diagram: { icon: 'globe', color: '#0d9488', shape: 'rectangle' },
   typeLabel: 'Service task',
   docs: {
