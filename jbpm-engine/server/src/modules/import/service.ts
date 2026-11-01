@@ -12,6 +12,7 @@ import { WorkflowService } from '../workflows/service.ts';
 import { VersionService } from '../versions/service.ts';
 import { DeploymentService } from '../deployments/service.ts';
 import { validation } from '../../infra/errors.ts';
+import { Collections } from '../../domain.ts';
 import { WORKITEM_HANDLERS } from '../../engine/workitems/registry.ts';
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -274,7 +275,7 @@ export interface ImportReport { summary: { unsupported: number; warnings: number
 /** Everything in an imported project that did not map cleanly, per process — so nothing is dropped silently:
  *  constructs kept only as raw XML, jBPM features this engine deliberately does not have (Java imports / globals, rule-driven conditional
  *  starts, web-service tasks), work-item handlers that are not available here, and a note where Java scripts will use the JVM sidecar. */
-export function buildImportReport(engine: EngineProject, files?: Record<string, unknown>): ImportReport {
+export function buildImportReport(engine: EngineProject, files?: Record<string, unknown>, directory?: { users: Set<string>; groups: Set<string> }): ImportReport {
   const items: ImportReportItem[] = [];
   const add = (i: ImportReportItem) => items.push(i);
   const known = new Set(Object.keys(WORKITEM_HANDLERS));
@@ -290,6 +291,20 @@ export function buildImportReport(engine: EngineProject, files?: Record<string, 
       }
       if ((n.type === 'script' || n.type === 'http') && n.lang === 'java') add({ process: processId, nodeId: n.id, nodeName: name, severity: 'info', code: 'java-script', message: `"${name}" is a Java script: it runs in the JVM sidecar (a JDK must be available on the server).` });
       if (n.type === 'start' && (n.on?.condition || n.event?.condition)) add({ process: processId, nodeId: n.id, nodeName: name, severity: 'warning', code: 'conditional-start', message: `Conditional start "${name}" is not supported (it needs a rule engine watching data). Start by signal, message or timer, or start the process and use a conditional catch as its first step.` });
+      if (n.type === 'userTask') {
+        const split = (v: unknown) => (Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : []).map((x) => String(x).trim()).filter(Boolean);
+        const users = [...new Set([...split(n.assignee), ...split(n.actors), ...split(n.taskInputs?.ActorId), ...split(n.businessAdmin), ...split(n.taskInputs?.BusinessAdministratorId)])];
+        const groups = [...new Set([...split(n.group), ...split(n.groups), ...split(n.businessAdminGroups), ...split(n.taskInputs?.BusinessAdministratorGroupId)])];
+        const dynamic = (x: string) => /^[#$]\{|^\$/.test(x);                      // #{var} / $var are resolved per instance, not names to look up
+        if (!users.length && !groups.length) add({ process: processId, nodeId: n.id, nodeName: name, severity: 'info', code: 'task-unassigned', message: `User task "${name}" has no actors or groups: any member who may manage tasks can claim it. Set Actors / Group on the task if it should be restricted.` });
+        else {
+          add({ process: processId, nodeId: n.id, nodeName: name, severity: 'info', code: 'task-assignment', message: `User task "${name}" is offered to ${[users.length ? `actors ${users.join(', ')}` : '', groups.length ? `groups ${groups.join(', ')}` : ''].filter(Boolean).join(' and ')}.` });
+          if (directory) {
+            const unknown = [...users.filter((u) => !dynamic(u) && !directory.users.has(u) && !directory.groups.has(u)).map((u) => `user or group "${u}"`), ...groups.filter((g) => !dynamic(g) && !directory.groups.has(g) && !directory.users.has(g)).map((g) => `group "${g}"`)];
+            if (unknown.length) add({ process: processId, nodeId: n.id, nodeName: name, severity: 'warning', code: 'task-assignee-unknown', message: `User task "${name}" is assigned to ${unknown.join(', ')}, which does not exist in this workspace: until it is created (Admin → users and groups) or the assignment is changed, only business administrators can work this task.` });
+          }
+        }
+      }
       if (Array.isArray(n.nodes)) walk(processId, n.nodes);
     }
   };
@@ -310,10 +325,20 @@ export function buildImportReport(engine: EngineProject, files?: Record<string, 
 export class ImportService {
   constructor(private ctx: AppContext) {}
   /** Import a kjar file map as a new project (workflow) + initial draft. */
+  /** the users and groups this workspace knows, so an import can say which task assignments point at nobody */
+  private async directory(): Promise<{ users: Set<string>; groups: Set<string> }> {
+    const t = this.ctx.tenantId; const users = new Set<string>(); const groups = new Set<string>();
+    for (const u of await this.ctx.store.repo<any>(Collections.users).query((x) => x.tenantId === t)) { users.add(u.username); if (u.email) users.add(u.email); for (const g of u.groups || []) groups.add(g); for (const r of u.roles || []) groups.add(r); }
+    for (const g of await this.ctx.store.repo<any>(Collections.groups).query((x) => x.tenantId === t)) groups.add(g.name);
+    for (const r of await this.ctx.store.repo<any>(Collections.roles).query((x) => x.tenantId === t)) groups.add(r.name);
+    for (const m of await this.ctx.store.repo<any>(Collections.tenantMembers).query((x) => x.tenantId === t)) { if (m.userId) users.add(m.userId); if (m.email) users.add(m.email); }
+    return { users, groups };
+  }
+
   async importKjar(files: Record<string, string>, name: string | undefined, actor: string): Promise<{ workflowId: string; processes: number; report: ImportReport } & AssetImportReport> {
     const engine = kjarToEngine(files);
     const assetReport = convertAssets(engine);
-    const report = buildImportReport(engine, files);
+    const report = buildImportReport(engine, files, await this.directory());
     const wf = await new WorkflowService(this.ctx).create({ name: name || (engine as any).name || (engine as any).id || 'Imported project' }, actor);
     await new VersionService(this.ctx).saveDraft(wf.defaultBranchId, engine, actor);
     await this.ctx.audit({ actor, kind: 'project.imported', workflowId: wf.id, data: { processes: engine.processes?.length || 0, ...assetReport, report: report.summary } });
@@ -332,7 +357,7 @@ export class ImportService {
   ): Promise<{ workflowId: string; processes: number; deploymentId: string; report: ImportReport } & AssetImportReport> {
     const engine = kjarToEngine(files);
     const assetReport = convertAssets(engine);
-    const report = buildImportReport(engine, files);
+    const report = buildImportReport(engine, files, await this.directory());
     const wf = await new WorkflowService(this.ctx).create({ name: name || (engine as any).name || (engine as any).id || 'Imported project' }, actor);
     const ver = new VersionService(this.ctx);
     const draft = await ver.saveDraft(wf.defaultBranchId, engine, actor);

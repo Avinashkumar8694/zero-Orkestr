@@ -69,13 +69,21 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
   /** a user task's other data inputs (ActorId, Comment, Locale, NotStartedReassign …) with their constant values */
   function userTaskInputs(el: ElementNode): Record<string, string> {
     const spec = kid(el, 'ioSpecification'); const out: Record<string, string> = {};
-    if (!spec) return out;
-    const nameOf = new Map(kids(spec, 'dataInput').map((d) => [d.attrs.id, d.attrs.name] as const));
-    for (const a of kids(el, 'dataInputAssociation')) {
+    const nameOf = new Map(spec ? kids(spec, 'dataInput').map((d) => [d.attrs.id, d.attrs.name] as const) : []);
+    for (const a of spec ? kids(el, 'dataInputAssociation') : []) {
       const name = nameOf.get(targetText(a)); if (!name || name === 'TaskName' || name === 'Skippable' || name === 'GroupId') continue;
       const asg = kid(a, 'assignment'); const v = asg ? cdataText(kid(asg, 'from')) : undefined;
       if (v !== undefined) out[name] = v;
     }
+    // BPMN2 human-task roles: <potentialOwner>/<businessAdministrator> hold a <resourceAssignmentExpression><formalExpression> (comma separated user or group ids).
+    // jBPM reads them into ActorId / BusinessAdministratorId, which is also what the engine maps to actors / businessAdmin.
+    const roleIds = (tag: string): string[] => kids(el, tag).flatMap((r) => {
+      const ra = kid(r, 'resourceAssignmentExpression'); const fe = ra ? kid(ra, 'formalExpression') : undefined;
+      return (fe ? cdataText(fe) ?? '' : '').split(',').map((x) => x.trim()).filter(Boolean);
+    });
+    const merge = (key: string, add: string[]) => { if (!add.length) return; const have = (out[key] ?? '').split(',').map((x) => x.trim()).filter(Boolean); out[key] = [...new Set([...have, ...add])].join(','); };
+    merge('ActorId', roleIds('potentialOwner'));
+    merge('BusinessAdministratorId', roleIds('businessAdministrator'));
     return out;
   }
   function applyOnEntryExit(el: ElementNode, nd: Node): void {

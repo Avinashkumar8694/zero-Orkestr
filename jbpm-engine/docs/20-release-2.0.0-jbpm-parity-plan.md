@@ -493,3 +493,15 @@ Defects this found and fixed:
 | 4 | Jackson shim: `readTree` swallowed malformed JSON; a `JsonNode` was not iterable (`for (JsonNode r : node.path("results"))`); `ArrayNode` lacked `size/get/addPOJO`; `ObjectMapper.readValue/convertValue` missing | all added; `readTree` / `readValue` now throw like Jackson (`test/java-replace.test.ts`) |
 | 5 | `mock_server` answered the send-communication endpoints without the `results[]` the process parses, so every send took the retry path | realistic `results[...SENT]` response, plus `/communications/send` |
 
+### 17.1 User mapping (task assignment) after import
+Not validated in the first pass of §17; found when the user pointed out that the source project's tasks carry assignments. In `MySpace_policy_system (9).zip` there are 22 user tasks and the assignments come in three forms:
+
+| Form in the BPMN | Tasks | Before | Now |
+|---|---|---|---|
+| `GroupId` data input, constant (`ProcessReviewer`) | 7 | imported | imported |
+| `GroupId` data input, `#{enrollment_review_group}` | 3 | imported, but the placeholder stayed as literal text on the created task | resolved from the instance variable when the task is created |
+| `<potentialOwner>` with `formalExpression` (`krisv`, `ProcessReviewer`) | 9 | **dropped: the task came in unassigned** | imported as `actors` (jBPM reads it into `ActorId`); `<businessAdministrator>` likewise into `businessAdmin` |
+| none | 5 | | reported as unassigned |
+
+Also changed: `#{var}` (plus `${var}` / `$var`) is now filled in task name, group, actors, groups, administrators and stakeholders at creation (a list variable expands to all its members); an actor entry that names a group admits the members of that group, as in jBPM where a potential owner is a user or a group; and the import report lists every task's assignment (`task-assignment`, `task-unassigned`) and warns (`task-assignee-unknown`) when a user or group does not exist in the workspace. Re-importing the zip reports 17 assigned, 5 unassigned and 14 unknown names (`krisv` is Business Central's placeholder user; `ProcessReviewer`, `ComplexCoverageReviewer`, `OFACComplianceReviewer` are groups to create). Until they exist only business administrators can work those tasks. Export writes the actors back as an `ActorId` data input (equivalent in jBPM, not the `potentialOwner` element).
+

@@ -101,3 +101,6 @@ Conditional **start** events are not supported (see plan §11, G23).
 
 ## Where to set them in the editor
 Process description, SLA, version, ad-hoc and variable *required* / *read-only*: **Variables** dialog. Flow priority: click a connection. Everything per node (multi-instance, event triggers incl. link and scope, event sub-process triggers, async, SLA): the node's properties panel.
+
+## Placeholders in task assignment
+`#{variable}`, `${variable}` and `$variable` are filled from the instance variables when a user task is created, in the task name, group, actors, groups, business administrators and stakeholders. A list variable expands to all its entries. A user named in *Actors* may also be a group name: its members can claim the task.

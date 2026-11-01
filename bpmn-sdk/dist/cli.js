@@ -238,15 +238,26 @@ function parseBpmnAll(xml) {
   function userTaskInputs(el) {
     const spec = kid(el, "ioSpecification");
     const out = {};
-    if (!spec) return out;
-    const nameOf = new Map(kids(spec, "dataInput").map((d) => [d.attrs.id, d.attrs.name]));
-    for (const a of kids(el, "dataInputAssociation")) {
+    const nameOf = new Map(spec ? kids(spec, "dataInput").map((d) => [d.attrs.id, d.attrs.name]) : []);
+    for (const a of spec ? kids(el, "dataInputAssociation") : []) {
       const name = nameOf.get(targetText(a));
       if (!name || name === "TaskName" || name === "Skippable" || name === "GroupId") continue;
       const asg = kid(a, "assignment");
       const v = asg ? cdataText(kid(asg, "from")) : void 0;
       if (v !== void 0) out[name] = v;
     }
+    const roleIds = (tag) => kids(el, tag).flatMap((r) => {
+      const ra = kid(r, "resourceAssignmentExpression");
+      const fe = ra ? kid(ra, "formalExpression") : void 0;
+      return (fe ? cdataText(fe) ?? "" : "").split(",").map((x) => x.trim()).filter(Boolean);
+    });
+    const merge = (key, add) => {
+      if (!add.length) return;
+      const have = (out[key] ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+      out[key] = [.../* @__PURE__ */ new Set([...have, ...add])].join(",");
+    };
+    merge("ActorId", roleIds("potentialOwner"));
+    merge("BusinessAdministratorId", roleIds("businessAdministrator"));
     return out;
   }
   function applyOnEntryExit(el, nd) {

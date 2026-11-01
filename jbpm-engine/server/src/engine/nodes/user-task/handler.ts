@@ -15,20 +15,27 @@ function mapTaskInputs(n: any, vars: Record<string, unknown>): Record<string, un
 }
 
 const list = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : typeof v === 'string' ? v.split(',').map((x) => x.trim()).filter(Boolean) : []);
-/** $variable or ${variable} placeholders filled from the process variables */
+const lookup = (vars: Record<string, unknown>, path: string): unknown => path.split('.').reduce<any>((cur, k) => (cur == null ? undefined : cur[k]), vars);
+/** $variable, ${variable} and jBPM's #{variable} placeholders (dotted paths allowed) filled from the process variables */
 const resolveText = (v: unknown, vars: Record<string, unknown>): string => {
   const s = String(v ?? '');
   if (s.startsWith('$') && !s.startsWith('${')) return String(vars[s.slice(1)] ?? '');
-  return s.replace(/\$\{([^}]+)\}/g, (_, name) => String(vars[name.trim()] ?? ''));
+  return s.replace(/[$#]\{([^}]+)\}/g, (_, name) => String(lookup(vars, name.trim()) ?? ''));
 };
+/** owner lists (actors, groups, administrators): each entry may be a placeholder; a list variable expands to all its members, a text one may hold a comma-separated list */
+const resolveOwners = (v: unknown, vars: Record<string, unknown>): string[] => list(v).flatMap((x) => {
+  const m = /^(?:[$#]\{([^}]+)\}|\$(\w+))$/.exec(x.trim());
+  if (m) { const val = lookup(vars, (m[1] || m[2]!).trim()); if (Array.isArray(val)) return val.map((e) => String(e).trim()).filter(Boolean); }
+  return resolveText(x, vars).split(',').map((e) => e.trim()).filter(Boolean);
+});
 
 /** Candidates: the listed actors plus registered members of the offered groups (minus excluded owners). Both strategies are stateless queries on indexed
  *  fields — nothing is held in memory or counted in a shared variable — so they behave the same with several replicas (two tasks created at the very same
  *  moment may pick the same person; that is the price of not locking, and the next task balances it). */
 async function pickOwner(c: any, n: any, task: Task): Promise<string | undefined> {
   const store = c.app.store, tenant = c.app.tenantId;
-  const candidates = new Set<string>(list(n.actors));
-  for (const g of new Set([task.group, ...list(n.groups)].filter((x): x is string => !!x))) {
+  const candidates = new Set<string>(task.actors ?? []);
+  for (const g of new Set([task.group, ...(task.groups ?? [])].filter((x): x is string => !!x))) {
     for (const u of await findRows<{ id: string; username: string; active?: boolean }>(store, Collections.users, tenant, { contains: { path: 'groups', value: [g] } })) if (u.active !== false) candidates.add(u.username);
   }
   for (const x of task.excludedOwners ?? []) candidates.delete(x);
@@ -57,13 +64,18 @@ export const handler: NodeHandler = async (c) => {
       dueAt = new Date(Date.parse(now) + settings.defaultTaskSlaHours * 3600 * 1000).toISOString();
     }
   }
+  // placeholders in owner fields (#{var}, ${var}, $var) are filled from the instance's variables, as in jBPM; several resolved groups: the first is `group`, the rest join `groups`
+  const [groupOne, ...moreGroups] = resolveOwners(n.group || n.assignee, c.inst.variables);
+  const actors = resolveOwners(n.actors, c.inst.variables);
+  const groups = [...new Set([...moreGroups, ...resolveOwners(n.groups, c.inst.variables)])];
   const task: Task = {
     id: c.app.newId(), tenantId: c.app.tenantId, instanceId: c.inst.id,
     tokenId: c.inst.tokens.find((t) => t.nodeId === n.id)!.id, nodeId: n.id,
-    name: n.name || n.form || 'Task', formName: n.form, group: n.group || n.assignee,
-    businessAdmin: n.businessAdmin, excludedOwners: n.excludedOwners, priority: n.priority,
-    ...(list(n.actors).length ? { actors: list(n.actors) } : {}), ...(list(n.groups).length ? { groups: list(n.groups) } : {}),
-    ...(list(n.businessAdminGroups).length ? { businessAdminGroups: list(n.businessAdminGroups) } : {}), ...(list(n.stakeholders).length ? { stakeholders: list(n.stakeholders) } : {}),
+    name: resolveText(n.name || n.form || 'Task', c.inst.variables), formName: n.form, group: groupOne || undefined,
+    businessAdmin: resolveOwners(n.businessAdmin, c.inst.variables)[0], priority: n.priority,
+    ...(resolveOwners(n.excludedOwners, c.inst.variables).length ? { excludedOwners: resolveOwners(n.excludedOwners, c.inst.variables) } : {}),
+    ...(actors.length ? { actors } : {}), ...(groups.length ? { groups } : {}),
+    ...(resolveOwners(n.businessAdminGroups, c.inst.variables).length ? { businessAdminGroups: resolveOwners(n.businessAdminGroups, c.inst.variables) } : {}), ...(resolveOwners(n.stakeholders, c.inst.variables).length ? { stakeholders: resolveOwners(n.stakeholders, c.inst.variables) } : {}),
     ...(n.locale ? { locale: String(n.locale) } : {}), createdBy: n.createdBy ? String(n.createdBy) : (c.inst.startedBy || 'system'),
     status: 'created', inputs: { ...mapTaskInputs(n, c.inst.variables), ...(n.content ? { Content: resolveText(n.content, c.inst.variables) } : {}) }, createdAt: now,
     ...(dueAt ? { dueAt } : {}),

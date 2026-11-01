@@ -83,3 +83,23 @@ test('importing a plain jBPM process (no engine extras) still works and adds not
   assert.strictEqual(out.nodes.find((n) => n.id === 't').metaData, undefined);
   assert.ok(!/engine\.extras/.test(serializeProcess(fromEngine(plain))), 'no extras entry unless something needs it');
 });
+
+test('potentialOwner / businessAdministrator in jBPM BPMN become ActorId / BusinessAdministratorId and survive a round trip', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn2:definitions xmlns:bpmn2="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:drools="http://www.jboss.org/drools" id="d" targetNamespace="http://www.omg.org/bpmn20">
+<bpmn2:process id="p" drools:packageName="x" name="p" isExecutable="true">
+<bpmn2:startEvent id="s"><bpmn2:outgoing>f0</bpmn2:outgoing></bpmn2:startEvent>
+<bpmn2:userTask id="u" name="Review"><bpmn2:incoming>f0</bpmn2:incoming><bpmn2:outgoing>f1</bpmn2:outgoing>
+<bpmn2:potentialOwner><bpmn2:resourceAssignmentExpression><bpmn2:formalExpression>krisv, Reviewers</bpmn2:formalExpression></bpmn2:resourceAssignmentExpression></bpmn2:potentialOwner>
+<bpmn2:businessAdministrator><bpmn2:resourceAssignmentExpression><bpmn2:formalExpression>boss</bpmn2:formalExpression></bpmn2:resourceAssignmentExpression></bpmn2:businessAdministrator></bpmn2:userTask>
+<bpmn2:endEvent id="e"><bpmn2:incoming>f1</bpmn2:incoming></bpmn2:endEvent>
+<bpmn2:sequenceFlow id="f0" sourceRef="s" targetRef="u"/><bpmn2:sequenceFlow id="f1" sourceRef="u" targetRef="e"/></bpmn2:process></bpmn2:definitions>`;
+  const eng = toEngine(parseBpmn(xml));
+  const u = eng.nodes.find((n) => n.id === 'u');
+  assert.deepStrictEqual(u.actors, ['krisv', 'Reviewers']);
+  assert.strictEqual(u.businessAdmin, 'boss');
+  const again = toEngine(parseBpmn(serializeProcess(fromEngine(eng))));
+  const u2 = again.nodes.find((n) => n.id === 'u');
+  assert.deepStrictEqual(u2.actors, ['krisv', 'Reviewers']);
+  assert.strictEqual(u2.businessAdmin, 'boss');
+});

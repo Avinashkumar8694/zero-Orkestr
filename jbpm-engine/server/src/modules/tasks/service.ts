@@ -48,8 +48,10 @@ export class TaskService {
     const groups = [...new Set([t.group, ...(t.groups ?? [])].filter((g): g is string => !!g))];
     if (!groups.length && !t.actors?.length) return;                    // an open task, as before
     const actingUser = await this.lookupUser(user);
-    // Offered to named actors: the caller must be one of them, or a registered member of a listed group. Nobody unregistered gets in by luck.
-    if (t.actors?.length && !(actingUser && groups.some((g) => actingUser.groups.includes(g)))) throw forbidden(`${user} is not one of this task's actors or group members`);
+    // Offered to named actors: the caller must be one of them, or a registered member of a listed group. jBPM's potential owners are
+    // entities that may be users OR groups, so an actor entry also admits members of a group of that name. Nobody unregistered gets in by luck.
+    const entities = [...groups, ...(t.actors ?? [])];
+    if (t.actors?.length && !(actingUser && entities.some((g) => actingUser.groups.includes(g)))) throw forbidden(`${user} is not one of this task's actors or group members`);
     // Group-only tasks keep the long-standing rule: only a REAL registered account is checked (pre-IAM actor strings are unaffected).
     if (groups.length && actingUser && !groups.some((g) => actingUser.groups.includes(g))) throw forbidden(`${user} is not a member of group "${groups.join('" or "')}"`);
   }
