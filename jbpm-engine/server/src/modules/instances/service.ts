@@ -144,6 +144,13 @@ export class InstanceService {
     return this.recordIfFailed(await this.engine.fireAsync(inst, dep, job.tokenId));
   }
 
+  /** The worker fired a node's SLA job (see ExecutionEngine.fireSla). */
+  async fireSla(job: TimerJob): Promise<Instance> {
+    const inst = await this.get(job.instanceId);
+    const dep = await this.deployments.get(inst.deploymentId);
+    return this.engine.fireSla(inst, dep, job.tokenId);
+  }
+
   async failAsync(inst: Instance, nodeId: string, message: string): Promise<Instance> {
     const dep = await this.deployments.get(inst.deploymentId);
     return this.recordIfFailed(await this.engine.failInstanceAt(inst, dep, nodeId, message));

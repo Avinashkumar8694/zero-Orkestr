@@ -30,3 +30,27 @@ export function computeDue(timer: any, nowIso: string): string {
   if (timer?.cycle) { const period = timer.cycle.split('/').slice(1).join('/') || timer.cycle; return new Date(nowMs + parseDuration(period)).toISOString(); }
   return new Date(nowMs).toISOString();
 }
+
+/** jBPM delay expression -> ms: ISO-8601 (`PT30M`, `P1D`), a repeating interval (`R/PT1H`: its period), or the designer's short form
+ *  (`4h`, `2d`, `1h 30m`, `500ms`; a bare number is ms). 0 when it cannot be read. */
+export function parseDelay(expr: string): number {
+  const t = String(expr ?? '').trim();
+  if (!t) return 0;
+  if (/^R\d*\//.test(t)) return parseDelay(t.split('/').slice(1).join('/'));
+  if (/^P/i.test(t)) return parseDuration(t.toUpperCase());
+  if (/^\d+$/.test(t)) return Number(t);
+  const unit: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+  const re = /(\d+)\s*(ms|d|h|m|s)\b/gi;
+  let total = 0, any = false, m: RegExpExecArray | null;
+  while ((m = re.exec(t))) { total += Number(m[1]) * unit[m[2]!.toLowerCase()]!; any = true; }
+  return any && t.replace(re, '').trim() === '' ? total : 0;
+}
+
+/** SLA / due expression -> absolute ISO time: an absolute date, or a delay from `nowIso`. `#{var}` is filled from `vars`. */
+export function dueFrom(expr: string, nowIso: string, vars: Record<string, unknown> = {}): string | null {
+  const t = String(expr ?? '').replace(/#\{\s*([\w.]+)\s*\}/g, (_, k) => String(vars[k] ?? '')).trim();
+  if (!t) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) { const ms = Date.parse(t); return Number.isNaN(ms) ? null : new Date(ms).toISOString(); }
+  const ms = parseDelay(t);
+  return ms > 0 ? new Date(Date.parse(nowIso) + ms).toISOString() : null;
+}

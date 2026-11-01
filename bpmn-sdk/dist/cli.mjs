@@ -216,6 +216,15 @@ function parseBpmnAll(xml) {
       const f = attr(onX, "scriptFormat");
       if (f) nd.onExitFormat = f;
     }
+    for (const md of kids(ext, "metaData")) {
+      const name = md.attrs.name;
+      if (!name || name === "elementname") continue;
+      const v = cdataText(kid(md, "metaValue")) ?? "";
+      if (name === "customAsync") nd.async = v.trim() === "true";
+      else if (name === "customSLADueDate") nd.slaDueDate = v;
+      else if (name === "customAutoStart") nd.autoStart = v.trim() === "true";
+      else (nd.metaData ||= {})[name] = v;
+    }
   }
   function applyEventDef(nd, el) {
     const sg = kid(el, "signalEventDefinition");
@@ -527,9 +536,19 @@ function serializeProcess(proc) {
   const edges = [];
   const seenItem = /* @__PURE__ */ new Set();
   const meta = (name) => name == null ? "" : `<bpmn2:extensionElements><drools:metaData name="elementname"><drools:metaValue>${cdata(name)}</drools:metaValue></drools:metaData></bpmn2:extensionElements>`;
+  function extraMeta(nd) {
+    const md = (name, v) => `<drools:metaData name="${escAttr(name)}"><drools:metaValue>${cdata(v)}</drools:metaValue></drools:metaData>`;
+    const out = [];
+    if (nd.async) out.push(md("customAsync", "true"));
+    if (nd.slaDueDate) out.push(md("customSLADueDate", nd.slaDueDate));
+    if (nd.autoStart) out.push(md("customAutoStart", "true"));
+    for (const [k, v] of Object.entries(nd.metaData || {})) out.push(md(k, v));
+    return out;
+  }
   function extBlock(nd) {
     const parts = [];
     if (nd.name != null) parts.push(`<drools:metaData name="elementname"><drools:metaValue>${cdata(nd.name)}</drools:metaValue></drools:metaData>`);
+    parts.push(...extraMeta(nd));
     if (nd.onEntry) parts.push(`<drools:onEntry-script scriptFormat="${nd.onEntryFormat || JAVA}"><drools:script>${cdata(nd.onEntry)}</drools:script></drools:onEntry-script>`);
     if (nd.onExit) parts.push(`<drools:onExit-script scriptFormat="${nd.onExitFormat || JAVA}"><drools:script>${cdata(nd.onExit)}</drools:script></drools:onExit-script>`);
     return parts.length ? `<bpmn2:extensionElements>${parts.join("")}</bpmn2:extensionElements>` : "";
@@ -624,7 +643,7 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
     const di = REST_INPUTS.map((p) => `<bpmn2:dataInput id="${nd.id}_${p}InputX" drools:dtype="" itemSubjectRef="__${nd.id}_${p}InputXItem" name="${p}"/>`).join("");
     const refs = REST_INPUTS.map((p) => `<bpmn2:dataInputRefs>${nd.id}_${p}InputX</bpmn2:dataInputRefs>`).join("");
     const aval = (p, v) => `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:targetRef>${nd.id}_${p}InputX</bpmn2:targetRef><bpmn2:assignment id="${uid()}"><bpmn2:from xsi:type="bpmn2:tFormalExpression" id="${uid()}">${cdata(v)}</bpmn2:from><bpmn2:to xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.id}_${p}InputX</bpmn2:to></bpmn2:assignment></bpmn2:dataInputAssociation>`;
-    const ext = `<bpmn2:extensionElements><drools:metaData name="elementname"><drools:metaValue>${cdata(nd.name)}</drools:metaValue></drools:metaData><drools:onEntry-script scriptFormat="${nd.onEntryFormat || JAVA}"><drools:script>${cdata(entry)}</drools:script></drools:onEntry-script><drools:onExit-script scriptFormat="${nd.onExitFormat || JAVA}"><drools:script>${cdata(exit)}</drools:script></drools:onExit-script></bpmn2:extensionElements>`;
+    const ext = `<bpmn2:extensionElements><drools:metaData name="elementname"><drools:metaValue>${cdata(nd.name)}</drools:metaValue></drools:metaData>${extraMeta(nd).join("")}<drools:onEntry-script scriptFormat="${nd.onEntryFormat || JAVA}"><drools:script>${cdata(entry)}</drools:script></drools:onEntry-script><drools:onExit-script scriptFormat="${nd.onExitFormat || JAVA}"><drools:script>${cdata(exit)}</drools:script></drools:onExit-script></bpmn2:extensionElements>`;
     const iospec = `<bpmn2:ioSpecification id="${uid()}">${di}<bpmn2:dataOutput id="${nd.id}_ResultOutputX" drools:dtype="" itemSubjectRef="__${nd.id}_ResultOutputXItem" name="Result"/><bpmn2:inputSet id="${uid()}">${refs}</bpmn2:inputSet><bpmn2:outputSet id="${uid()}"><bpmn2:dataOutputRefs>${nd.id}_ResultOutputX</bpmn2:dataOutputRefs></bpmn2:outputSet></bpmn2:ioSpecification>`;
     const assocs = `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:sourceRef>reqPayload</bpmn2:sourceRef><bpmn2:targetRef>${nd.id}_ContentDataInputX</bpmn2:targetRef></bpmn2:dataInputAssociation>` + aval("ContentType", "application/json") + aval("HandleResponseErrors", "true") + aval("Method", nd.method || "POST") + aval("Url", "#{baseUrl}" + (nd.url || ""));
     const dout = `<bpmn2:dataOutputAssociation id="${uid()}"><bpmn2:sourceRef>${nd.id}_ResultOutputX</bpmn2:sourceRef><bpmn2:targetRef>resPayload</bpmn2:targetRef></bpmn2:dataOutputAssociation>`;

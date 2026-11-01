@@ -117,8 +117,12 @@ export interface Token {
   id: string; nodeId: string; state: TokenState; scopeId?: string; waitFor?: WaitSpec; enteredAt: string;
   /** set when an async job released this token: the node now runs for real (it is not parked a second time) */
   asyncReady?: boolean;
+  /** the node's SLA clock, started when the node was triggered (it survives an async hop) */
+  sla?: NodeSla;
 }
-export interface NodeVisit { tokenId: string; nodeId: string; type: string; enteredAt: string; exitedAt?: string; outcome?: string; }
+/** jBPM "SLA Due Date" (customSLADueDate) compliance for one node visit */
+export interface NodeSla { dueAt: string; status: 'pending' | 'met' | 'violated'; at?: string }
+export interface NodeVisit { tokenId: string; nodeId: string; type: string; enteredAt: string; exitedAt?: string; outcome?: string; sla?: NodeSla; }
 export interface Instance extends Entity {
   id: string; tenantId: string; deploymentId: string; workflowId: string;
   processId?: string;              // which process (definition) in the deployment this instance runs
@@ -166,11 +170,13 @@ export interface Task extends Entity {
 
 export interface TimerJob extends Entity {
   id: string; tenantId: string; instanceId: string; tokenId: string; nodeId: string;
-  kind: 'duration' | 'cycle' | 'date' | 'start' | 'async';
+  kind: 'duration' | 'cycle' | 'date' | 'start' | 'async' | 'sla' | 'deadline';
   dueAt: string; cycle?: string; fired: number;
   // kind 'async' (jBPM's "Is Async" / a background start): run the parked token's node in the worker. A job that could not
   // run (store/lock/engine exception — not a business error, which follows the normal error model) is retried.
   attempts?: number; maxAttempts?: number; retryDelayMs?: number; lastError?: string;
+  // kind 'deadline' (user task NotStarted/NotCompleted Reassign/Notify): act on a task that is still open at dueAt
+  taskId?: string; deadline?: { type: 'notStartedReassign' | 'notCompletedReassign' | 'notStartedNotify' | 'notCompletedNotify'; action: Record<string, string> };
   status: 'scheduled' | 'fired' | 'cancelled';
   // kind 'start' (timer/cron start event): begin a new instance instead of resuming a token.
   deploymentId?: string; processId?: string;

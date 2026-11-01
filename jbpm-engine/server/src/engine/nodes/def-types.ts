@@ -111,3 +111,8 @@ export const EXECUTION: UiSection = { title: 'Execution', fields: [
   { key: 'asyncRetries', label: 'Async retries', widget: 'number', placeholder: '3', help: 'Extra attempts when the worker cannot run the node (infrastructure failure). A script or HTTP error is not retried here: it follows the error handling of the process.' },
   { key: 'asyncRetryDelay', label: 'Async retry delay', widget: 'text', placeholder: 'PT10S', help: 'ISO-8601 duration; each further attempt waits this long times the attempt number.' },
 ] };
+
+/** jBPM "SLA Due Date" (customSLADueDate): a node that is still running past this time is flagged as violating its SLA. */
+export const SLA: UiSection = { title: 'Service level (SLA)', fields: [
+  { key: 'slaDueDate', label: 'SLA due date', widget: 'text', placeholder: '2h  ·  1d  ·  PT30M  ·  #{deadline}', help: 'How long this step may take from the moment it starts. On breach the instance is flagged, the audit log records it and the person who started it is notified; the process keeps running. A date or #{variable} also works.' },
+] };

@@ -106,6 +106,14 @@ interface Node {
     /** dialect URI for onEntry/onExit wrapper scripts; defaults to Java */
     onEntryFormat?: string;
     onExitFormat?: string;
+    /** jBPM "Is Async" — <drools:metaData name="customAsync">true */
+    async?: boolean;
+    /** jBPM "SLA Due Date" — <drools:metaData name="customSLADueDate"> (1d, 2h, PT30M, a date, #{var}) */
+    slaDueDate?: string;
+    /** jBPM "AdHoc Autostart" — <drools:metaData name="customAutoStart">true */
+    autoStart?: boolean;
+    /** every OTHER <drools:metaData> on the element (name -> value), kept so a round trip loses nothing */
+    metaData?: Record<string, string>;
     reqExtra?: string;
     setVars?: string[];
     rest?: boolean;
@@ -524,6 +532,11 @@ interface WithLifecycle {
     onExit?: string;
     onEntryLang?: Lang;
     onExitLang?: Lang;
+    /** jBPM "Is Async" (customAsync) and "SLA Due Date" (customSLADueDate); asyncRetries / asyncRetryDelay are this engine's own, kept as metaData */
+    async?: boolean;
+    slaDueDate?: string;
+    asyncRetries?: number;
+    asyncRetryDelay?: string;
 }
 interface EngineStart extends Base {
     type: 'start';

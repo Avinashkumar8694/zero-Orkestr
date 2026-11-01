@@ -34,7 +34,11 @@ interface Base { id?: string; name?: string; }
 // just the http/REST wrapper (which has its own `exitScript`, pre-dating this and kept separate since
 // it auto-generates a default body). Independent dialects since a real jBPM project's onEntry/onExit
 // pair could in principle differ (the underlying ProcessModel keeps them independent too).
-interface WithLifecycle { onEntry?: string; onExit?: string; onEntryLang?: Lang; onExitLang?: Lang; }
+interface WithLifecycle {
+  onEntry?: string; onExit?: string; onEntryLang?: Lang; onExitLang?: Lang;
+  /** jBPM "Is Async" (customAsync) and "SLA Due Date" (customSLADueDate); asyncRetries / asyncRetryDelay are this engine's own, kept as metaData */
+  async?: boolean; slaDueDate?: string; asyncRetries?: number; asyncRetryDelay?: string;
+}
 export interface EngineStart extends Base { type: 'start'; on?: EventDef; }
 export interface EngineEnd extends Base { type: 'end'; result?: 'terminate'; throw?: EventDef; }
 export interface EngineScript extends Base { type: 'script'; lang?: Lang; code: string; }
@@ -463,6 +467,10 @@ export function fromEngine(ep: EngineProcess, sharedTypes: EngineType[] = []): P
         : javaBareNamePreamble(n.onExit, varType) + javaMetaLocalsPreamble(n.onExit, varType)) + n.onExit;
       out.onExitFormat = langUri(n.onExitLang);
     }
+    if (n.async) out.async = true;
+    if (n.slaDueDate) out.slaDueDate = n.slaDueDate;
+    if (n.asyncRetries !== undefined) (out.metaData ||= {}).asyncRetries = String(n.asyncRetries);
+    if (n.asyncRetryDelay) (out.metaData ||= {}).asyncRetryDelay = n.asyncRetryDelay;
     return out;
   };
   const conv = (n: EngineNode): Node => {
@@ -1233,6 +1241,10 @@ export function toEngine(m: ProcessModel): EngineProcess {
   const revLifecycle = (n: Node): Partial<EngineNode> => ({
     ...(n.onEntry ? { onEntry: n.onEntry, onEntryLang: dialectToLang(n.onEntryFormat) } : {}),
     ...(n.onExit ? { onExit: n.onExit, onExitLang: dialectToLang(n.onExitFormat) } : {}),
+    ...(n.async ? { async: true } : {}),
+    ...(n.slaDueDate ? { slaDueDate: n.slaDueDate } : {}),
+    ...(n.metaData?.asyncRetries !== undefined && Number.isInteger(Number(n.metaData.asyncRetries)) ? { asyncRetries: Number(n.metaData.asyncRetries) } : {}),
+    ...(n.metaData?.asyncRetryDelay ? { asyncRetryDelay: n.metaData.asyncRetryDelay } : {}),
   });
   // toEngine is a best-effort reverse: jBPM fields may be undefined and don't always satisfy the
   // strict EngineNode union (e.g. an http node with no reversible url), so the builder returns `any`.

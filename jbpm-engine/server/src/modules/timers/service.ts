@@ -4,6 +4,7 @@ import type { AppContext } from '../../context.ts';
 import { inList } from '../../infra/filters.ts';
 import { Collections, type TimerJob } from '../../domain.ts';
 import { InstanceService } from '../instances/service.ts';
+import { TaskService } from '../tasks/service.ts';
 import { SettingsService } from '../settings/service.ts';
 import type { EngineEvent } from '../../engine/execution-engine.ts';
 import { computeDue, parseCycleRepeatCount } from '../../engine/duration.ts';
@@ -93,6 +94,10 @@ export class TimerService {
               // cron/cycle start; it should just skip this occurrence and try again next time.
               try { await this.instances.startScheduled(job); }
               finally { if (job.cycle) await this.reschedule(job, nowIso); }
+            } else if (job.kind === 'sla') {
+              await this.instances.fireSla(job);
+            } else if (job.kind === 'deadline') {
+              await new TaskService(this.ctx).fireDeadline(job);
             } else if (job.kind === 'async') {
               // a background node/start. A thrown exception is an infrastructure failure (not a business error — those follow the
               // normal error model inside the engine), so the job is retried with a delay until its attempts are used up.

@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL } from '../def-types.ts';
+import { type NodeDef, GENERAL, SLA } from '../def-types.ts';
 
 export const def: NodeDef = {
   engineType: 'userTask',
@@ -15,10 +15,15 @@ export const def: NodeDef = {
     { key: 'dueDate', label: 'Due date / SLA', widget: 'text', placeholder: 'PT8H or 2026-01-01' },
     { key: 'skippable', label: 'Skippable', widget: 'bool' },
     { key: 'description', label: 'Task description', widget: 'textarea' },
+  ] }, { title: 'Deadlines (reassign / notify)', fields: [
+    { key: 'notStartedReassign', label: 'Not started — reassign', widget: 'textarea', placeholder: '[users:john|groups:Managers]@[4h]', help: 'If nobody has started the task after the delay, move it to these users / groups. Several rules: join with ^ .' },
+    { key: 'notCompletedReassign', label: 'Not completed — reassign', widget: 'textarea', placeholder: '[groups:Escalations]@[2d]', help: 'If the task is still open after the delay, move it.' },
+    { key: 'notStartedNotify', label: 'Not started — notify', widget: 'textarea', placeholder: '[tousers:john|toemails:a@b.com|subject:Waiting|body:Please start]@[1h]', help: 'Keys: tousers, togroups, toemails, from, replyto, subject, body. Users get a bell notification; addresses get an e-mail.' },
+    { key: 'notCompletedNotify', label: 'Not completed — notify', widget: 'textarea', placeholder: '[tousers:john]@[1d]' },
   ] }, { title: 'Data', fields: [
     { key: 'inputs', label: 'Task inputs (taskVar ← processVar)', widget: 'keyval', valueSource: 'ownRef', help: 'Left = the field name the form/UI sees on this task. Right = "$name" to copy one of this process\'s own variables in, or a literal value.' },
     { key: 'outputs', label: 'Task outputs (processVar ← taskVar)', widget: 'keyval', keySource: 'own', help: 'Left = the process variable to write (pick an existing one to overwrite it, or type a new name). Right = the field name submitted on this task.' },
-  ] }],
+  ] }, SLA],
   diagram: { icon: 'user', color: '#2563eb', shape: 'rectangle' },
   typeLabel: 'User task',
   docs: {

@@ -2,18 +2,19 @@
 // Deterministic core (clock/newId injected). Persists the instance after runToQuiescence.
 import { effectiveLimitsFor } from '../modules/platform/limits.ts';
 import type { AppContext } from '../context.ts';
-import { Collections, type Deployment, type Instance, type NodeVisit, type Task, type TimerJob, type Token } from '../domain.ts';
+import { Collections, type Deployment, type Instance, type NodeSla, type NodeVisit, type Task, type TimerJob, type Token } from '../domain.ts';
 import type { EngineFlow, EngineNode, EngineProcess } from '../sdk/index.ts';
 import { NODE_HANDLERS, CHILD_OUTPUT_MAPPERS, buildMultiInstanceResult, type HandlerCtx, type HandlerResult } from './nodes/index.ts';
 import { varTypesOf, kcontextInfoOf, onActionOf, scriptLimitsOf } from './nodes/kcontext-info.ts';
 // Aliased (not `boundary`) since fireBoundary()'s own parameter below is already named `boundary`.
 import * as boundaryHandler from './nodes/boundary/handler.ts';
-import { computeDue, parseDuration } from './duration.ts';
+import { computeDue, parseDuration, dueFrom } from './duration.ts';
 import { kickWorker, ASYNC_CAPABLE } from './async-kick.ts';
 import { runScript } from './sandbox.ts';
 import { config } from '../infra/config.ts';
 import { conflict, quotaExceeded } from '../infra/errors.ts';
 import { SettingsService } from '../modules/settings/service.ts';
+import { NotificationService } from '../modules/notifications/service.ts';
 
 // Error codes the Node runtime raises (documented in docs/14-error-handling.md); user codes also
 // allowed. Re-exported from nodes/boundary/handler.ts, which owns error-catch matching logic now.
@@ -105,7 +106,7 @@ export class ExecutionEngine {
         const node = nodes.get(token.nodeId);
         if (!node) { this.removeToken(inst, token.id); continue; }
 
-        const visit: NodeVisit = { tokenId: token.id, nodeId: node.id!, type: node.type, enteredAt: this.ctx.clock() };
+        const visit: NodeVisit = { tokenId: token.id, nodeId: node.id!, type: node.type, enteredAt: this.ctx.clock(), ...(token.sla ? { sla: { ...token.sla } } : {}) };
         inst.history.push(visit);
         this.emit({ kind: 'node.entered', instanceId: inst.id, nodeId: node.id!, tokenId: token.id });
 
@@ -121,7 +122,7 @@ export class ExecutionEngine {
         if (result.wait?.kind === 'async') {
           // jBPM "Is Async": park the token (the instance is saved), hand the node to the worker, and let the caller go
           token.state = 'waiting'; token.waitFor = result.wait; visit.outcome = 'queued';
-          try { await this.scheduleAsync(inst, token.id, node.id!, node as any); }
+          try { await this.scheduleAsync(inst, token.id, node.id!, node as any); await this.startSla(inst, token, node as any, visit); }
           catch (e) {
             this.removeToken(inst, token.id);
             if (await this.raiseError(inst, p, dep, node.id!, 'RUNTIME_ERROR', (e as Error).message)) continue;
@@ -132,6 +133,7 @@ export class ExecutionEngine {
         if (result.wait) {
           token.state = 'waiting'; token.waitFor = result.wait;
           try {
+            await this.startSla(inst, token, node as any, visit);
             if (result.wait.kind === 'timer' && result.wait.dueAt) await this.scheduleTimer(inst, token.id, node.id!, result.wait.dueAt);
             // schedule any timer boundary events attached to this (now waiting) host node — WHICH
             // boundaries match is boundary/handler.ts's own decision; scheduling the actual TimerJob
@@ -186,6 +188,7 @@ export class ExecutionEngine {
         // triggered mid-handler (inst.status no longer 'running'): an aborted instance must not
         // keep accumulating new tokens just because the node it aborted from "completed normally"
         // from the handler's own point of view.
+        if (token.sla) await this.settleSla(inst, token.id, 'met');
         this.removeHostToken(inst, p, token.id, node.id!);
         if (result.end === 'complete' || result.consume || inst.status !== 'running') { /* no successors */ }
         else {
@@ -596,6 +599,38 @@ export class ExecutionEngine {
     inst.status = 'running';
     return this.runToQuiescence(inst, dep);
   }
+  /** jBPM "SLA Due Date" (customSLADueDate): when a node waits (or is queued) with an SLA, start its clock — compliance is
+   *  pending, becomes met when the node completes before dueAt, violated when the SLA job fires first. Nodes that finish inline
+   *  have nothing to measure, so they never reach this. Armed once per token (an async hop keeps the same clock). */
+  private async startSla(inst: Instance, token: Token, node: { slaDueDate?: unknown }, visit: NodeVisit): Promise<void> {
+    if (token.sla || typeof node.slaDueDate !== 'string' || !node.slaDueDate.trim()) return;
+    const dueAt = dueFrom(node.slaDueDate, this.ctx.clock(), inst.variables);
+    if (!dueAt) return;                                        // an unreadable SLA never blocks the process (validation flags it)
+    token.sla = { dueAt, status: 'pending' }; visit.sla = { ...token.sla };
+    await this.timerRepo().put({ id: this.ctx.newId(), tenantId: this.ctx.tenantId, instanceId: inst.id, tokenId: token.id, nodeId: token.nodeId, kind: 'sla', dueAt, fired: 0, status: 'scheduled' });
+  }
+  /** the node finished (met) or its SLA timer fired (violated): record it on the token and on every visit of that token */
+  private async settleSla(inst: Instance, tokenId: string, status: 'met' | 'violated'): Promise<boolean> {
+    let changed = false;
+    const at = this.ctx.clock();
+    const tok = inst.tokens.find((t) => t.id === tokenId);
+    if (tok?.sla?.status === 'pending') { tok.sla = { ...tok.sla, status, at }; changed = true; }
+    for (const v of inst.history) if (v.tokenId === tokenId && v.sla?.status === 'pending') { v.sla = { ...v.sla, status, at }; changed = true; }
+    return changed;
+  }
+  /** The worker fired a node's SLA job. Violation is recorded and announced; the process itself carries on untouched. */
+  async fireSla(inst: Instance, dep: Deployment, tokenId: string): Promise<Instance> {
+    if (!inst.tokens.some((t) => t.id === tokenId)) return inst;           // the node already ended another way
+    if (!(await this.settleSla(inst, tokenId, 'violated'))) return inst;
+    const node = this.nodeMap(this.proc(inst, dep)).get(inst.tokens.find((t) => t.id === tokenId)!.nodeId);
+    await this.inst().put(inst);
+    await this.ctx.audit({ actor: 'system', kind: 'node.sla.violated', workflowId: inst.workflowId, instanceId: inst.id, nodeId: node?.id, data: { node: (node as any)?.name ?? node?.id } });
+    this.emit({ kind: 'instance.updated', instanceId: inst.id });
+    if (inst.startedBy && inst.startedBy !== 'system' && inst.startedBy !== 'timer') {
+      await new NotificationService(this.ctx).notify({ userId: inst.startedBy, kind: 'sla-breached', title: `SLA breached on "${(node as any)?.name ?? node?.id}"`, body: `Instance ${inst.id} is past the node's due time`, link: `/instances/${inst.id}`, instanceId: inst.id }).catch(() => {});
+    }
+    return inst;
+  }
   /** An async job ran out of attempts: the instance fails at that node (shows up in Execution Errors like any other failure). */
   async failInstanceAt(inst: Instance, dep: Deployment, nodeId: string, message: string): Promise<Instance> {
     inst.tokens = inst.tokens.filter((t) => !(t.nodeId === nodeId && t.waitFor?.kind === 'async'));
@@ -978,6 +1013,7 @@ export class ExecutionEngine {
     if (!token || token.state !== 'waiting') throw conflict('token is not waiting');
     if (vars) Object.assign(inst.variables, vars);
     await this.cancelTimersForToken(inst, tokenId);   // host resumed → drop its pending boundary/catch timers
+    if (token.sla) await this.settleSla(inst, tokenId, 'met');
     const p = this.proc(inst, dep);
     const node = this.nodeMap(p).get(token.nodeId);
     // A message/signal/escalation boundary's own waiting token (see messageBoundaryHosts) resolving —

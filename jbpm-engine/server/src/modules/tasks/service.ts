@@ -1,11 +1,12 @@
 // User-task inbox: list/claim/complete. Completing a task resumes the waiting instance token.
 import type { AppContext } from '../../context.ts';
 import { inList } from '../../infra/filters.ts';
-import { Collections, type AuditEvent, type Deployment, type Group, type Task, type TaskAttachment, type TaskComment, type User } from '../../domain.ts';
+import { Collections, type AuditEvent, type Deployment, type Group, type Task, type TaskAttachment, type TaskComment, type TimerJob, type User } from '../../domain.ts';
 import { InstanceService } from '../instances/service.ts';
 import { NotificationService } from '../notifications/service.ts';
 import type { EngineEvent } from '../../engine/execution-engine.ts';
 import { notFound, conflict, forbidden, validation } from '../../infra/errors.ts';
+import { sendMail } from '../../infra/mailer.ts';
 
 export class TaskService {
   private instances: InstanceService;
@@ -213,6 +214,39 @@ export class TaskService {
     return t;
   }
 
+  private async cancelDeadlines(taskId: string, prefix: 'notStarted' | 'notCompleted'): Promise<void> {
+    const jobs = await this.ctx.store.repo<TimerJob>(Collections.timers).query((j) => j.kind === 'deadline' && j.taskId === taskId && j.status === 'scheduled' && !!j.deadline?.type.startsWith(prefix));
+    for (const j of jobs) { j.status = 'cancelled'; await this.ctx.store.repo<TimerJob>(Collections.timers).put(j); }
+  }
+
+  /** A task deadline came due (NotStarted/NotCompleted Reassign/Notify): act only if the task is still in the state the deadline
+   *  watches — a started task ignores "not started", a finished one ignores both. Reassign moves it to the named users/groups;
+   *  notify rings the users' bell and mails the addresses (mail never fails the job). */
+  async fireDeadline(job: TimerJob): Promise<void> {
+    const t = job.taskId ? await this.repo().get(job.taskId) : undefined;
+    const d = job.deadline;
+    if (!t || !d || t.tenantId !== this.ctx.tenantId) return;
+    const open = t.status === 'created' || t.status === 'reserved';
+    const working = open || t.status === 'inprogress' || t.status === 'suspended';
+    if (d.type.startsWith('notStarted') ? !open : !working) return;
+    const list = (v?: string) => (v ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (d.type.endsWith('Reassign')) {
+      const users = list(d.action.users), groups = list(d.action.groups);
+      const from = t.assignee ?? t.group;
+      if (groups[0]) { t.group = groups[0]; t.assignee = undefined; t.status = 'created'; }
+      if (users[0]) { t.assignee = users[0]; t.status = 'reserved'; }
+      await this.repo().put(t);
+      await this.ctx.audit({ actor: 'system', kind: 'task.reassigned.deadline', instanceId: t.instanceId, taskId: t.id, data: { deadline: d.type, from, users, groups } });
+      if (users[0]) await new NotificationService(this.ctx).notify({ userId: users[0], kind: 'task-assigned', title: `Task "${t.name}" was reassigned to you`, body: `deadline ${d.type}`, link: `/tasks/${t.id}`, taskId: t.id, instanceId: t.instanceId }).catch(() => {});
+      return;
+    }
+    const subject = d.action.subject || `Task "${t.name}" ${d.type.startsWith('notStarted') ? 'has not been started' : 'is not completed'}`;
+    const body = d.action.body || `The task "${t.name}" needs attention.`;
+    for (const u of list(d.action.tousers)) await new NotificationService(this.ctx).notify({ userId: u, kind: 'task-reminder', title: subject, body, link: `/tasks/${t.id}`, taskId: t.id, instanceId: t.instanceId }).catch(() => {});
+    for (const to of list(d.action.toemails)) void sendMail({ to, subject, text: body });
+    await this.ctx.audit({ actor: 'system', kind: 'task.notified.deadline', instanceId: t.instanceId, taskId: t.id, data: { deadline: d.type, tousers: list(d.action.tousers), togroups: list(d.action.togroups), toemails: list(d.action.toemails) } });
+  }
+
   /** jBPM Start: reserved → inprogress (the owner begins working; Work tab shows Save/Complete). */
   async start(id: string, user: string): Promise<Task> {
     const t = await this.get(id);
@@ -223,6 +257,7 @@ export class TaskService {
     else if (t.assignee !== user && t.businessAdmin !== user) throw forbidden('only the task owner can start it');
     t.status = 'inprogress';
     await this.repo().put(t);
+    await this.cancelDeadlines(t.id, 'notStarted');          // "not started" deadlines no longer apply once work has begun
     await this.ctx.audit({ actor: user, kind: 'task.started', instanceId: t.instanceId, taskId: t.id });
     return t;
   }
