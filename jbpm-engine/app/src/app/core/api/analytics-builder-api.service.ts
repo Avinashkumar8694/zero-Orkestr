@@ -26,7 +26,7 @@ export interface ParamSpec { name: string; type: 'string' | 'number' | 'boolean'
 export interface AnalyticsApiDef {
   id?: string; slug: string; name: string; description?: string; query: AnalyticsQuery; params: ParamSpec[];
   cacheSeconds: number; status: 'draft' | 'published'; visibility: 'workspace' | 'private'; requires?: string; allowFlows?: boolean;
-  ownerId?: string; version?: number; updatedAt?: string; updatedBy?: string;
+  builtIn?: boolean; ownerId?: string; version?: number; updatedAt?: string; updatedBy?: string;
 }
 export interface AnalyticsResult {
   mode: 'rows' | 'aggregate'; columns: Array<{ key: string; label: string; type: string }>; rows: Array<Record<string, unknown>>;

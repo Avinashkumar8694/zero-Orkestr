@@ -158,6 +158,39 @@ If project-scoped visibility is introduced there, it belongs in the catalogue's 
 
 ---
 
+## 3b. Built-in analytics (seed migrations)
+A set of ready-made analytics APIs ships with the product so a workspace has useful numbers on day one. They are applied like a
+**migration**: versioned, tracked per workspace, run once.
+
+* **When:** at server start for every active workspace (and the default one), and when a workspace is created.
+* **Not every restart:** each workspace has a marker (`analytics_seed`, per workspace) holding the last applied version. A start
+  with nothing newer reads that marker and does nothing — no re-creation, no new audit entry.
+* **Upgrades:** a release adds a new migration (version 2, 3 …) to `analytics/seed.ts`; only that one is applied, once.
+* **Respects the workspace:** a slug the workspace already uses is skipped (never overwritten); a built-in an administrator
+  deleted stays deleted; a failed seed never blocks startup or signup (it stays pending and retries on the next start).
+* **How they look:** published, visible to the workspace, owned by `system`, flagged **Built-in** in the list. Only an
+  administrator (`admin:iam`) can edit or delete one; everyone else builds their own. They obey every rule in §3a, e.g. a viewer
+  can run the process / task ones but not the case ones.
+
+Version 1:
+
+| Slug | Answers | Needs |
+|---|---|---|
+| `instances-by-status` | process instances per status | `query:read` |
+| `instances-started-per-day` | daily starts / ends / average duration, last 30 days | `query:read` |
+| `failed-instances` | recent failures with node and message | `query:read` |
+| `process-duration-by-project` | average and p95 duration of completed instances per project | `query:read` + `workflow:view` |
+| `open-tasks-by-assignee` | workload per assignee / group, oldest open task | `query:read` |
+| `task-turnaround-by-assignee` | count, average, p90 total time, average wait to claim | `query:read` |
+| `overdue-tasks` | tasks past their due time | `query:read` |
+| `cases-by-status` | cases per workflow and status | `workflowInstance:manage` |
+| `case-tasks` (`caseId`) | every task under a case, including sub-processes | `workflowInstance:manage` + `query:read` |
+| `process-call-tree` (`instanceId`) | every called / sub instance with depth, status, duration | `query:read` |
+| `errors-by-node` | unacknowledged execution errors clustered by node | `query:read` |
+| `deployments-overview` | deployments with project, environment, version, status | `workflow:view` |
+
+---
+
 ## 4. Case instance / Process instance flow nodes
 Two nodes in the palette (category *Instances*): **Case instance** (`caseInstance`) and **Process instance** (`processInstance`).
 
@@ -209,6 +242,7 @@ Two nodes in the palette (category *Instances*): **Case instance** (`caseInstanc
 | Catalogue (entities, fields, relations) | `server/src/analytics/catalog.ts` |
 | Query validation + compile + run (joins, aggregation, cache) | `server/src/analytics/engine.ts` |
 | Definitions, slugs, params, versions | `server/src/analytics/service.ts` |
+| Built-in APIs (seed migrations) and their runner | `server/src/analytics/seed.ts`, `migrate.ts` |
 | HTTP routes | `server/src/http/routes/analytics-builder.ts` |
 | Operation registry shared by both nodes | `server/src/engine/nodes/instance-ops/ops.ts` |
 | Nodes | `server/src/engine/nodes/case-instance/`, `process-instance/` |

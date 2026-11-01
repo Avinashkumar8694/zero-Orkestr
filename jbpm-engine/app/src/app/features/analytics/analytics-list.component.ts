@@ -32,7 +32,7 @@ import { AnalyticsBuilderApiService, type AnalyticsApiDef } from '../../core/api
             <tbody>
               @for (a of items(); track a.id) {
                 <tr>
-                  <td><a [routerLink]="['/analytics', a.id]"><b>{{ a.name }}</b></a><div class="muted small">{{ a.query.from }}{{ a.query.joins?.length ? ' + ' + a.query.joins!.length + ' join' + (a.query.joins!.length > 1 ? 's' : '') : '' }}</div></td>
+                  <td><a [routerLink]="['/analytics', a.id]"><b>{{ a.name }}</b></a>@if (a.builtIn) { <span class="badge" title="Shipped with the product; only an administrator can change it">Built-in</span> }<div class="muted small">{{ a.query.from }}{{ a.query.joins?.length ? ' + ' + a.query.joins!.length + ' join' + (a.query.joins!.length > 1 ? 's' : '') : '' }}</div></td>
                   <td><code>{{ a.slug }}</code> <button class="linklike" (click)="copy(a)" title="Copy the call URL">copy URL</button></td>
                   <td><span class="badge" [class.pub]="a.status === 'published'">{{ a.status === 'published' ? 'Published' : 'Draft' }}</span></td>
                   <td>{{ a.visibility === 'private' ? 'Private' : 'Workspace' }}@if (a.requires) { <span class="muted small"> · needs {{ a.requires }}</span> }@if (a.allowFlows) { <span class="muted small"> · flows</span> }</td>

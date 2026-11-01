@@ -8,6 +8,7 @@ import { conflict, forbidden, notFound, validation } from '../infra/errors.ts';
 import { permissionProblem } from '../modules/iam/permissions.ts';
 import type { WorkflowServiceStore } from '../workflow-service/store/types.ts';
 import { catalogView, makeEnv } from './catalog.ts';
+import { SEED_MIGRATIONS } from './seed.ts';
 import { authorizeQuery, collectParams, LIMITS, runQuery, validateQuery, type AnalyticsQuery, type RunResult } from './engine.ts';
 
 export type ParamType = 'string' | 'number' | 'boolean' | 'date' | 'list';
@@ -25,6 +26,8 @@ export interface AnalyticsApi {
   requires?: string;
   /** the owner allows flows (case / process instance nodes) to call this API with the engine's authority */
   allowFlows?: boolean;
+  /** shipped with the product (seed migration): only an administrator can change or delete it */
+  builtIn?: boolean;
   ownerId: string; version: number;
   createdAt: string; createdBy: string; updatedAt: string; updatedBy: string;
 }
@@ -157,6 +160,18 @@ export class AnalyticsService {
     await this.ctx.audit({ actor: c.actor, kind: 'analytics.deleted', data: { id, slug: a.slug } });
   }
 
+  /** create a shipped (seed) API: published, workspace-visible, owned by "system". Returns false when the slug is already in use. */
+  async createBuiltIn(api: { slug: string; name: string; description: string; query: AnalyticsQuery; params?: ParamSpec[]; cacheSeconds?: number }): Promise<boolean> {
+    // a deterministic id: two processes (or replicas) seeding the same workspace at the same moment write the SAME row, so a race can
+    // never produce duplicates
+    const id = `${this.ctx.tenantId}:builtin:${api.slug}`;
+    if ((await this.repo().query((a) => a.tenantId === this.ctx.tenantId && a.slug === api.slug)).length) return false;
+    const d = this.validateDefinition({ ...api, status: 'published', visibility: 'workspace' }, { actor: 'system', permissions: ['*'] });
+    const now = this.ctx.clock();
+    await this.repo().put({ id, tenantId: this.ctx.tenantId, ...d, builtIn: true, ownerId: 'system', version: 1, createdAt: now, createdBy: 'system', updatedAt: now, updatedBy: 'system' });
+    return true;
+  }
+
   // ---- calling a published API ----------------------------------------------------------------------------------------
   private coerce(p: ParamSpec, v: unknown): unknown {
     const fail = () => validation(`parameter "${p.name}" must be ${p.type === 'list' ? 'a list' : `a ${p.type}`}`);
@@ -203,6 +218,37 @@ export class AnalyticsService {
     await this.ctx.audit({ actor: via === 'flow' ? 'flow' : c.actor, kind: 'analytics.run', data: { slug: a.slug, version: a.version, via, rows: result.meta.returned, cached: !!hit } });
     return { slug: a.slug, version: a.version, ...result, meta: { ...result.meta, cached: !!hit } };
   }
+}
+
+// ------------------------------------------------------------------------------------------------ seed migrations
+interface SeedMarker { id: string; tenantId: string; version: number; at: string }
+const SEED_COLLECTION = 'analytics_seed';
+
+/** Apply every seed migration this workspace has not had yet, in order. A no-op (one read) when it is up to date, so it is safe to call
+ *  on every start. Never touches an API the workspace already has under the same slug, and never re-creates one it deleted. */
+const seeding = new Map<string, Promise<unknown>>();
+export function runAnalyticsSeedMigrations(ctx: AppContext, wf: WorkflowServiceStore): Promise<{ applied: number[]; created: string[] }> {
+  // one run at a time per workspace inside this process (the server boots through more than one seeding path)
+  const prev = seeding.get(ctx.tenantId) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(() => applySeedMigrations(ctx, wf));
+  seeding.set(ctx.tenantId, next);
+  next.finally(() => { if (seeding.get(ctx.tenantId) === next) seeding.delete(ctx.tenantId); }).catch(() => undefined);
+  return next;
+}
+async function applySeedMigrations(ctx: AppContext, wf: WorkflowServiceStore): Promise<{ applied: number[]; created: string[] }> {
+  const marker = await ctx.store.repo<SeedMarker>(SEED_COLLECTION).get(`${ctx.tenantId}:analytics`);
+  const have = marker?.version ?? 0;
+  const pending = SEED_MIGRATIONS.filter((m) => m.version > have);
+  const out = { applied: [] as number[], created: [] as string[] };
+  if (!pending.length) return out;
+  const svc = new AnalyticsService(ctx, wf);
+  for (const m of pending) {
+    for (const api of m.apis) { if (await svc.createBuiltIn(api)) out.created.push(api.slug); }
+    await ctx.store.repo<SeedMarker>(SEED_COLLECTION).put({ id: `${ctx.tenantId}:analytics`, tenantId: ctx.tenantId, version: m.version, at: ctx.clock() });
+    out.applied.push(m.version);
+  }
+  await ctx.audit({ actor: 'system', kind: 'analytics.seeded', data: { versions: out.applied, created: out.created } });
+  return out;
 }
 
 export { LIMITS };
