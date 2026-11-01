@@ -1,0 +1,50 @@
+{
+ "policy_system.api-error-handler": [],
+ "policy_system.certificate_document_generation": [],
+ "policy_system.certificate_resend": [],
+ "policy_system.claims": [
+  "warning:usertask-assignment:_A742C21E-359A-48A9-84E1-B3BA5876F5AD:User task \"Task\" has no group or assignee"
+ ],
+ "policy_system.coverage_lapse": [
+  "warning:usertask-assignment:_CBEB9C61-AD21-4E5A-B4BF-9C05F61A651B:User task \"Coverage_Lapse\" has no group or assignee"
+ ],
+ "policy_system.enrollment": [
+  "warning:usertask-assignment:_613DE4E4-BB12-4178-BD5B-4AC07118E50E:User task \"Enrollment\" has no group or assignee"
+ ],
+ "policy_system.enrollment_error_rate_review": [],
+ "policy_system.enrollment_exception": [],
+ "policy_system.enrollment_participation_rate_review": [],
+ "policy_system.error_flow": [],
+ "policy_system.Escalation": [
+  "warning:usertask-assignment:_FC35E5DC-171D-4ADD-A5CE-1640668F5214:User task \"Escalation\" has no group or assignee"
+ ],
+ "policy_system.file_feed": [
+  "warning:usertask-assignment:_9B7A7C7C-2EAD-4675-A272-EEA3F1A87082:User task \"File feed\" has no group or assignee"
+ ],
+ "generate-certificate-send-email": [
+  "warning:usertask-assignment:_76878D2E-559A-49C9-BE03-F139A492B628:User task \"Physical Delivery Exception\" has no group or assignee",
+  "warning:usertask-assignment:_F45E59C8-3A08-44EF-AE67-A2C92098B10A:User task \"Certificate Creation Exception\" has no group or assignee"
+ ],
+ "generate-id-card-send-email": [
+  "warning:usertask-assignment:_76878D2E-559A-49C9-BE03-F139A492B628:User task \"Physical Delivery Exception\" has no group or assignee",
+  "warning:usertask-assignment:_F45E59C8-3A08-44EF-AE67-A2C92098B10A:User task \"ID Card Creation Exception\" has no group or assignee"
+ ],
+ "generate-send-policy-document": [
+  "warning:usertask-assignment:_76878D2E-559A-49C9-BE03-F139A492B628:User task \"Physical Delivery Exception\" has no group or assignee",
+  "warning:usertask-assignment:_F45E59C8-3A08-44EF-AE67-A2C92098B10A:User task \"Generate Document Exception\" has no group or assignee"
+ ],
+ "group-takeover-process": [
+  "warning:usertask-assignment:_A30CA0EC-51AD-4E57-B583-829F59857A8A:User task \"Task\" has no group or assignee"
+ ],
+ "policy-termination": [
+  "warning:usertask-assignment:_F45E59C8-3A08-44EF-AE67-A2C92098B10A:User task \"Termination Exception Review\" has no group or assignee"
+ ],
+ "policy_system.policy_agreement_issuance": [],
+ "policy_system.policy_issue": [],
+ "policy_management_process": [],
+ "policy_system.rest-executor": [],
+ "policy_system.send_communication_with_retry": [
+  "warning:usertask-assignment:_HOLD:User task \"Manual Case - Communication Delivery Failure\" has no group or assignee"
+ ],
+ "policy_management.send_email": []
+}

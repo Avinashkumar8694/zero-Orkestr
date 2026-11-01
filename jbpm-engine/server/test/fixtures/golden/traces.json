@@ -1,0 +1,319 @@
+{
+ "linear": {
+  "status": "completed",
+  "visits": [
+   "s:done",
+   "sc:done",
+   "e:complete"
+  ],
+  "vars": {
+   "out": "a",
+   "x": 1
+  },
+  "waiting": [],
+  "error": null
+ },
+ "exclusive-x1": {
+  "status": "completed",
+  "visits": [
+   "s:done",
+   "g:default",
+   "small:done",
+   "e:complete"
+  ],
+  "vars": {
+   "out": "small",
+   "x": 1
+  },
+  "waiting": [],
+  "error": null
+ },
+ "exclusive-x9": {
+  "status": "completed",
+  "visits": [
+   "s:done",
+   "g:conditional",
+   "big:done",
+   "e:complete"
+  ],
+  "vars": {
+   "out": "big",
+   "x": 9
+  },
+  "waiting": [],
+  "error": null
+ },
+ "parallel": {
+  "status": "completed",
+  "visits": [
+   "s:done",
+   "fork:fork",
+   "a:done",
+   "b:done",
+   "join:join 1/2",
+   "join:join-complete",
+   "e:complete"
+  ],
+  "vars": {
+   "x": 11
+  },
+  "waiting": [],
+  "error": null
+ },
+ "userTask": {
+  "before": {
+   "status": "waiting",
+   "visits": [
+    "s:done",
+    "u:waiting"
+   ],
+   "vars": {},
+   "waiting": [
+    "u:task"
+   ],
+   "error": null
+  },
+  "after": {
+   "status": "completed",
+   "visits": [
+    "s:done",
+    "u:waiting",
+    "sc:done",
+    "e:complete"
+   ],
+   "vars": {
+    "out": "after",
+    "x": 5
+   },
+   "waiting": [],
+   "error": null
+  }
+ },
+ "catchTimer": {
+  "before": {
+   "status": "waiting",
+   "visits": [
+    "s:done",
+    "c:waiting"
+   ],
+   "vars": {},
+   "waiting": [
+    "c:timer"
+   ],
+   "error": null
+  },
+  "after": {
+   "status": "completed",
+   "visits": [
+    "s:done",
+    "c:waiting",
+    "sc:done",
+    "e:complete"
+   ],
+   "vars": {
+    "out": "woke"
+   },
+   "waiting": [],
+   "error": null
+  }
+ },
+ "boundaryTimer": {
+  "instance": {
+   "status": "completed",
+   "visits": [
+    "s:done",
+    "u:waiting",
+    "bt:done",
+    "esc:done",
+    "e2:complete"
+   ],
+   "vars": {
+    "out": "escalated"
+   },
+   "waiting": [],
+   "error": null
+  },
+  "tasks": [
+   "exited"
+  ]
+ },
+ "signalCatch": {
+  "before": {
+   "status": "waiting",
+   "visits": [
+    "s:done",
+    "c:waiting"
+   ],
+   "vars": {},
+   "waiting": [
+    "c:signal"
+   ],
+   "error": null
+  },
+  "signaled": 1,
+  "after": {
+   "status": "completed",
+   "visits": [
+    "s:done",
+    "c:waiting",
+    "sc:done",
+    "e:complete"
+   ],
+   "vars": {
+    "out": "went"
+   },
+   "waiting": [],
+   "error": null
+  }
+ },
+ "errorBoundary": {
+  "status": "completed",
+  "visits": [
+   "s:done",
+   "bad:error",
+   "be:done",
+   "h:done",
+   "e2:complete"
+  ],
+  "vars": {
+   "errorInfo": {
+    "code": "SCRIPT_ERROR",
+    "node": "bad",
+    "nodeName": "bad",
+    "nodeType": "script",
+    "message": "script failed: boom",
+    "details": {
+     "lang": "js",
+     "message": "boom",
+     "stack": "Error: boom\n    at <isolated-vm>:2:7\n    at <isolated-vm>:3:3\n    at (<isolated-vm boundary>)\n    at file:///Users/avinashkumargupta/Documents/projects/Zero/zero-Orkestr/jbpm-engine/server/src/engine/sandbox.ts:6:71"
+    },
+    "at": "2025-01-01T00:00:00.000Z"
+   },
+   "out": "handled"
+  },
+  "waiting": [],
+  "error": null
+ },
+ "unhandledError": {
+  "status": "failed",
+  "visits": [
+   "s:done",
+   "sc:error"
+  ],
+  "vars": {
+   "errorInfo": {
+    "code": "SCRIPT_ERROR",
+    "node": "sc",
+    "nodeName": "sc",
+    "nodeType": "script",
+    "message": "script failed: nope",
+    "details": {
+     "lang": "js",
+     "message": "nope",
+     "stack": "Error: nope\n    at <isolated-vm>:2:7\n    at <isolated-vm>:3:3\n    at (<isolated-vm boundary>)\n    at file:///Users/avinashkumargupta/Documents/projects/Zero/zero-Orkestr/jbpm-engine/server/src/engine/sandbox.ts:6:71"
+    },
+    "at": "2025-01-01T00:00:00.000Z"
+   }
+  },
+  "waiting": [],
+  "error": "script failed: nope"
+ },
+ "callSync": {
+  "status": "completed",
+  "visits": [
+   "s:done",
+   "c:called:*",
+   "e:complete"
+  ],
+  "vars": {
+   "out": "from child"
+  },
+  "waiting": [],
+  "error": null
+ },
+ "callWaiting": {
+  "before": {
+   "status": "waiting",
+   "visits": [
+    "s:done",
+    "c:called:*"
+   ],
+   "vars": {},
+   "waiting": [
+    "c:child"
+   ],
+   "error": null
+  },
+  "after": {
+   "status": "completed",
+   "visits": [
+    "s:done",
+    "c:called:*",
+    "sc:done",
+    "e:complete"
+   ],
+   "vars": {
+    "out": "parent done"
+   },
+   "waiting": [],
+   "error": null
+  }
+ },
+ "subprocess": {
+  "status": "completed",
+  "visits": [
+   "s:done",
+   "sp:sub:*",
+   "e:complete"
+  ],
+  "vars": {
+   "out": "inner"
+  },
+  "waiting": [],
+  "error": null
+ },
+ "terminate": {
+  "instance": {
+   "status": "completed",
+   "visits": [
+    "s:done",
+    "fork:fork",
+    "u:waiting",
+    "et:terminate"
+   ],
+   "vars": {},
+   "waiting": [],
+   "error": null
+  },
+  "tasks": [
+   "exited"
+  ]
+ },
+ "asyncNode": {
+  "before": {
+   "status": "waiting",
+   "visits": [
+    "s:done",
+    "sc:queued"
+   ],
+   "vars": {},
+   "waiting": [
+    "sc:async"
+   ],
+   "error": null
+  },
+  "after": {
+   "status": "completed",
+   "visits": [
+    "s:done",
+    "sc:done",
+    "e:complete"
+   ],
+   "vars": {
+    "out": "bg"
+   },
+   "waiting": [],
+   "error": null
+  }
+ }
+}
