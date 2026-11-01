@@ -27,12 +27,16 @@ export const handler: NodeHandler = async (c) => {
     childVars[cv] = typeof spec === 'string' && spec.startsWith('$') ? c.inst.variables[spec.slice(1)] : spec;
   }
   const independent = n.independent === true;
+  // jBPM keeps two switches apart: `independent` (the child outlives the parent) and `waitForCompletion` (the parent waits for it).
+  // `waitForCompletion: false` makes the parent continue at once. For flows written before it existed, `independent: true` alone
+  // still means fire-and-forget; setting waitForCompletion explicitly always wins.
+  const wait = n.waitForCompletion !== undefined ? n.waitForCompletion !== false : !independent;
   const child = await c.startChild(resolved.dep, resolved.processId, childVars, token.id, independent);
-  // independent:true = fire-and-forget — the parent continues immediately whether or not the child
-  // has finished, and the child's lifecycle is fully decoupled: it keeps running standalone even past
+  // no wait = fire-and-forget — the parent continues immediately whether or not the child
+  // has finished (with independent:true the child's lifecycle is also fully decoupled: it keeps running standalone even past
   // this parent's own completion/abort (see Instance.independent / abortDescendants). Default
   // (unset/false) preserves the normal wait-for-completion behavior below.
-  if (independent) return { vars: child.status === 'completed' ? mapChildOutputs(n, child) : {}, outcome: `called:${child.id}` };
+  if (!wait) return { vars: child.status === 'completed' ? mapChildOutputs(n, child) : {}, outcome: `called:${child.id}` };
   if (child.status === 'completed') return { vars: mapChildOutputs(n, child), outcome: `called:${child.id}` };
   // A dependent child that already finished (aborted/failed) synchronously — inside this very
   // startChild() call, never having parked in a wait — must be raised here; falling through to the

@@ -153,6 +153,7 @@ export class SideNavComponent {
     if (this.auth.hasPermission('query:read')) {
       base.push({ label: 'Reports & Exports', icon: 'file', link: '/reports' });
     }
+    if (this.auth.hasPermission('analytics:query')) base.push({ label: 'Analytics builder', icon: 'chart', link: '/analytics' });
     if (this.tenant.isPlatformAdmin()) base.push({ label: 'Plans & platform limits', icon: 'settings', link: '/platform-limits' });
     return base;
   });

@@ -72,6 +72,15 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
     const onE = kids(ext, 'onEntry-script')[0]; const onX = kids(ext, 'onExit-script')[0];
     if (onE) { nd.onEntry = cdataText(kid(onE, 'script')); const f = attr(onE, 'scriptFormat'); if (f) nd.onEntryFormat = f; }
     if (onX) { nd.onExit = cdataText(kid(onX, 'script')); const f = attr(onX, 'scriptFormat'); if (f) nd.onExitFormat = f; }
+    // jBPM's designer extras live in <drools:metaData name="customXxx"> — keep every one (elementname is the node's name, handled elsewhere)
+    for (const md of kids(ext, 'metaData')) {
+      const name = md.attrs.name; if (!name || name === 'elementname') continue;
+      const v = cdataText(kid(md, 'metaValue')) ?? '';
+      if (name === 'customAsync') nd.async = v.trim() === 'true';
+      else if (name === 'customSLADueDate') nd.slaDueDate = v;
+      else if (name === 'customAutoStart') nd.autoStart = v.trim() === 'true';
+      else (nd.metaData ||= {})[name] = v;
+    }
   }
   function applyEventDef(nd: Node, el: ElementNode) {
     const sg = kid(el, 'signalEventDefinition'); if (sg) { nd.eventType = 'signal'; nd.signalName = sigName(sg.attrs.signalRef); return; }

@@ -28,6 +28,8 @@ export type VarSource = 'own' | 'ownRef' | 'called';
 export interface UiField {
   key: string; label: string; widget: Widget; options?: string[]; placeholder?: string; help?: string;
   assetKind?: string; varSource?: VarSource; keySource?: VarSource; valueSource?: VarSource;
+  /** show this field only while another field has one of these values — e.g. an operation's own parameters */
+  when?: { key: string; in: string[] };
 }
 export interface UiSection { title: string; fields: UiField[]; }
 
@@ -97,10 +99,22 @@ export interface NodeDef {
   typeLabel: string;
 }
 
-export const CATEGORIES = ['Events', 'Tasks', 'Gateways', 'Sub-process', 'Data'];
+export const CATEGORIES = ['Events', 'Tasks', 'Gateways', 'Sub-process', 'Instances', 'Data'];
 
 // shared "General" section reused by every node's schema
 export const GENERAL: UiSection = { title: 'General', fields: [
   { key: 'name', label: 'Name', widget: 'text' },
   { key: 'documentation', label: 'Documentation', widget: 'textarea', placeholder: 'Notes for this node' },
+] };
+
+/** jBPM's "Is Async" (drools:customAsync), shared by every node type that can run in the background. */
+export const EXECUTION: UiSection = { title: 'Execution', fields: [
+  { key: 'async', label: 'Run in the background (async)', widget: 'bool', help: 'The instance is saved and the caller is released; a worker runs this node. Use for slow scripts, calls and integrations so the start request never waits.' },
+  { key: 'asyncRetries', label: 'Async retries', widget: 'number', placeholder: '3', help: 'Extra attempts when the worker cannot run the node (infrastructure failure). A script or HTTP error is not retried here: it follows the error handling of the process.' },
+  { key: 'asyncRetryDelay', label: 'Async retry delay', widget: 'text', placeholder: 'PT10S', help: 'ISO-8601 duration; each further attempt waits this long times the attempt number.' },
+] };
+
+/** jBPM "SLA Due Date" (customSLADueDate): a node that is still running past this time is flagged as violating its SLA. */
+export const SLA: UiSection = { title: 'Service level (SLA)', fields: [
+  { key: 'slaDueDate', label: 'SLA due date', widget: 'text', placeholder: '2h  ·  1d  ·  PT30M  ·  #{deadline}', help: 'How long this step may take from the moment it starts. On breach the instance is flagged, the audit log records it and the person who started it is notified; the process keeps running. A date or #{variable} also works.' },
 ] };

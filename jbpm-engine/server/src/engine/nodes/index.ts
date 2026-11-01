@@ -19,10 +19,12 @@ import { handler as call, mapChildOutputs as mapCallOutputs } from './call/handl
 import { handler as forEach, buildMultiInstanceResult } from './for-each/handler.ts';
 import { handler as subprocess, mapChildOutputs as mapSubprocessOutputs } from './subprocess/handler.ts';
 import { handler as workItem } from './work-item/handler.ts';
+import { handler as caseInstance } from './case-instance/handler.ts';
+import { handler as processInstance } from './process-instance/handler.ts';
 
 export const NODE_HANDLERS: Record<string, NodeHandler> = {
   start, end, manual, script, http, rule, gateway, userTask, receive,
-  catch: catchEvent, throw: throwEvent, send, call, forEach, subprocess, workItem,
+  catch: catchEvent, throw: throwEvent, send, call, forEach, subprocess, workItem, caseInstance, processInstance,
   // 'boundary' has no active handler — it is spawned by the error router and follows its outgoing flow.
 };
 
@@ -58,6 +60,8 @@ import { def as forEachDef } from './for-each/def.ts';
 import { def as subprocessDef } from './subprocess/def.ts';
 import { def as boundaryDef } from './boundary/def.ts';
 import { def as workItemDef } from './work-item/def.ts';
+import { def as caseInstanceDef } from './case-instance/def.ts';
+import { def as processInstanceDef } from './process-instance/def.ts';
 import type { NodeDef } from './def-types.ts';
 
 export const NODE_DEFS: NodeDef[] = [
@@ -65,6 +69,7 @@ export const NODE_DEFS: NodeDef[] = [
   userTaskDef, scriptDef, httpDef, ruleDef, sendDef, receiveDef, manualDef, workItemDef,  // Tasks (+ work items)
   gatewayDef,                                                // Gateways
   callDef, forEachDef, subprocessDef,                        // Sub-process
+  caseInstanceDef, processInstanceDef,                       // Instances (case / process operations)
 ];
 /** engineType → def (ports/schema lookup for validation + UI). */
 export const NODE_DEF_BY_TYPE: Record<string, NodeDef> = Object.fromEntries(NODE_DEFS.map((d) => [d.engineType, d]));

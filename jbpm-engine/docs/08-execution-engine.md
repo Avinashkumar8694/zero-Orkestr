@@ -68,6 +68,9 @@ Resume = load instance → place event → re-enter the step loop → persist.
 
 ## 5. Timers
 
+> Background (async) execution, SLA and user-task deadlines reuse this timer-job machinery: see [18-async-and-node-properties.md](18-async-and-node-properties.md).
+
+
 - `TimerService` polls `timers` where `status='scheduled' AND dueAt<=now` (or uses a min-heap in
   memory backed by the store). Fires → resume token → for cycles, reschedule next `dueAt`.
 - Durations `PTnMnS`/`PnD`, cycles `R/PT1H` / `R5/PT10M`, and absolute dates supported.

@@ -77,6 +77,13 @@ proves each claim. **Legend:** ✅ full · 🟡 partial · ⛔ not yet · ➖ No
 | Retry / suspend / resume / abort | all present | ✅ | test 13; E2E |
 | Related instances (parent/children) | `/instances/:id/related` | ✅ | test 11; E2E |
 | Timers / async jobs | durable TimerJob + scheduler: catch, boundary, **start-timer & recurring cron** | ✅ | engine-timers/-boundary-timer/-start-timer tests |
+| Is Async (`customAsync`) on a node | `async: true` parks the token, a worker runs the node; infra retries with delay | ✅ | async-execution tests; doc 18 |
+| Start a process in the background | `POST /instances` `async:true` / `Prefer: respond-async` → 202 + Location | ✅ (jBPM: command only) | async-execution tests |
+| SLA Due Date (`customSLADueDate`) | pending → met / violated, audit + notification, process continues | ✅ | node-properties tests |
+| User-task NotStarted/NotCompleted Reassign/Notify | jBPM deadline syntax, acts only while the task is in the watched state | ✅ (repeating expiries fire once) | node-properties tests |
+| Call activity `waitForCompletion` | separate from `independent` (legacy `independent:true` still fire-and-forget) | ✅ | node-properties tests |
+| Designer metaData in import / export | async, SLA, autostart, other metaData round-trip through bpmn-sdk | ✅ | bpmn-sdk async-sla-metadata test |
+| Variable tags, MI completion condition, process SLA/description/version/adHoc | — | ⛔ planned (doc 18 §7) | — |
 
 ## G. Human tasks
 | jBPM | This engine | Status | Evidence |

@@ -147,6 +147,8 @@ export class TenantService {
     };
 
     await this.tenantRepo().put(tenant);
+    // a new workspace starts with the built-in analytics APIs (seed migrations; a failure here never blocks the signup)
+    await (await import('../../analytics/migrate.ts')).migrateAnalyticsFor(this.ctx.store, tenantId);
 
     // Find or link user by email/username
     const allUsers = await this.userRepo().query(() => true);
@@ -462,5 +464,7 @@ export class TenantService {
     }
     // bring plans stored by an older version up to date: add the limit keys they lack, move the old 14-day trial to 7
     await new PlanService(this.ctx.store).ensureDefaults();
+    // built-in analytics APIs (a versioned seed migration: applied once per workspace)
+    await (await import('../../analytics/migrate.ts')).migrateAnalyticsFor(this.ctx.store, defaultTenantId);
   }
 }

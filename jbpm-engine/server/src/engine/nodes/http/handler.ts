@@ -34,7 +34,9 @@ export const handler: NodeHandler = async (c) => {
       return { error: (e as Error).message, errorCode: 'SSRF_BLOCKED' };
     }
   }
-  const httpTimeout = (settings.httpTimeoutSeconds && settings.httpTimeoutSeconds > 0) ? settings.httpTimeoutSeconds : 10;
+  // per-node `timeoutSeconds` (jBPM ConnectTimeout/ReadTimeout) wins; else the workspace setting; capped so a node cannot hold a worker forever
+  const nodeTimeout = Number(n.timeoutSeconds);
+  const httpTimeout = nodeTimeout > 0 ? Math.min(nodeTimeout, 300) : (settings.httpTimeoutSeconds && settings.httpTimeoutSeconds > 0) ? settings.httpTimeoutSeconds : 10;
   try {
     const res = await fetch(url, {
       method,

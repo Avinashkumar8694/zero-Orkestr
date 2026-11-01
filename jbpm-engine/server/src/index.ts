@@ -1,4 +1,6 @@
 // Boot: HTTP server + WebSocket hub.
+import { onKick } from './engine/async-kick.ts';
+import { migrateAnalyticsAll } from './analytics/migrate.ts';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createApp } from './app.ts';
@@ -47,9 +49,12 @@ wss.on('connection', async (ws, req) => {
 let stopped = false;
 const isWorkerEnabled = config.role === 'all' || config.role === 'worker';
 if (isWorkerEnabled) {
-  const runTick = async () => {
-    if (stopped) return;
+  let passRunning = false;
+  /** one scheduler pass over every workspace; returns the delay before the next scheduled pass */
+  const runPass = async (): Promise<number> => {
     let nextIntervalMs = config.timerTickIntervalMs;
+    if (passRunning) return nextIntervalMs;
+    passRunning = true;
     try {
       const defaults = await new SettingsService(makeContext({ store, tenantId: config.defaultTenant })).get().catch(() => null);
       if (defaults?.executorIntervalSeconds && defaults.executorIntervalSeconds > 0) nextIntervalMs = defaults.executorIntervalSeconds * 1000;
@@ -75,10 +80,23 @@ if (isWorkerEnabled) {
     } catch (e) {
       logger.error('timer tick failed', { err: (e as Error).message });
     } finally {
-      if (!stopped) setTimeout(runTick, nextIntervalMs);
+      passRunning = false;
     }
+    return nextIntervalMs;
+  };
+  const runTick = async () => {
+    if (stopped) return;
+    const next = await runPass();
+    if (!stopped) setTimeout(runTick, next);
   };
   setTimeout(runTick, config.timerTickIntervalMs);
+  // an async job was just queued in this process: run a pass now (debounced) instead of waiting for the next tick
+  let kicking = false;
+  onKick(() => {
+    if (kicking || stopped) return;
+    kicking = true;
+    setTimeout(() => { kicking = false; void runPass(); }, 25);
+  });
   logger.info('timer worker scheduler enabled', { role: config.role, intervalMs: config.timerTickIntervalMs, batchSize: config.timerBatchSize });
 } else {
   logger.info('timer worker scheduler disabled (stateless API role)', { role: config.role });
@@ -97,6 +115,7 @@ const iamCtx = makeContext({ store, tenantId: config.defaultTenant });
 new IamService(iamCtx).ensureSeeded(config.adminInitialPassword).then(async ({ seededAdmin }) => {
   await new TenantService(iamCtx).seedDefaultsIfEmpty();   // default workspace first, so the platform-admin bootstrap has somewhere to land
   await ensurePlatformAdmin(store, new Date().toISOString(), () => iamCtx.newId());
+  await migrateAnalyticsAll(store);                        // seed migrations (built-in analytics APIs): each version once per workspace, nothing on a plain restart
   if (seededAdmin) logger.info('seeded initial admin user', { username: 'admin', note: 'set ADMIN_INITIAL_PASSWORD before first boot in anything but local dev' });
   server.listen(config.port, () => {
     logger.info('jbpm-engine server up', { port: config.port, ws: config.wsPath, store: config.store, role: config.role, dataDir: config.dataDir, sso: !!config.oidc.issuer, localLogin: config.localLogin });
