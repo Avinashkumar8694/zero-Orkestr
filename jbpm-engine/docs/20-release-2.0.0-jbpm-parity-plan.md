@@ -1,0 +1,237 @@
+# 20 — Release 2.0.0: jBPM property parity — plan and test plan
+
+Goal: close every jBPM property gap listed in the audit (doc 18 §7 and the follow-up audit), **without breaking anything that works
+today**. This document is the single register: every gap has an id, a design, a risk and the tests that prove it. A gap is "done"
+only when its tests are green and its docs are updated (§7).
+
+Branch: `release/2.0.0` (built on top of the async / node-properties / analytics work). Nothing is merged to `master` or
+`release/1.0.1` from here.
+
+---
+
+## 1. Ground rules — "nothing should break"
+
+| # | Rule | How it is enforced |
+|---|---|---|
+| R1 | **Additive only.** Every new property is optional. A process that does not set it behaves exactly as before. | Compat harness (§5.1): old process JSON must produce identical results. |
+| R2 | **Defaults never change.** Where jBPM's default differs from ours (e.g. `skippable`), we keep ours unless the process opts in. | Per-gap "default" column; a test per gap asserts the unset case. |
+| R3 | **No data migration.** New fields are absent on existing rows; readers treat absent as "off". Engine JSON stays valid for the SDK. | Load-old-data tests (§5.2). |
+| R4 | **Security can only get tighter.** Multi-owner tasks must never widen who can claim or complete. | Dedicated authorization tests (§5.5). |
+| R5 | **One gap, one commit, one test file section.** Each commit leaves the whole suite green. | Phase exit criteria (§4). |
+| R6 | **Honest non-goals.** Anything that cannot make sense in a JavaScript engine is documented as unsupported, and import reports it explicitly. | §6, and the SDK import report (S08). |
+| R7 | **Docs move with code.** Node reference, parity table, in-app node docs and API spec are updated in the same change. | Phase exit checklist (§7). |
+
+### Baseline to protect (measured on this branch)
+* Server suite: **522 pass / 30 fail**; the 30 are environmental (Java sidecar needs a JVM; kjar journeys) and must stay exactly those
+  30 — any *new* failure is a regression.
+* bpmn-sdk suite: **195 pass / 0 fail**.
+* Angular production build: clean.
+* The real project `policy_system_node_project.json` (23 processes, ~365 nodes): validates the same before and after (§5.1).
+
+---
+
+## 2. Gap register
+
+Legend — **Risk**: L low (isolated, optional field) · M medium (touches a shared engine path) · H high (new execution concept).
+**Default** = behaviour when the property is not set.
+
+### 2.1 Phase 1 — small, isolated, high value (all Risk L unless noted)
+
+| Id | Area | Property | What it does | Design (where) | Default | Risk |
+|---|---|---|---|---|---|---|
+| G01 | User task | Several **actors** and **groups** (`actors[]`, `groups[]`) | Offer a task to many users and many groups | `Task.actors/groups`; `assertOwnable`, claim, inbox filters accept any match; legacy `group`/`assignee` still honoured and merged | one group / assignee as today | **M** (authorization) |
+| G02 | User task | **Stakeholders**, **business-admin groups** | Extra roles that may view / manage a task | `Task.stakeholders[]`, `businessAdminGroups[]`; view + admin checks | none | M |
+| G03 | User task | **Comment**, **Content**, **Locale**, **Created by** | Initial comment, extra form data, notification language, creator | first `TaskComment` from `comment`; `Content` → `inputs.Content`; `Task.locale/createdBy` | absent | L |
+| G05 | Call activity | **When the called process fails** (`onChildFailure`: `fail` \| `continue` \| `abort`) — jBPM "abort parent" | Choose fail-with-error (today), carry on, or abort the parent at once | `tryFailParent` + call handler sync branch; `continue` writes `{error}` to an optional result var | `fail` (today) | M |
+| G05b | Call activity | **Called element by name** (`processName`) | Find the process by name, not id | `makeResolveCalled` second lookup by `name` | by id | L |
+| G06 | Gateway / flow | **Flow priority** (`priority` on flows) | Decides which outgoing flow wins when several conditions are true | gateway handler sorts candidates by priority (stable, ascending) | drawn order | L |
+| G07 | For-each | **Completion condition** (`completionCondition`) | Stop remaining runs once an expression is true | evaluated after each child settles in `buildMultiInstanceResult`; cancels the rest | none | M |
+| G08 | Variables | **Tags** `required`, `readonly` | `required`: start fails if absent; `readonly`: set once | `EngineVar.tags`; check at start, in `updateVariables`, and after each node (snapshot compare) | no tags | M |
+| G09 | Process | **Process SLA** (`slaDueDate`) | Instance-level due time, met / violated | reuse the `sla` job on the instance; `Instance.sla` | none | L |
+| G10 | Process | **Instance description** (`#{var}` template) | Readable title filled at start | `Instance.description` rendered once; shown in lists | none | L |
+| G11 | Process | **Version label**, **ad-hoc flag** | Version string on the definition; make a process ad-hoc | stored on the process JSON, shown in UI | none | L |
+| G12 | Activity | **AdHoc autostart** (`autoStart`) | In an ad-hoc process, nodes without incoming flow start by themselves | `engine.start` seeds tokens for them | off | L |
+| G13 | Activity | **Tags / metadata attributes** (`metaData`) | Free labels readable from scripts | `GENERAL` schema keyval; exposed as `node.metaData` | none | L |
+| G14 | HTTP / REST | **Content type**, **basic / bearer auth** | Right headers without hand-writing them | http handler builds headers; secrets via `$var` / env | headers as today | L |
+| G15 | Async | **Initial delay**, **priority** (`asyncDelay`, `asyncPriority`) | Wait before a background run; order jobs | `scheduleAsync` dueAt + job priority ordering in tick | immediate | L |
+| G16 | Activity | **isForCompensation** | Marks a node as a compensation handler | validation skips "unreachable" for it; engine ignores it in normal flow | off | L |
+
+### 2.2 Phase 2 — timers and events (Risk M: shared timer machinery)
+
+| Id | Area | Property | What it does | Design | Default | Risk |
+|---|---|---|---|---|---|---|
+| G17 | Timers | **Cron** (`language: cron`; Quartz-style 6/7 fields and 5-field) | Fire on a schedule | `cronNext()` in `duration.ts`; `computeDue`; reschedule path; start / boundary / catch | ISO only | M |
+| G18 | Timers | **`#{variable}`** in any timer value | Delay / date from a variable | `computeDue(spec, now, vars)` at the three call sites | literal | L |
+| G19 | Timers | **Short delay form** (`1h 30m`) | Friendlier durations | `parseDelay` fallback in `computeDue` | ISO | L |
+| G20 | Events | **Link events** (throw ↔ catch by name) | "Go to" inside one process | throw returns `next:[catch id]`; catch with `link` passes through; validation pairs them | n/a | L |
+| G21 | Events | **Conditional catch** | Wait until a condition becomes true | re-evaluate waiting condition tokens whenever variables change (node end, API edit, signal) | n/a | **M** |
+| G22 | Events | **Conditional boundary** | Interrupt / run beside a host when a condition becomes true | reuse the message-boundary token mechanism with kind `condition` | n/a | M |
+| G23 | Events | **Conditional start** | Start when a condition becomes true | *Decision needed:* no rule engine; offer "condition evaluated on variable change of a *running* instance" only, or defer. Default plan: **not supported**, documented | n/a | H |
+| G24 | Events | **Signal scope** (`scope`: `workspace` \| `instance`) | Signal reaches only this instance, or everyone | throw / end pass `scope`; `instance` → targeted delivery | `workspace` (today) | M |
+| G25 | User task | **Suspend until** | Task hidden until a time | task created `suspended`; one `deadline` job resumes it | immediate | L |
+
+### 2.3 Phase 3 — structural (Risk H: new execution concepts; each lands behind its own tests)
+
+| Id | Area | Property | What it does | Design | Default | Risk |
+|---|---|---|---|---|---|---|
+| G27 | Sub-process | **Event sub-process by signal / message / timer / escalation** | Handler that starts when the event happens during the parent's life | register waiting listener tokens at scope start; firing starts the nested instance; cancelled at scope end | error only (today) | **H** |
+| G28 | Sub-process | **Interrupting vs non-interrupting** event sub-process | Stop the parent, or run beside it | flag on G27 | n/a | H |
+| G29 | Sub-process | **Ad-hoc sub-process** (`completionCondition`, `ordering`) | Tasks started by people in any order until done | nested scope with unconnected nodes started via API; completes when condition true | n/a | H |
+| G30 | User task | **Assignment strategy** | Auto-pick owner (round-robin, least-loaded) | pluggable picker at task creation | manual claim | M |
+| G31 | User task | **Swimlane autoclaim** | Same person as the previous task in the lane gets it | lane lookup of last completer | off | M |
+| G32 | Gateway | **Event-based gateway "instantiate"** | Process starts on first of several events | start-time listeners (shares G27 machinery) | n/a | H |
+| G33 | Sub-process | **Transaction cancel** | Cancel end triggers compensation of the scope | cancel end → run recorded handlers for the scope, then abort scope | n/a | M |
+| G34 | Activity | **Multi-instance on any task** | Run a user task / script / HTTP once per item | generic `multiInstance` property expanded by the engine into the existing for-each machinery | none | H |
+| G35 | Gateway | **Complex gateway activation condition** | Custom rule for when a join fires | evaluate expression over arrived-token counts | n/a | M |
+
+### 2.4 Phase 4 — jBPM import / export (bpmn-sdk)
+
+| Id | Item | Notes |
+|---|---|---|
+| S01 | Process-level `drools:metaData` (SLA, description) | read / write; engine ⇄ BPMN |
+| S02 | Variable tags (`customTags`) | `required` / `readonly` |
+| S03 | `drools:version`, `drools:adHoc` | attributes on the process |
+| S04 | User-task data inputs (`ActorId`, `GroupId`, `Comment`, `Content`, `Locale`, `CreatedBy`, `BusinessAdministratorGroupId`, `TaskStakeholderId`, `suspendUntil`, `NotStarted…`, `NotCompleted…`) | mapped to G01–G03, G25 and the existing deadlines |
+| S05 | Timer `language` (cron / mvel) | G17 |
+| S06 | MI completion condition | G07 |
+| S07 | `abortParent`, `calledElementByName` | G05, G05b |
+| S08 | **Import report**: every construct that could not be mapped (non-goals in §6, anything still `raw`) is listed per process, never silently dropped | new, shown in the import UI |
+
+### 2.5 Phase 5 — UI and tooling
+| Id | Item |
+|---|---|
+| U01 | Properties-panel fields for every new node property (schema-driven, with help text) |
+| U02 | Process properties: version, ad-hoc, SLA, description template, variable tags |
+| U03 | Variable editor: `required` / `readonly` checkboxes |
+| U04 | User-task form: owners as chips (many users / groups) |
+| U05 | Instance views: SLA state, description, queued / suspended task markers |
+| U06 | In-app node documentation updated (`def.ts` docs blocks) |
+
+---
+
+## 3. Delivery order and why
+1. **Phase 0 — safety net first** (no behaviour change): golden fixtures and compat harness (§5.1–5.2), so every later phase is checked against today's behaviour.
+2. **Phase 1** — the small items (and G01, the one with a security angle, early so it gets the longest soak).
+3. **Phase 2** — timers and events (shared machinery, done together so the timer code is touched once).
+4. **Phase 3** — structural items, one at a time, each only after the previous is green.
+5. **Phase 4** — SDK, once the engine surface is final (otherwise the SDK chases a moving target).
+6. **Phase 5** — UI, then docs / release notes, then a full regression + live smoke pass.
+
+Each phase ends with its **exit gate** (§4). A failed gate blocks the next phase.
+
+---
+
+## 4. Exit gate for every phase
+1. Server suite: pass count ≥ previous + the phase's new tests; **failures = exactly the 30 environmental ones**.
+2. bpmn-sdk suite green (195 + new).
+3. `ng build` (development and production) clean.
+4. Golden harness (§5.1) unchanged.
+5. Live smoke (§5.6) passes on a restarted server.
+6. Docs checklist (§7) ticked for every gap in the phase.
+7. One commit per gap, message names the gap id.
+
+---
+
+## 5. Test plan
+
+### 5.1 Compat harness (Phase 0) — "old things behave the same"
+* **Validation golden:** run `validateProcess` on all 23 processes of `policy_system_node_project.json` and on every process fixture in
+  `server/test`, store the problem lists as `test/fixtures/golden-validation.json`; the test fails on any difference.
+* **Execution golden:** a set of ~25 representative flows (script, gateways of every mode, call + wait, sub-process, for-each,
+  boundary timer / error, event sub-process, error handler, user task + complete, signal / message, compensation, terminate,
+  async node, SLA). For each, record the **instance trace** (node ids and outcomes in order, final status, variables) under a fake
+  clock as `test/fixtures/golden-traces.json`. The test replays and compares exactly. This is what proves R1 / R2.
+* Each phase may *add* golden flows for its new behaviour; it may never edit an existing golden entry (a diff there is a regression
+  unless the user has approved a behaviour change).
+
+### 5.2 Old-data tests
+Load instances, tasks, timer jobs, deployments and analytics definitions written **before** each phase (fixtures captured now) and
+confirm they read, resume and finish unchanged: an instance waiting on a user task / timer / child resumes; an old task is claimable
+exactly as before; an old `TimerJob` fires.
+
+### 5.3 Per-gap tests
+Every gap gets (a) *unset ⇒ unchanged*, (b) *happy path*, (c) *edge / invalid input*, (d) *interaction* cases. Ids are `T-<gap>-<n>`.
+
+| Gap | Must-have cases |
+|---|---|
+| G01 | unset ⇒ same as today · task offered to 2 actors + 2 groups; each can claim, a non-member cannot · `excludedOwners` still wins · group-only member can claim, user listed in `actors` can claim · inbox shows the task to every owner and to no one else · legacy `group` + new `groups` merge · claim by second person while reserved ⇒ 409 as today · business admin override unchanged |
+| G02 | stakeholder can view but not complete · admin group member can reassign · neither widens `complete` |
+| G03 | comment becomes first comment · content reaches form inputs · locale / createdBy stored · all absent ⇒ unchanged |
+| G05 | `fail` identical to today (golden) · `continue`: parent proceeds, error stored in var · `abort`: parent ends `aborted`, children cascade, no boundary needed · sync-failing and waiting child both covered · independent child unaffected · `calledByName`: found by name, ambiguous name ⇒ clear error, unknown ⇒ same as today |
+| G06 | two true conditions: higher priority wins · equal priority ⇒ drawn order · priority on inclusive orders the fan-out list but still takes all matches · unset ⇒ golden |
+| G07 | stops at N completed · remaining children aborted · parallel and sequential · invalid expression ⇒ node error · unset ⇒ golden |
+| G08 | `required` missing ⇒ start refused (422), present ⇒ ok · `readonly` second write via API refused · via script refused with `VARIABLE_READONLY` · first write allowed · tags absent ⇒ golden |
+| G09–G11 | process SLA met / violated / ignored when unreadable · description renders `#{var}` (missing var ⇒ empty) · version / ad-hoc round-trip |
+| G12 | ad-hoc process starts unconnected autoStart nodes only · non-ad-hoc ignores the flag |
+| G13 | metadata saved, readable as `node.metaData` in a script, never affects routing |
+| G14 | content type header sent · basic / bearer built from `$var`, secrets not logged · explicit header still wins |
+| G15 | delayed job not run before its time · priority orders within one tick |
+| G16 | validation does not flag the handler as unreachable · normal flow ignores it |
+| G17 | next-fire correctness table (≥ 25 expressions incl. month ends, DST-free UTC, leap day, `L`/`?`, names, steps) · cron start timer reschedules · cron boundary / catch · invalid cron ⇒ validation error |
+| G18–G19 | `#{x}` resolved for duration / date / cycle · missing var ⇒ error not hang · `1h 30m`, `2d`, ISO equivalent · unset ⇒ golden |
+| G20 | throw jumps to the matching catch · unmatched name ⇒ validation error · duplicate catch name ⇒ validation error · jump inside a sub-process only |
+| G21–G22 | already-true condition passes at once · becomes true after a variable edit / script / signal · boundary interrupting and non-interrupting · condition never true ⇒ stays waiting (no spin) · evaluation cost bounded |
+| G24 | `instance` scope reaches only a parallel branch of this instance · `workspace` as today |
+| G25 | task hidden / not claimable until the time · then appears · aborted instance cancels the job |
+| G27–G28 | signal / message / timer / escalation fire during parent · interrupting stops the parent, non-interrupting runs beside · listener removed when the scope ends · nested event sub-process · event never fires ⇒ no leak · parent abort cancels listeners |
+| G29 | tasks start in any order · ends when condition true · remaining cancelled · ordering `parallel` / `sequential` |
+| G30–G31 | strategy picks per rule · tie-breaks deterministic · autoclaim only for same lane · falls back to normal queue |
+| G32–G35 | instantiate: first event creates exactly one instance · cancel runs compensation once · MI on user task creates N tasks and collects outputs · complex condition fires on the stated count |
+| S01–S08 | each property survives engine → BPMN → engine · unknown metaData preserved · import report lists every dropped construct and counts match |
+| U01–U06 | `ng build`; schema-driven fields render for every new key; conditional fields hide; screenshots of each new panel / page stored under `docs/ui-screenshots/` |
+
+### 5.4 Cross-cutting scenarios (combinations break things)
+* async node + SLA + user-task deadline + cron boundary in one process;
+* event sub-process + error boundary + global error handler on the same failure;
+* multi-owner task + deadline reassign + `suspendUntil`;
+* for-each with completion condition + async + call with `onChildFailure: continue`;
+* variable tags + background start + case operations;
+* suspend / resume / abort of an instance holding listeners, timers, async jobs and deadlines — nothing may fire after.
+
+### 5.5 Security tests (R4)
+Every ownership change is tested from the attacker's side: user not in `actors` / `groups`, a group member of a *different* workspace,
+an excluded owner who is also in a listed group, a stakeholder trying to complete, a platform admin in the all-workspaces scope,
+and an unauthenticated call. Tasks can never become visible or claimable to someone who could not see them before.
+
+### 5.6 Live smoke (after every phase, on a restarted server)
+Start server + UI; sign in; run a scripted pass through the real HTTP API: create → publish → deploy → start (sync and background) →
+complete a task → read the instance → run two built-in analytics → open the builder page and the node panels; zero server errors in
+the log. Screenshots are saved for UI-facing changes.
+
+### 5.7 Performance guard
+A micro-benchmark (1 000 instances of a 20-node flow, and a 200-node flow) is recorded now; after each phase the time may not grow
+by more than 15 %. Conditional-event evaluation and event-sub-process listeners are the two places this can regress, so they get
+their own bounded-cost tests (no per-node full scan; evaluation only on variable change).
+
+### 5.8 Release checks (end of Phase 5)
+Full server + SDK + UI builds; full golden harness; fresh-install test (empty store ⇒ seeds, default plans, built-in analytics);
+upgrade test (data from the pre-2.0.0 branch loads and runs); docs link check; changelog reviewed.
+
+---
+
+## 6. Explicit non-goals (documented, reported on import, never silent)
+| jBPM feature | Why not | What we do instead |
+|---|---|---|
+| Imports and globals (Java classes, rule globals) | the engine runs JavaScript / JVM sidecar scripts, not a Drools session | listed in the import report; scripts keep working through `kcontext` helpers |
+| Web-service / Java service task (interface + operation) | needs a Java object model | use the HTTP node or a work item; reported on import |
+| Conditional **start** that depends on rule-engine facts (G23) | no rule-engine session to watch | start by signal, message or timer; decision recorded at Phase 2 start |
+| `kie-deployment-descriptor` handler wiring beyond named work items | deployment model differs | existing work-item registry |
+
+## 7. Documentation checklist (per gap, same commit)
+- [ ] `docs/16-jbpm-parity.md` row moves to ✅ with the test id.
+- [ ] Node `def.ts`: schema field with help text, and the `docs` block (fields, scenarios, gotchas).
+- [ ] `docs/18` §7 entry removed or pointed here.
+- [ ] `docs/05-api-spec.md` / OpenAPI when an API shape changes (the OpenAPI test enforces this).
+- [ ] This file: gap status table (§8) updated.
+- [ ] `docs/bpm-nodes` reference for any SDK-visible property.
+- [ ] Release notes entry for 2.0.0 with the compatibility statement.
+
+## 8. Status board (updated as work lands)
+| Phase | Gaps | Status |
+|---|---|---|
+| 0 | compat harness, golden fixtures | not started |
+| 1 | G01 G02 G03 G05 G05b G06 G07 G08 G09 G10 G11 G12 G13 G14 G15 G16 | not started |
+| 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | not started |
+| 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | not started |
+| 4 | S01–S08 | not started |
+| 5 | U01–U06, docs, release checks | not started |

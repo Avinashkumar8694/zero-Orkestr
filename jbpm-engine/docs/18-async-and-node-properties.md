@@ -214,6 +214,9 @@ No migration is needed: every new field is optional and absent on existing data.
 * `bpmn-sdk/test/async-sla-metadata.test.mjs` — metaData round trip.
 
 ## 7. Not done yet (and the plan)
+
+> Superseded for release 2.0.0 by the full register, phasing and test plan in [20-release-2.0.0-jbpm-parity-plan.md](20-release-2.0.0-jbpm-parity-plan.md).
+
 | Item | jBPM | Proposed approach |
 |---|---|---|
 | Variable tags | `required` / `readonly` / `restricted` | `EngineVar.tags`; reject a start missing a `required` variable (400); reject API edits to a set `readonly` variable |
