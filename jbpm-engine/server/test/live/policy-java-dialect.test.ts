@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boot } from '../harness.ts';
+import { makeContext } from '../../src/context.ts';
+import { TimerService } from '../../src/modules/timers/service.ts';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const mockUp = () => new Promise<boolean>((res) => { const s = net.connect(3010, '127.0.0.1'); s.once('connect', () => { s.destroy(); res(true); }); s.once('error', () => res(false)); });
@@ -47,6 +49,7 @@ test('JAVA-IMPORT-1 the policy project imported with scriptDialect=java deploys,
   const subtree = (all: any[], id: string): any[] => all.filter((i) => i.parentInstanceId === id).flatMap((k) => [k, ...subtree(all, k.id)]);
   for (let round = 0; round < 8; round++) {
     await new Promise((r) => setTimeout(r, 700));
+    await new TimerService(makeContext({ store: h.store, tenantId: ws.id })).tick(new Date(Date.now() + 1000).toISOString());   // the server's scheduler: runs due async jobs and timers
     const all = (await call('GET', '/instances?limit=2000')).body.items as any[];
     let acted = 0;
     for (const root of roots) for (const inst of [all.find((i) => i.id === root.id), ...subtree(all, root.id)]) {
@@ -58,14 +61,17 @@ test('JAVA-IMPORT-1 the policy project imported with scriptDialect=java deploys,
         else if (t.waitFor?.kind === 'signal') { await call('POST', `/instances/${inst.id}/signal`, { name: t.waitFor.ref }); acted++; }
       }
     }
-    if (!acted) break;
+    if (!acted && round > 2) break;
   }
   await new Promise((r) => setTimeout(r, 700));
   const all = (await call('GET', '/instances?limit=2000')).body.items as any[];
   for (const root of roots) {
     const inst = all.find((i) => i.id === root.id);
     const bad = [inst, ...subtree(all, root.id)].filter((i) => i && ['failed', 'aborted'].includes(i.status)).map((i) => `${i.processId}: ${i.error?.message}`);
-    const tree = [inst, ...subtree(all, root.id)].map((i) => `${i.processId}[${i.status}]${(i.tokens || []).filter((t: any) => t.state === 'waiting').map((t: any) => ` waits ${t.waitFor?.kind}:${String(t.waitFor?.ref).slice(0, 24)}`).join('')}`).join(' > ');
+    const fulls: any[] = [];
+    for (const i of [inst, ...subtree(all, root.id)]) fulls.push((await call('GET', `/instances/${i.id}`)).body);
+    const tree = fulls.map((i: any) => `${i.processId}[${i.status}]${(i.tokens || []).filter((t: any) => t.state === 'waiting').map((t: any) => ` waits ${t.waitFor?.kind}:${String(t.waitFor?.ref).slice(0, 40)}`).join('')}${i.error ? ' ERR ' + i.error.message : ''}`).join(' > ');
+    const _unused = [inst, ...subtree(all, root.id)].map((i) => `${i.processId}[${i.status}]${(i.tokens || []).filter((t: any) => t.state === 'waiting').map((t: any) => ` waits ${t.waitFor?.kind}:${String(t.waitFor?.ref).slice(0, 24)}`).join('')}`).join(' > ');
     assert.equal(inst.status, 'completed', `${root.type} ended ${inst.status} ${JSON.stringify(inst.error)} ${bad.join(' | ')} :: ${tree}`);
     assert.deepEqual(bad, [], `${root.type} has failed children`);
   }

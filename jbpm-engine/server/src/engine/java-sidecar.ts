@@ -166,7 +166,20 @@ type SidecarResponse = {
   error?: string;
 };
 
-async function callSidecar(body: Record<string, unknown>): Promise<SidecarResponse> {
+// At most this many requests are in flight at once: a burst (publish validation compiles ~200 scripts) would otherwise pile onto a cold JVM, push slow
+// ones past the timeout, and each timeout used to kill the JVM for everybody.
+const MAX_IN_FLIGHT = Math.max(1, Number(process.env.JAVA_SIDECAR_CONCURRENCY || 6));
+let inFlight = 0;
+const waiting: Array<() => void> = [];
+async function slot<T>(fn: () => Promise<T>): Promise<T> {
+  if (inFlight >= MAX_IN_FLIGHT) await new Promise<void>((r) => waiting.push(r));
+  inFlight++;
+  try { return await fn(); } finally { inFlight--; waiting.shift()?.(); }
+}
+
+function callSidecar(body: Record<string, unknown>): Promise<SidecarResponse> { return slot(() => callSidecarNow(body)); }
+
+async function callSidecarNow(body: Record<string, unknown>): Promise<SidecarResponse> {
   const p = await ensureStarted();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.javaSidecarTimeoutMs);
@@ -181,8 +194,12 @@ async function callSidecar(body: Record<string, unknown>): Promise<SidecarRespon
   } catch (e) {
     // ECONNREFUSED etc. — the process may have died between ensureStarted() and this call; the
     // caller's next attempt will trigger a fresh spawn via ensureStarted().
-    if (child) { child.kill(); child = undefined; port = undefined; starting = undefined; }
-    throw new JavaSidecarUnavailableError(`Request to the sidecar failed: ${(e as Error).message}`);
+    // Only a JVM that is really gone is replaced. A request that merely timed out (aborted) must not take down the shared process with every other request in it.
+    const aborted = (e as Error).name === 'AbortError';
+    if (!aborted && child && (child.exitCode !== null || child.signalCode !== null || /ECONNREFUSED|ECONNRESET|socket hang up|fetch failed/i.test(String((e as any)?.cause?.code ?? (e as Error).message)))) {
+      child.kill(); child = undefined; port = undefined; starting = undefined;
+    }
+    throw new JavaSidecarUnavailableError(`Request to the sidecar ${aborted ? 'timed out' : 'failed'}: ${(e as Error).message}`);
   } finally {
     clearTimeout(timer);
   }
