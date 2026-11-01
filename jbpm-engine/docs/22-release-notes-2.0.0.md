@@ -23,4 +23,4 @@ Postgres push-down and the Redis lease are now verified live with separate repli
   ```sql
   UPDATE system_admins SET enabled = true WHERE email = 'someone@company.com';   -- or INSERT a row
   ```
-
+- **Serving replicas** (plan `maxReplicas` and the global / per-workspace cap) is visible to system administrators only. It is removed from workspace settings, plan usage and public plans, and unlike the script settings it cannot be delegated.

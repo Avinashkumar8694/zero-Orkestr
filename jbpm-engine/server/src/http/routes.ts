@@ -631,6 +631,7 @@ export function buildRoutes(): Router {
   // the workspace's plan, its limits and what it has used (every member may look; the platform admin edits plans)
   r.get('/plan/usage', perm('team:read'), asyncHandler(async (req, res) => {
     const u: any = await planUsageFor(ctxOf(req));
+    if (!(req as any).access?.platformAdmin) delete u.limits?.maxReplicas;          // serving replicas: system administrator only, never delegated
     if (!(req as any).access?.platformAdmin && !(await scriptControlsVisibleFor(ctxOf(req).store, ctxOf(req).tenantId))) delete u.limits?.concurrentScripts;   // shown only when the system administrator allows it
     res.json(u);
   }));
@@ -659,6 +660,7 @@ export function buildRoutes(): Router {
       effectiveLimits: { ...effective },   // what is really applied (read-only)
       limitCaps: { ...caps },              // what this workspace may not exceed (set by the platform administrator)
     };
+    if (!(req as any).access?.platformAdmin) { delete out.effectiveLimits.maxReplicas; delete out.limitCaps.maxReplicasCap; }   // serving replicas: system administrator only
     if (!(req as any).access?.platformAdmin && !(await scriptControlsVisibleFor(ctxOf(req).store, ctxOf(req).tenantId))) {   // script parallelism / queue / overflow: system administrator, or workspace admins when allowed (global switch / per-workspace override)
       for (const k of SCRIPT_SETTING_KEYS) delete out[k];
       for (const k of ['scriptPoolSize', 'scriptQueueMax', 'scriptOverflowMode']) delete out.effectiveLimits[k];

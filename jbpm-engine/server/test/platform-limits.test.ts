@@ -250,3 +250,14 @@ test('PLIM-10 the system administrator can allow workspace admins to manage scri
   await platformCall('PUT', '/limits', { scriptControlsVisible: null, scriptPoolMaxSize: null });
   await platformCall('PUT', `/workspaces/${ws2.id}/limits`, { scriptControlsVisible: null });
 });
+
+test('PLIM-11 serving replicas are visible to the system administrator only', async () => {
+  const own = (await h.call('GET', '/settings/system', { token: ws.tokens.owner, tenant: ws.id })).body;
+  assert.ok(!('maxReplicas' in own.effectiveLimits) && !('maxReplicasCap' in own.limitCaps), 'hidden from the workspace owner');
+  const usage = (await h.call('GET', '/plan/usage', { token: ws.tokens.owner, tenant: ws.id })).body;
+  assert.ok(!('maxReplicas' in usage.limits), 'not a visible plan limit');
+  const root = (await h.call('GET', '/settings/system', { token: ROOT, tenant: ws.id })).body;
+  assert.ok('maxReplicas' in root.effectiveLimits && 'maxReplicasCap' in root.limitCaps, 'the system administrator sees it');
+  const pub = (await h.call('GET', '/public/plans', {})).body;
+  assert.ok(JSON.stringify(pub).indexOf('maxReplicas') < 0, 'not advertised publicly');
+});
