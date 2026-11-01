@@ -18,7 +18,8 @@
     "test": "node --import tsx --test test/*.test.ts",
     "test:pg": "node --import tsx --test test/pg/*.test.ts",
     "docker:up": "docker-compose -f ../docker-compose.yml up -d",
-    "docker:down": "docker-compose -f ../docker-compose.yml down"
+    "docker:down": "docker-compose -f ../docker-compose.yml down",
+    "test:live": "sh ../scripts/live-cluster.sh"
   },
   "dependencies": {
     "@fabrixly/bpmn-sdk": "file:../../bpmn-sdk",

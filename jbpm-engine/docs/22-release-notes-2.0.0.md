@@ -13,4 +13,4 @@ jBPM-parity release. Plan and results: [20](20-release-2.0.0-jbpm-parity-plan.md
 Existing processes, deployments, instances, timers and APIs behave as before (golden fixtures unchanged, 608 server tests green). Changes: declared-but-empty variables are `null` in scripts; the start trigger list no longer offers *condition* (warning on imports that use it).
 
 ## Known limits
-Postgres SQL push-down and the Redis lease are unit-tested only; ad-hoc sequential ordering and per-instance variable size cap are not implemented; Java scripts do not see `node.metaData`.
+Postgres push-down and the Redis lease are now verified live with separate replica processes (`npm run test:live`, plan §15); ad-hoc sequential ordering and per-instance variable size cap are not implemented; Java scripts do not see `node.metaData`.

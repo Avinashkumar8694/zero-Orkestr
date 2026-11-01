@@ -451,3 +451,16 @@ Carried in `engine.extras` (engine-only): event sub-process triggers and `interr
 | Conditional start | the start trigger list no longer offers *condition*; a validation warning (`conditional-start`) flags an imported one, since the engine does not start instances from conditions |
 
 Checked in the running app: Process Variables dialog shows the properties block and the tags. Full suite 608 pass / 0 fail, UI development build clean.
+
+## 15. Live multi-replica verification (Postgres + Redis)
+`npm run test:live` (script `scripts/live-cluster.sh`) starts throw-away Postgres 16 and Redis 7 containers (or uses `PG_URL` / `REDIS_URL`) and runs, with **separate OS processes as replicas** (own Postgres connection, own Redis coordinator, own replica id): `test/live/live-cluster.test.ts`, the Redis contract in `test/cluster.test.ts`, and `test/pg/*`. Result: 43 pass / 0 fail.
+
+| Test | Proves |
+|---|---|
+| LIVE-1 | workers really coordinate through Redis |
+| LIVE-2 | 5 replicas signal one instance at once: resumes once, script ran once |
+| LIVE-3 | 3 replicas × 8 variable edits on one instance: all 24 kept |
+| LIVE-4 | 4 replicas tick one due timer: fired once |
+| LIVE-5 | replica killed (SIGKILL) holding a lease: others refused, take over after the lease expires |
+
+The same tests with Redis switched off fail (LIVE-2, LIVE-3), so they do detect a missing lock. This closes the "Postgres SQL and Redis lease only unit-tested" limit of §9.6. The `test/pg/*` files share one database and are run one after another by the script; running them in parallel against the same database can make one fail.
