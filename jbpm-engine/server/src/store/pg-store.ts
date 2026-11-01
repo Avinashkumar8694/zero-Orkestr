@@ -8,6 +8,7 @@
 // like FileStore/MemoryStore do — `pred` is an opaque closure the DB can't introspect, so this is the
 // only correct option (not a shortcut); tenant_id is still extracted into a real, indexed column so a
 // direct SQL/ops look at the table isn't just an opaque blob.
+import { buildFindSql, FIND_INDEXES, type FindSpec } from './find.ts';
 import 'reflect-metadata';
 import { DataSource, Entity as TypeOrmEntity, PrimaryColumn, Column, Index } from 'typeorm';
 import type { Entity as DomainEntity, Repository, Store } from './repository.ts';
@@ -144,6 +145,17 @@ export class PgStore implements Store {
     const res = await ds.query(sql, [tenantId, nowIso, limit]);
     const rows: Array<{ data: unknown }> = Array.isArray(res) ? (Array.isArray(res[0]) ? res[0] : res) : [];
     return rows.map((r) => r.data as TimerJob);
+  }
+
+  private indexed = false;
+  /** Indexed lookup (see store/find.ts). The indexes are created once, idempotently; failing to create them (privileges) only costs speed. */
+  async findBy(collection: string, tenantId: string, spec: FindSpec): Promise<any[]> {
+    const ds = await this.ensureDataSource();
+    if (!this.indexed) { this.indexed = true; for (const sql of FIND_INDEXES) await ds.query(sql).catch(() => undefined); }
+    const { sql, params } = buildFindSql(collection, tenantId, spec);
+    const res = await ds.query(sql, params);
+    const rows: Array<{ data: unknown }> = Array.isArray(res) ? (Array.isArray(res[0]) ? res[0] : res) : [];
+    return rows.map((r) => r.data);
   }
 
   repo<T extends DomainEntity>(collection: string): Repository<T> {

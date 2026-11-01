@@ -131,6 +131,8 @@ export interface Instance extends Entity {
   variables: Record<string, unknown>;
   tokens: Token[];
   history: NodeVisit[];
+  /** per-node count of visits dropped from `history` when it outgrew the cap (see engine/history-cap.ts); keeps join counting and the diagram right */
+  historyCompacted?: Record<string, number>;
   error?: { nodeId: string; message: string; stack?: string; at: string };
   parentInstanceId?: string; parentTokenId?: string;
   // Set when spawned by a call activity with independent:true (fire-and-forget) — this child's

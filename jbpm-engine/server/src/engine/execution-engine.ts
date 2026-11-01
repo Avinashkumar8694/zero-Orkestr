@@ -11,6 +11,8 @@ import * as boundaryHandler from './nodes/boundary/handler.ts';
 import { computeDue, parseDuration, dueFrom } from './duration.ts';
 import { kickWorker, ASYNC_CAPABLE } from './async-kick.ts';
 import { withInstanceLock, deferAfterLock } from './instance-lock.ts';
+import { findRows } from '../store/find.ts';
+import { compactHistory } from './history-cap.ts';
 import { runScript } from './sandbox.ts';
 import { config } from '../infra/config.ts';
 import { conflict, quotaExceeded } from '../infra/errors.ts';
@@ -207,6 +209,7 @@ export class ExecutionEngine {
       inst.error = { nodeId: '', message: (err as Error).message, stack: (err as Error).stack, at: this.ctx.clock() };
       inst.endedAt = this.ctx.clock();
     }
+    compactHistory(inst);
     await this.inst().put(inst);
     this.emit({ kind: inst.status === 'failed' ? 'instance.failed' : inst.status === 'completed' ? 'instance.completed' : 'instance.updated', instanceId: inst.id });
     // Reached a terminal state → no orphans: abort any still-active child instances (e.g. a terminate
@@ -473,7 +476,10 @@ export class ExecutionEngine {
   /** Broadcast a signal across all running/waiting instances in the tenant + trigger any matching signal-start events.
    *  Matches jBPM KIE-Server POST /server/containers/{id}/processes/instances/signal/{signalName}. */
   async broadcastSignal(name: string, payload?: unknown, correlationValue?: string): Promise<{ signaled: number }> {
-    const others = await this.inst().query((i) => i.tenantId === this.ctx.tenantId && (i.status === 'waiting' || i.status === 'running'));
+    // only the instances that have a token waiting on this name — an indexed lookup, not a scan of every live instance's full row
+    const others = await findRows<Instance>(this.ctx.store, Collections.instances, this.ctx.tenantId, {
+      eq: { status: ['waiting', 'running'] }, contains: { path: 'tokens', value: [{ waitFor: { ref: name } }] },
+    });
     let count = 0;
     for (const other of others) {
       if (correlationValue !== undefined && other.correlationKey !== correlationValue) continue;
@@ -1079,7 +1085,7 @@ export class ExecutionEngine {
   /** Diagram state for the live canvas highlight. */
   diagramState(inst: Instance) {
     const active = inst.tokens.map((t) => t.nodeId);
-    const visited = [...new Set(inst.history.map((h) => h.nodeId))];
+    const visited = [...new Set([...inst.history.map((h) => h.nodeId), ...Object.keys(inst.historyCompacted ?? {})])];
     return { activeNodeIds: active, visitedNodeIds: visited, status: inst.status };
   }
 }

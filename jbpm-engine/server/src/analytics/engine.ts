@@ -2,6 +2,7 @@
 // joins, streaming aggregation and guards. Pure of HTTP and storage details — it only talks to an Env (see catalog.ts).
 import { ApiError, validation } from '../infra/errors.ts';
 import { permissionGrants } from '../infra/auth.ts';
+import type { FindSpec } from '../store/find.ts';
 import { forbidden } from '../infra/errors.ts';
 import { BUCKETS, FUNCTIONS, OPERATORS, RELATIONS, SOURCES, SOURCE_PERMISSION, type Env, type FieldType, type Relation, type SourceDef, type SourceKey } from './catalog.ts';
 
@@ -28,7 +29,7 @@ export interface Column { key: string; label: string; type: FieldType }
 export interface RunMeta { tookMs: number; scanned: number; returned: number; total: number | null; truncated: boolean; truncatedReason?: string; cached?: boolean }
 export interface RunResult { mode: 'rows' | 'aggregate'; columns: Column[]; rows: Rec[]; meta: RunMeta }
 
-export const LIMITS = { maxScan: 200_000, maxRows: 1_000, defaultRows: 100, budgetMs: 10_000, maxPath: 6 };
+export const LIMITS = { maxGroups: 50_000, maxScan: 200_000, maxRows: 1_000, defaultRows: 100, budgetMs: 10_000, maxPath: 6 };
 const bad = (m: string) => validation(`analytics: ${m}`);
 
 type Wide = Record<string, Rec | null>;
@@ -268,60 +269,105 @@ function compileAll(q: AnalyticsQuery, params: Record<string, unknown> | null, n
   const limit = Math.min(Math.max(1, Math.floor(q.limit ?? LIMITS.defaultRows)), LIMITS.maxRows);
   const offset = Math.max(0, Math.floor(q.offset ?? 0));
 
+  // `=` / `in` conditions (top-level AND, on the from-source's always-present stored fields) are also handed to the store, which can answer
+  // them from an index; every condition is still evaluated here as well, so the result is identical either way.
+  const pushable = new Set(SOURCES[plan.from.src].pushable ?? []);
+  const pushSpec: FindSpec | undefined = (() => {
+    const eq: Record<string, string | boolean | number | Array<string | number | boolean>> = {};
+    for (const i of items) {
+      if ('items' in i || (i.op !== 'eq' && i.op !== 'in')) continue;
+      const parts = i.field.split('.'); const field = plan.aliases.has(parts[0]!) ? parts.slice(1) : parts;
+      if (plan.aliases.has(parts[0]!) && parts[0] !== plan.from.alias) continue;
+      if (field.length !== 1 || !pushable.has(field[0]!)) continue;
+      const v = resolveValue(i.value, params, nowMs) as unknown;
+      if (v === undefined || v === null || (typeof v === 'object' && !Array.isArray(v))) continue;
+      eq[field[0]!] = v as never;
+    }
+    return Object.keys(eq).length ? { eq } : undefined;
+  })();
+
   const run = async (env: Env): Promise<RunResult> => {
     const t0 = Date.now();
-    let scanned = 0, truncated = false, reason: string | undefined;
+    let scanned = 0, matched = 0, truncated = false, reason: string | undefined, stop = false, early = false;
     const over = () => { if (Date.now() - t0 > LIMITS.budgetMs) { truncated = true; reason ||= 'time budget'; return true; } return false; };
+    const K = offset + limit;
 
-    let fromRows = await env.table(plan.from.src);
-    scanned += fromRows.length;
-    if (fromRows.length > LIMITS.maxScan) { fromRows = fromRows.slice(0, LIMITS.maxScan); truncated = true; reason = `scan limit (${LIMITS.maxScan} rows)`; }
-    const w0: Wide[] = [];
-    for (const r of fromRows) { const w: Wide = { [plan.from.alias]: r }; if (pushed.every((p) => p(w))) w0.push(w); }
-
-    let wide = w0;
-    const simple = !plan.joins.length && !sortSpecs.length && !aggregate;
-    for (const j of plan.joins) {
-      if (over()) break;
-      // a one-cardinality left join that nothing reads cannot change the result: skip it
-      if (j.type === 'left' && !j.rel.many && !referenced.has(j.alias) && !plan.joins.some((x) => x.fromAlias === j.alias)) continue;
-      const lefts = new Set<Rec>(); for (const w of wide) { const r = w[j.fromAlias]; if (r) lefts.add(r); }
-      const map = await j.rel.fetch(env, [...lefts]);
-      const next: Wide[] = [];
-      for (const w of wide) {
-        const l = w[j.fromAlias]; const k = l ? j.rel.leftKey(l) : undefined;
-        const rights = k !== undefined ? map.get(k) : undefined;
-        if (!rights?.length) { if (j.type === 'left') next.push({ ...w, [j.alias]: null }); }
-        else for (const r of rights) { next.push({ ...w, [j.alias]: r }); if (next.length > LIMITS.maxScan) break; }
-        if (next.length > LIMITS.maxScan) { truncated = true; reason = `join expanded past ${LIMITS.maxScan} rows`; break; }
+    // ---- sinks: aggregate mode streams into the group map; rows mode keeps only what could appear on the requested page (top-K) ----
+    const groups = new Map<string, { keys: unknown[]; accs: Acc[] }>();
+    let kept: Array<{ out: Rec; sv: unknown[] }> = [];
+    const rowCmp = (a: { out: Rec; sv: unknown[] }, b: { out: Rec; sv: unknown[] }) => {
+      for (let k = 0; k < sortSpecs.length; k++) { const sp = sortSpecs[k]!; const av = sp.col ? a.out[sp.col] : a.sv[k], bv = sp.col ? b.out[sp.col] : b.sv[k]; const c = cmp(av, bv) * sp.dir; if (c) return c; }
+      return 0;
+    };
+    const consume = (rows: Wide[]) => {
+      for (const w of rows) {
+        matched++;
+        if (aggregate) {
+          const keys = groupFns.map((g) => g.get(w));
+          const gk = keys.length ? JSON.stringify(keys) : '';
+          let g = groups.get(gk);
+          if (!g) {
+            if (groups.size >= LIMITS.maxGroups) { truncated = true; reason ||= `group limit (${LIMITS.maxGroups})`; stop = true; return; }
+            g = { keys, accs: metricDefs.map(newAcc) }; groups.set(gk, g);
+          }
+          metricDefs.forEach((m, mi) => {
+            const a = g!.accs[mi]!;
+            if (!m.get) { a.count++; return; }                       // count of rows
+            const v = m.get(w);
+            if (v === undefined || v === null) return;
+            if (m.fn === 'count') { a.count++; return; }
+            if (m.fn === 'countDistinct') { a.set!.add(typeof v === 'object' ? JSON.stringify(v) : String(v)); return; }
+            const n = typeof v === 'number' ? v : Date.parse(String(v)); const num = typeof v === 'number' ? v : Number.isNaN(Number(v)) ? n : Number(v);
+            if (Number.isNaN(num)) return;
+            a.n++; a.sum += num; if (num < a.min) a.min = num; if (num > a.max) a.max = num; a.vals?.push(num);
+          });
+        } else if (!sortSpecs.length) {
+          kept.push({ out: outRow(w), sv: [] });
+          if (kept.length >= K) { stop = true; early = true; return; }   // nothing to sort: the page is full, stop reading
+        } else {
+          kept.push({ out: outRow(w), sv: sortSpecs.map((sp) => (sp.get ? sp.get(w) : undefined)) });
+          if (kept.length > 2 * K + 1000) { kept.sort(rowCmp); kept.length = K; }   // memory stays O(K), whatever the table size
+        }
       }
-      scanned += next.length;
-      wide = next;
+    };
+
+    // ---- one page of source rows -> joins -> filters -> sink; the joins look up only the rows this page points at ----
+    const expand = async (wide: Wide[]): Promise<Wide[]> => {
+      for (const j of plan.joins) {
+        if (over()) break;
+        // a one-cardinality left join that nothing reads cannot change the result: skip it
+        if (j.type === 'left' && !j.rel.many && !referenced.has(j.alias) && !plan.joins.some((x) => x.fromAlias === j.alias)) continue;
+        const lefts = new Set<Rec>(); for (const w of wide) { const r = w[j.fromAlias]; if (r) lefts.add(r); }
+        const map = await j.rel.fetch(env, [...lefts]);
+        const next: Wide[] = [];
+        for (const w of wide) {
+          const l = w[j.fromAlias]; const k = l ? j.rel.leftKey(l) : undefined;
+          const rights = k !== undefined ? map.get(k) : undefined;
+          if (!rights?.length) { if (j.type === 'left') next.push({ ...w, [j.alias]: null }); }
+          else for (const r of rights) { next.push({ ...w, [j.alias]: r }); if (next.length > LIMITS.maxScan) break; }
+          if (next.length > LIMITS.maxScan) { truncated = true; reason = `join expanded past ${LIMITS.maxScan} rows`; break; }
+        }
+        scanned += next.length;
+        wide = next;
+      }
+      return wide;
+    };
+
+    for await (let page of env.scan(plan.from.src, pushSpec)) {
+      scanned += page.length;
+      if (scanned > LIMITS.maxScan) {                                // enforced while reading: nothing past the cap is ever kept
+        page = page.slice(0, Math.max(0, page.length - (scanned - LIMITS.maxScan)));
+        truncated = true; reason = `scan limit (${LIMITS.maxScan} rows)`; stop = true;
+      }
+      const w0: Wide[] = [];
+      for (const r of page) { const w: Wide = { [plan.from.alias]: r }; if (pushed.every((p) => p(w))) w0.push(w); }
+      const wide = plan.joins.length ? await expand(w0) : w0;
+      consume(rest.length ? wide.filter((w) => rest.every((p) => p(w))) : wide);
+      if (stop || over()) break;
     }
-    const rows = rest.length ? wide.filter((w) => rest.every((p) => p(w))) : wide;
 
     let out: Rec[]; let total: number | null;
     if (aggregate) {
-      const groups = new Map<string, { keys: unknown[]; accs: Acc[] }>();
-      let i = 0;
-      for (const w of rows) {
-        if ((++i & 1023) === 0 && over()) break;
-        const keys = groupFns.map((g) => g.get(w));
-        const gk = keys.length ? JSON.stringify(keys) : '';
-        let g = groups.get(gk);
-        if (!g) { g = { keys, accs: metricDefs.map(newAcc) }; groups.set(gk, g); }
-        metricDefs.forEach((m, mi) => {
-          const a = g!.accs[mi]!;
-          if (!m.get) { a.count++; return; }                       // count of rows
-          const v = m.get(w);
-          if (v === undefined || v === null) return;
-          if (m.fn === 'count') { a.count++; return; }
-          if (m.fn === 'countDistinct') { a.set!.add(typeof v === 'object' ? JSON.stringify(v) : String(v)); return; }
-          const n = typeof v === 'number' ? v : Date.parse(String(v)) ; const num = typeof v === 'number' ? v : Number.isNaN(Number(v)) ? n : Number(v);
-          if (Number.isNaN(num)) return;
-          a.n++; a.sum += num; if (num < a.min) a.min = num; if (num > a.max) a.max = num; a.vals?.push(num);
-        });
-      }
       if (!groupFns.length && !groups.size) groups.set('', { keys: [], accs: metricDefs.map(newAcc) });
       out = [...groups.values()].map((g) => {
         const o: Rec = {};
@@ -335,21 +381,12 @@ function compileAll(q: AnalyticsQuery, params: Record<string, unknown> | null, n
         return o;
       });
       if (havingFn) out = out.filter(havingFn);
-      if (sortSpecs.length) out.sort((a, b) => { for (const s of sortSpecs) { const c = cmp(a[s.col!], b[s.col!]) * s.dir; if (c) return c; } return 0; });
+      if (sortSpecs.length) out.sort((a, b) => { for (const sp of sortSpecs) { const c = cmp(a[sp.col!], b[sp.col!]) * sp.dir; if (c) return c; } return 0; });
       total = out.length; out = out.slice(offset, offset + limit);
-    } else if (simple) {
-      out = []; total = null;
-      for (const w of rows) { out.push(outRow(w)); if (out.length >= offset + limit) break; }
-      out = out.slice(offset);
     } else {
-      total = rows.length;
-      let items = rows.map((w) => ({ w, sv: sortSpecs.map((s) => (s.get ? s.get(w) : undefined)) }));
-      if (sortSpecs.length) {
-        const proj = sortSpecs.some((s) => s.col) ? new Map(items.map((it) => [it, outRow(it.w)])) : undefined;
-        items.sort((a, b) => { for (let k = 0; k < sortSpecs.length; k++) { const s = sortSpecs[k]!; const av = s.col ? proj!.get(a)![s.col] : a.sv[k], bv = s.col ? proj!.get(b)![s.col] : b.sv[k]; const c = cmp(av, bv) * s.dir; if (c) return c; } return 0; });
-      }
-      items = items.slice(offset, offset + limit);
-      out = items.map((it) => outRow(it.w));
+      if (sortSpecs.length) kept.sort(rowCmp);
+      total = early ? null : matched;
+      out = kept.slice(offset, offset + limit).map((x) => x.out);
     }
     return { mode: aggregate ? 'aggregate' : 'rows', columns, rows: out, meta: { tookMs: Date.now() - t0, scanned, returned: out.length, total, truncated, ...(reason ? { truncatedReason: reason } : {}) } };
   };

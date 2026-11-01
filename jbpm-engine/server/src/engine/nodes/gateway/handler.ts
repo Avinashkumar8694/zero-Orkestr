@@ -1,6 +1,7 @@
 // Gateway — exclusive/parallel/inclusive/event/complex branching + join.
 import type { NodeHandler, HandlerResult } from '../types.ts';
 import { evalCondition } from '../../sandbox.ts';
+import { visitCount } from '../../history-cap.ts';
 import { varTypesOf, kcontextInfoOf, onActionOf, scriptLimitsOf } from '../kcontext-info.ts';
 
 /** sequential (not Promise.all) so a 'java' condition's sidecar round trip for flow N doesn't race
@@ -29,7 +30,7 @@ export const handler: NodeHandler = async (c): Promise<HandlerResult> => {
 
   if (converging && (node.mode === 'parallel' || node.mode === 'inclusive')) {
     // join: wait until a token has arrived via each incoming flow (supports cyclic looping paths via modulo)
-    const arrived = c.inst.history.filter((h) => h.nodeId === node.id).length;
+    const arrived = visitCount(c.inst, node.id);
     if (arrived % ins.length !== 0) return { consume: true, outcome: `join ${arrived % ins.length}/${ins.length}` };
     c.joins[node.id] = new Set();
     return { next: outs.map((f) => f.to), outcome: 'join-complete' };

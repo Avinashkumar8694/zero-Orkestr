@@ -40,17 +40,28 @@ const PARAM_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,31}$/;
 
 // bounded, in-process result cache. Authorization is always evaluated BEFORE a lookup, and the key carries the workspace, the API
 // id and its version, so an entry can only ever be served to someone who passes the same checks for the same data.
-const CACHE_MAX = 200;
-const cache = new Map<string, { at: number; result: RunResult }>();
+// Bounded by BYTES (a few huge results cannot crowd out memory the way a count limit would); one result may use at most a quarter of it.
+const CACHE_BYTES = Number(process.env.ANALYTICS_CACHE_BYTES) || 8_000_000;
+export const cacheLimits = { bytes: CACHE_BYTES };
+const cache = new Map<string, { at: number; result: RunResult; size: number }>();
+let cacheSize = 0;
+const cacheDrop = (k: string) => { const e = cache.get(k); if (e) { cacheSize -= e.size; cache.delete(k); } };
 const cacheGet = (k: string, ttlMs: number) => {
   const e = cache.get(k);
   if (!e) return undefined;
-  if (Date.now() - e.at > ttlMs) { cache.delete(k); return undefined; }
+  if (Date.now() - e.at > ttlMs) { cacheDrop(k); return undefined; }
   cache.delete(k); cache.set(k, e);                      // LRU touch
   return e.result;
 };
-const cachePut = (k: string, result: RunResult) => { cache.set(k, { at: Date.now(), result }); while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value as string); };
-export const clearAnalyticsCache = () => cache.clear();
+const cachePut = (k: string, result: RunResult) => {
+  const size = JSON.stringify(result).length;
+  if (size > cacheLimits.bytes / 4) return;
+  cacheDrop(k);
+  while (cache.size && cacheSize + size > cacheLimits.bytes) cacheDrop(cache.keys().next().value as string);
+  cache.set(k, { at: Date.now(), result, size }); cacheSize += size;
+};
+export const clearAnalyticsCache = () => { cache.clear(); cacheSize = 0; };
+export const analyticsCacheStats = () => ({ entries: cache.size, bytes: cacheSize });
 const stable = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x));
 
 export class AnalyticsService {

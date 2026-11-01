@@ -262,8 +262,8 @@ exactly-once test (if it uses jobs), the subscription invariant (if it listens),
 ## 8. Status board (updated as work lands)
 | Phase | Gaps | Status |
 |---|---|---|
-| 0 | compat harness, golden fixtures | not started |
-| 0b | F1 indexed store · F2 wait subscriptions · F3 instance lease + revision · F4 bounded analytics · F5 bounded tick · F6 size guards | not started |
+| 0 | compat harness, golden fixtures | **done** — `test/golden.test.ts` (23 real processes + 16 flow traces), `test/flow-kit.ts` |
+| 0b | F1 indexed store · F2 signal delivery · F3 instance lock · F4 bounded analytics · F5 bounded tick · F6 size guards | **done** — see §9.6 |
 | 1 | G01 G02 G03 G05 G05b G06 G07 G08 G09 G10 G11 G12 G13 G14 G15 G16 | not started |
 | 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | not started |
 | 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | not started |
@@ -345,6 +345,23 @@ principles true, and how every gap behaves.
 | S01–S08 SDK | streaming parse is per process file | n/a | n/a | n/a |
 | Analytics (existing) | F4: O(page + groups) | definitions + seed marker | cache shared (Redis) or per-replica bounded | n/a |
 | Async / SLA / deadline (existing) | none | jobs | claimed per job | survive |
+
+### 9.6 Phase 0b — what was built, and what it does not cover
+| Id | Built as | Where | Tests |
+|---|---|---|---|
+| F1 | Optional store capability `findBy` (SQL on Postgres, same filter in JS elsewhere) behind one helper `findRows`; indexes created idempotently | `store/find.ts`, `store/pg-store.ts` | `store-find.test.ts` |
+| F2 | **Simplified:** instead of a separate subscription table (backfill + drift risk), signal / message delivery uses an indexed *containment* lookup on the instance's tokens (`tokens @> [{waitFor:{ref:name}}]`, GIN index on Postgres). Same cost (only subscribers are read), works on existing data with no migration. A subscription table stays an option if profiling ever shows a need. | `engine/execution-engine.ts` (`broadcastSignal`) | `FIND-5` |
+| F3 | Per-instance lock: FIFO queue per instance in-process + coordinator lease across replicas (Redis when configured, expires if a replica dies); re-entrant per call chain; child → parent notification runs *after* the lock is released so two instances never wait on each other; a busy timer job is put back, not lost | `engine/instance-lock.ts`, wrapper at the end of `modules/instances/service.ts` | `instance-lock.test.ts` (failed before the fix, passes after) |
+| F4 | Analytics reads by key or in pages of 2 000 with `=` / `in` conditions pushed to the store; joins look up only the rows the current page points at; recursion goes level by level (one lookup per level for all roots); row mode keeps top-K; group cap 50 000; result cache bounded by bytes (8 MB, one result ≤ ¼) | `analytics/catalog.ts`, `engine.ts`, `service.ts` | `analytics-scale.test.ts` + the 25 existing analytics tests unchanged |
+| F5 | Replica-gated tick reads one batch of due jobs, oldest first | `modules/timers/service.ts` | `FIND-6` |
+| F6 | History cap (default 5 000, 0 = off) with per-node counts of dropped visits so parallel joins and the diagram stay correct | `engine/history-cap.ts` | `history-cap.test.ts` |
+
+**Not covered yet (honest limits):**
+* The Postgres SQL (`findBy`, indexes) is unit-tested as generated text and the filter semantics are shared with the in-memory path, but it has **not been executed against a live Postgres** in this environment. First action when a Postgres is available: run `store-find` and the analytics suites against it.
+* The cross-replica lease is exercised in-process (one coordinator); the Redis variant is the existing, separately tested `claim` primitive but was not run against a live Redis here.
+* Case, audit and comment analytics sources still come from the workflow-service store (typed tables): lookups by id are direct reads, other lookups are one workspace-scoped read. SQL push-down for those tables is a follow-up.
+* Instance list screens still load rows before paging (F1 makes the fix easy; not yet applied).
+* Per-instance variable size cap (F6, second half) is not done yet.
 
 ### 9.5 Compatibility of the foundations
 * F1: purely additive; stores without the capability keep working.

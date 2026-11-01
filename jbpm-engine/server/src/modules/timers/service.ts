@@ -11,6 +11,7 @@ import { computeDue, parseCycleRepeatCount } from '../../engine/duration.ts';
 import { notFound, conflict, validation } from '../../infra/errors.ts';
 import { config } from '../../infra/config.ts';
 import { logger } from '../../infra/logger.ts';
+import { findRows } from '../../store/find.ts';
 import { isBusy } from '../../engine/instance-lock.ts';
 
 /** Multi-replica guards for tick(): `admit` says whether this replica may work this workspace's timers at all (checked
@@ -50,7 +51,8 @@ export class TimerService {
       }
       let due: TimerJob[];
       if (gate?.claim) {
-        due = (await this.repo().query((t) => t.tenantId === this.ctx.tenantId && t.status === 'scheduled' && t.dueAt <= nowIso)).slice(0, limit);
+        // bounded: only this workspace's DUE jobs, oldest first, at most one batch (never every scheduled job of the workspace)
+        due = await findRows<TimerJob>(this.ctx.store, Collections.timers, this.ctx.tenantId, { eq: { status: 'scheduled' }, lte: { dueAt: nowIso }, orderBy: 'dueAt', limit });
         if (!due.length) return 0;
         if (gate.admit && !(await gate.admit())) return 0;
       } else {
