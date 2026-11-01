@@ -267,7 +267,7 @@ exactly-once test (if it uses jobs), the subscription invariant (if it listens),
 | 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | **done** (see §11) |
 | 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | **done** (see §12) |
 | 4 | S01–S08 | **done** (see §13) |
-| 5 | U01–U06, docs, release checks | not started |
+| 5 | U01–U06, docs, release checks | done (UI controls, docs, tests; live Postgres/Redis checks remain, see §9.6) |
 
 ---
 
@@ -389,7 +389,7 @@ All in `test/phase1.test.ts` (12 tests) with the golden fixtures unchanged. Prop
 
 Also fixed on the way (found by running the real project journeys): a **declared process variable that has no value yet is now in scope as `null`** inside scripts (jBPM behaviour) instead of raising `ReferenceError`.
 
-Still for Phase 5 (UI): flow priority and the process-level properties (description, SLA, version, ad-hoc, variable tags) are honoured by the engine and the API but have no editor control yet (U01–U03).
+Editor controls for these landed in Phase 5 (§14).
 
 ## 11. Phase 2 — timers and events
 All in `test/phase2.test.ts` (10 tests; the cron test alone checks 23 expressions) with the golden fixtures unchanged.
@@ -440,3 +440,14 @@ metadata entry (`engine.extras`, ignored by jBPM), so exporting a process and im
 | S08 | **import report** (`report` in the import responses and a summary in the audit entry): per process, constructs kept only as raw XML (`unsupported`), work-item handlers that do not exist here, conditional starts, web-service tasks, Java imports / globals (`warning` / `info`), and a note that Java scripts need the JVM sidecar. The real policy kjar reports **0 unsupported constructs** |
 
 Carried in `engine.extras` (engine-only): event sub-process triggers and `interrupting`, ad-hoc settings, multi-instance on tasks, instantiate / complex-gateway conditions, assignment strategy, swimlane, auto-claim, compensation-handler flag, call failure policy other than abort, the cancel end, and the node's free metadata. Script tasks now keep their metadata (async, SLA, extras) through a round trip as well.
+
+## 14. Phase 5 — UI
+| Item | Result |
+|---|---|
+| U01 | done: event widget gains `link` (catch/throw), `escalation` on catch, cron and `#{var}` / short-delay hints on timers, and a workspace / this-instance scope on signal, message and escalation throws. Multi-instance fields (`over`, `as`, `parallel`, `collectInto`, `itemResult`, `completionCondition`) on user task, script, http, rule, send, call, work item and sub-process. Event sub-process triggers (`on.signal`, `on.message`, `on.escalation`, `on.condition`) on the sub-process. Emptying a nested field removes its empty parent so a blank `multiInstance` never switches the feature on |
+| U01 (flows) | done: connection editor has **Priority** (shown when a node has several outgoing flows) |
+| U02 | done: *Process properties* in the Process Variables dialog: description template, SLA due, version, ad-hoc with completion condition. **Saving no longer drops process-level fields** the canvas does not draw (imported or API-set values are carried through) |
+| U03 | done: each variable has *required* and *read-only* tick boxes (stored as `tags`) |
+| Conditional start | the start trigger list no longer offers *condition*; a validation warning (`conditional-start`) flags an imported one, since the engine does not start instances from conditions |
+
+Checked in the running app: Process Variables dialog shows the properties block and the tags. Full suite 608 pass / 0 fail, UI development build clean.

@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
+import { type NodeDef, MULTI_INSTANCE, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
 export const def: NodeDef = {
   engineType: 'call',
   palette: [{ key: 'call', label: 'Call Activity', category: 'Sub-process', icon: '⇥', color: '#4f46e5', engineType: 'call', defaults: { type: 'call', process: '' } }],
@@ -11,7 +11,7 @@ export const def: NodeDef = {
     { key: 'waitForCompletion', label: 'Wait for completion', widget: 'bool', help: 'Untick for fire-and-forget: the parent continues at once and does not wait for the called process (jBPM waitForCompletion=false). Independent keeps the child alive after the parent ends.' },
     { key: 'onChildFailure', label: 'When the called process fails', widget: 'select', options: ['fail', 'continue', 'abort'], help: 'fail (default): raise CALL_ERROR here, catchable by an error boundary · continue: carry on and store what happened in the variable below · abort: abort this process at once.' },
     { key: 'errorVar', label: 'Store the failure in', widget: 'varRef', varSource: 'own', placeholder: 'callError', help: 'Used by "continue": { childInstanceId, childStatus, childError }.' },
-  ] }, EXECUTION, SLA, ADVANCED],
+  ] }, EXECUTION, MULTI_INSTANCE, SLA, ADVANCED],
   diagram: { icon: 'arrowRight', color: '#4f46e5', shape: 'rectangle' },
   typeLabel: 'Call activity',
 };

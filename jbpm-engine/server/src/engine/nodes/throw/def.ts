@@ -7,7 +7,7 @@ export const def: NodeDef = {
   ],
   ports: { maxIn: 1, maxOut: 1 },
   schema: [GENERAL, { title: 'Event', fields: [
-    { key: 'event', label: 'Throw', widget: 'event', options: ['signal', 'message', 'escalation', 'compensation'] },
+    { key: 'event', label: 'Throw', widget: 'event', options: ['signal', 'message', 'escalation', 'link', 'compensation'] },
     { key: 'event.ref', label: 'Compensate activity (optional)', widget: 'text', help: 'Host node id to compensate; blank = compensate all completed activities' },
     { key: 'event.correlationKey', label: 'Correlate to', widget: 'varRef', varSource: 'ownRef', placeholder: '$claimId', help: 'Deliver only to the waiting instance whose own correlationKey matches this variable’s value; blank = deliver to every instance waiting on this name' },
   ] }],

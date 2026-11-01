@@ -98,3 +98,6 @@ Conditional **start** events are not supported (see plan §11, G23).
 |---|---|
 | `assignmentStrategy` | `leastLoaded` (fewest open tasks) or `roundRobin` (longest since this step gave that person a task) among actors and group members; none = queue. |
 | `swimlane`, `autoClaim` | With `autoClaim`, the task goes to whoever completed the previous task of the same swimlane in the instance (unless excluded). |
+
+## Where to set them in the editor
+Process description, SLA, version, ad-hoc and variable *required* / *read-only*: **Variables** dialog. Flow priority: click a connection. Everything per node (multi-instance, event triggers incl. link and scope, event sub-process triggers, async, SLA): the node's properties panel.

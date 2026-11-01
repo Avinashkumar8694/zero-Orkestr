@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, SLA, ADVANCED } from '../def-types.ts';
+import { type NodeDef, MULTI_INSTANCE, GENERAL, SLA, ADVANCED } from '../def-types.ts';
 
 export const def: NodeDef = {
   engineType: 'userTask',
@@ -34,7 +34,7 @@ export const def: NodeDef = {
   ] }, { title: 'Data', fields: [
     { key: 'inputs', label: 'Task inputs (taskVar ← processVar)', widget: 'keyval', valueSource: 'ownRef', help: 'Left = the field name the form/UI sees on this task. Right = "$name" to copy one of this process\'s own variables in, or a literal value.' },
     { key: 'outputs', label: 'Task outputs (processVar ← taskVar)', widget: 'keyval', keySource: 'own', help: 'Left = the process variable to write (pick an existing one to overwrite it, or type a new name). Right = the field name submitted on this task.' },
-  ] }, SLA, ADVANCED],
+  ] }, MULTI_INSTANCE, SLA, ADVANCED],
   diagram: { icon: 'user', color: '#2563eb', shape: 'rectangle' },
   typeLabel: 'User task',
   docs: {

@@ -145,6 +145,7 @@ import { CodeEditorComponent } from '../../shared/code-editor.component';
                     <small>Runtime codes: SCRIPT_ERROR, SERVICE_ERROR, RULE_ERROR, CALL_ERROR, RUNTIME_ERROR — or your own from an error-throw end. Blank/“*” = any.</small>
                   }
                   @case ('escalation') { <input class="mt" placeholder="Escalation code" [ngModel]="val(f.key + '.escalation')" (ngModelChange)="set(f.key + '.escalation', $event)" /> }
+                  @case ('link') { <input class="mt" placeholder="Link name (a throw jumps to the catch with the same name)" [ngModel]="val(f.key + '.link')" (ngModelChange)="set(f.key + '.link', $event)" /> }
                   @case ('condition') {
                     <div class="cond-header">
                       <span class="cond-sub">Condition (JavaScript)</span>
@@ -155,10 +156,15 @@ import { CodeEditorComponent } from '../../shared/code-editor.component';
                     <input class="mt" placeholder="Condition expression (JavaScript)" [ngModel]="val(f.key + '.condition')" (ngModelChange)="set(f.key + '.condition', $event); set(f.key + '.lang', 'js')" />
                   }
                   @case ('timer') {
-                    <input class="mt" placeholder="Duration e.g. PT5M / P1D" [ngModel]="val(f.key + '.timer.duration')" (ngModelChange)="set(f.key + '.timer.duration', $event)" />
-                    <input class="mt" placeholder="Cycle e.g. R/PT1H" [ngModel]="val(f.key + '.timer.cycle')" (ngModelChange)="set(f.key + '.timer.cycle', $event)" />
+                    <input class="mt" placeholder="Duration e.g. PT5M, 2d, #{slaHours}h" [ngModel]="val(f.key + '.timer.duration')" (ngModelChange)="set(f.key + '.timer.duration', $event)" />
+                    <input class="mt" placeholder="Cycle e.g. R/PT1H or cron: 0 9 * * MON-FRI" [ngModel]="val(f.key + '.timer.cycle')" (ngModelChange)="set(f.key + '.timer.cycle', $event)" />
                     <input class="mt" placeholder="Date (ISO)" [ngModel]="val(f.key + '.timer.date')" (ngModelChange)="set(f.key + '.timer.date', $event)" />
                   }
+                }
+                @if (canScope(f) && ['signal','message','escalation'].includes(eventKind(f.key))) {
+                  <select class="mt" [ngModel]="val(f.key + '.scope') || 'workspace'" (ngModelChange)="set(f.key + '.scope', $event === 'workspace' ? undefined : $event)" title="Who can receive it">
+                    <option value="workspace">deliver workspace-wide</option><option value="instance">this instance only</option>
+                  </select>
                 }
               }
             }
@@ -340,9 +346,18 @@ export class PropertiesPanelComponent implements OnChanges {
     const parts = path.split('.'); let cur = this.node;
     for (let i = 0; i < parts.length - 1; i++) { const p = parts[i]!; if (cur[p] == null || typeof cur[p] !== 'object') cur[p] = {}; cur = cur[p]; }
     const last = parts[parts.length - 1]!;
-    if (value === '' || value === undefined) delete cur[last]; else cur[last] = value;
+    if (value === '' || value === undefined) {
+      delete cur[last];
+      // drop parent objects left empty (e.g. multiInstance: {}) so they do not switch a feature on
+      for (let i = parts.length - 2; i >= 0; i--) {
+        const holder = parts.slice(0, i).reduce((c: any, p) => c[p], this.node); const k = parts[i]!;
+        if (holder[k] && typeof holder[k] === 'object' && !Object.keys(holder[k]).length) delete holder[k]; else break;
+      }
+    } else cur[last] = value;
     this.changed.emit();
   }
+  /** Throw widgets (those offering compensation) can also be limited to the current instance. */
+  canScope(f: Field) { return !!f.options?.includes('compensation'); }
   num(v: any) { const n = Number(v); return Number.isFinite(n) ? n : undefined; }
   str(v: any) { return typeof v === 'object' ? JSON.stringify(v) : String(v); }
 
@@ -354,7 +369,7 @@ export class PropertiesPanelComponent implements OnChanges {
   eventKind(path: string): string {
     const o = this.val(path);
     if (!o || typeof o !== 'object') return 'none';
-    for (const k of ['timer', 'signal', 'message', 'error', 'escalation', 'condition']) if (k in o) return k;
+    for (const k of ['timer', 'signal', 'message', 'error', 'escalation', 'condition', 'link']) if (k in o) return k;
     return 'none';
   }
   setKind(f: Field, kind: string) {
@@ -365,6 +380,7 @@ export class PropertiesPanelComponent implements OnChanges {
       case 'message': obj = { message: '' }; break;
       case 'error': obj = { error: '' }; break;
       case 'escalation': obj = { escalation: '' }; break;
+      case 'link': obj = { link: '' }; break;
       case 'condition': obj = { condition: '', lang: 'js' }; break;
       case 'timer': obj = { timer: { duration: 'PT5M' } }; break;
     }

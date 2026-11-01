@@ -126,3 +126,13 @@ export const EXECUTION: UiSection = { title: 'Execution', fields: [
 export const SLA: UiSection = { title: 'Service level (SLA)', fields: [
   { key: 'slaDueDate', label: 'SLA due date', widget: 'text', placeholder: '2h  ·  1d  ·  PT30M  ·  #{deadline}', help: 'How long this step may take from the moment it starts. On breach the instance is flagged, the audit log records it and the person who started it is notified; the process keeps running. A date or #{variable} also works.' },
 ] };
+
+/** Multi-instance on an activity: run it once per item of a collection, in parallel or one after another. */
+export const MULTI_INSTANCE: UiSection = { title: 'Multi-instance', fields: [
+  { key: 'multiInstance.over', label: 'Repeat over', widget: 'varRef', varSource: 'ownRef', placeholder: 'items', help: 'Collection variable; the node runs once per item. Leave empty for a normal single run.' },
+  { key: 'multiInstance.as', label: 'Item variable', widget: 'text', placeholder: 'item', help: 'Name each item is available under inside the node.' },
+  { key: 'multiInstance.parallel', label: 'Run in parallel', widget: 'bool', help: 'Untick to run the items one after another.' },
+  { key: 'multiInstance.collectInto', label: 'Collect results into', widget: 'text', placeholder: 'results', help: 'Variable that receives the list of per-item results.' },
+  { key: 'multiInstance.itemResult', label: 'Item result variable', widget: 'text', help: 'Variable inside each item whose value is collected.' },
+  { key: 'multiInstance.completionCondition', label: 'Completion condition', widget: 'text', placeholder: 'completed >= 2', help: 'When true the remaining items are cancelled and the node completes early.' },
+] };

@@ -9,7 +9,7 @@ export const def: NodeDef = {
   ],
   ports: { maxIn: 0, maxOut: 1 },   // start: exactly one outgoing
   schema: [GENERAL, { title: 'Trigger', fields: [
-    { key: 'on', label: 'Start trigger', widget: 'event', options: ['none', 'signal', 'message', 'timer', 'condition'], help: 'How instances of this process are started' },
+    { key: 'on', label: 'Start trigger', widget: 'event', options: ['none', 'signal', 'message', 'timer'], help: 'How instances of this process are started' },
     { key: 'on.timer', label: 'Timer / cron', widget: 'text', help: 'ISO duration (PT1H), date, or recurring cycle (R/PT1H). The active deployment auto-starts instances on schedule.' },
   ] }],
   diagram: { icon: 'play', color: '#16a34a', shape: 'circle' },

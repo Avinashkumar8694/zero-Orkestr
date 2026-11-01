@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
+import { type NodeDef, MULTI_INSTANCE, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
 export const def: NodeDef = {
   engineType: 'subprocess',
   palette: [{ key: 'subprocess', label: 'Sub-process', category: 'Sub-process', icon: '▭', color: '#4f46e5', engineType: 'subprocess', defaults: { type: 'subprocess', nodes: [], flows: [] } }],
@@ -8,8 +8,12 @@ export const def: NodeDef = {
     { key: 'adHoc', label: 'Ad-hoc', widget: 'bool', help: 'Its activities are not wired together: those marked autoStart begin, any other can be started on demand ("re-trigger a node"). Ends when the completion condition is true (or, without one, when nothing is left running).' },
     { key: 'completionCondition', label: 'Completion condition (ad-hoc)', widget: 'textarea', placeholder: 'completed >= 3', help: 'Sees completed (finished steps), active (running steps) and the process variables.' },
     { key: 'interrupting', label: 'Interrupting (event sub-process)', widget: 'bool', help: 'For an event sub-process: when it fires, stop everything else in the process (default). Untick to run beside the main flow.' },
+    { key: 'on.signal', label: 'Event sub-process on signal', widget: 'text', help: 'Signal name that triggers this as an event sub-process' },
+    { key: 'on.message', label: 'Event sub-process on message', widget: 'text', help: 'Message name that triggers this as an event sub-process' },
+    { key: 'on.escalation', label: 'Event sub-process on escalation', widget: 'text', help: 'Escalation code that triggers this as an event sub-process' },
+    { key: 'on.condition', label: 'Event sub-process on condition', widget: 'text', help: 'JavaScript condition; fires when it becomes true after a variable change' },
     { key: 'on.error', label: 'Event sub-process on error', widget: 'text', help: 'Error code that triggers this as an event sub-process' },
-  ] }, EXECUTION, SLA, ADVANCED],
+  ] }, EXECUTION, MULTI_INSTANCE, SLA, ADVANCED],
   diagram: { icon: 'projects', color: '#4f46e5', shape: 'rectangle' },
   typeLabel: 'Sub-process',
 };

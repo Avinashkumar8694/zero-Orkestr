@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
+import { type NodeDef, MULTI_INSTANCE, GENERAL, EXECUTION, SLA, ADVANCED } from '../def-types.ts';
 
 export const def: NodeDef = {
   engineType: 'http',
@@ -20,7 +20,7 @@ export const def: NodeDef = {
     { key: 'timeoutSeconds', label: 'Timeout (seconds)', widget: 'number', placeholder: 'workspace default', help: 'Cancel the call after this long (1–300). Empty uses the workspace HTTP timeout.' },
     { key: 'errorVar', label: 'Soft-failure variable (when Throw Error is Off)', widget: 'text', placeholder: 'serviceError', help: 'Variable name to store { httpStatus, url, responseBody, method } on soft failure.' },
     { key: 'exitScript', label: 'Exit script (hook)', widget: 'code', placeholder: '// raw response in resPayload', help: 'Optional post-processing script executed with resPayload bound.' },
-  ] }, EXECUTION, SLA, ADVANCED],
+  ] }, EXECUTION, MULTI_INSTANCE, SLA, ADVANCED],
   diagram: { icon: 'globe', color: '#0d9488', shape: 'rectangle' },
   typeLabel: 'Service task',
   docs: {

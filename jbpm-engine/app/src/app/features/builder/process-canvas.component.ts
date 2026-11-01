@@ -11,7 +11,7 @@ import { MarkdownViewerComponent } from '../../shared/markdown-viewer.component'
 
 // A canvas node is just an engine node with x/y layout coords stored alongside (ignored by the SDK).
 interface CNode { id: string; type: string; name?: string; x: number; y: number; [k: string]: any; }
-interface CEdge { id: string; from: string; to: string; when?: string; lang?: string; label?: string; }
+interface CEdge { id: string; from: string; to: string; when?: string; lang?: string; label?: string; priority?: number; }
 
 const NW = 190, NH = 48;
 const COL_W = NW + 100, ROW_H = NH + 46;
@@ -279,6 +279,10 @@ const COL_W = NW + 100, ROW_H = NH + 46;
                 <input [(ngModel)]="e.when" (ngModelChange)="onEdgeChange(e)" placeholder="e.g. amount > 1000 &amp;&amp; riskTier === 'HIGH'" />
               </label>
               <p class="hint">Leave empty for an unconditional / default flow. Evaluates bare variables (<code>amount</code>), <code>vars.key</code>, or functional conditions.</p>
+              @if (siblingCount(e) > 1) {
+                <label class="fld"><span>Priority</span><input type="number" min="1" [(ngModel)]="e.priority" (ngModelChange)="onEdgeChange(e)" placeholder="1 = tried first" /></label>
+                <p class="hint">On an exclusive gateway the lowest number whose condition is true is taken. Empty = after all numbered branches.</p>
+              }
               <button class="btn danger full" (click)="delEdge(e.id); closeEdgeEditor()">Delete connection</button>
             </div>
           </div>
@@ -298,12 +302,24 @@ const COL_W = NW + 100, ROW_H = NH + 46;
             </div>
             <div class="modal-body">
               <p class="hint">Typed data this process carries. Access in scripts via bare names (<code>amount</code>), <code>vars.name</code>, or <code>getVariable('name')</code>.</p>
+              <details class="pprops">
+                <summary>Process properties</summary>
+                <label class="fld"><span>Description template</span><input [ngModel]="meta('description')" (ngModelChange)="setMeta('description', $event)" placeholder="Loan for #{customer}" /></label>
+                <label class="fld"><span>SLA due (e.g. 2d, PT4H, #&#123;slaHours&#125;h)</span><input [ngModel]="meta('slaDueDate')" (ngModelChange)="setMeta('slaDueDate', $event)" /></label>
+                <label class="fld"><span>Version</span><input [ngModel]="meta('version')" (ngModelChange)="setMeta('version', $event)" placeholder="1.0" /></label>
+                <label class="vtag"><input type="checkbox" [checked]="meta('adHoc') === true" (change)="setMeta('adHoc', $any($event.target).checked || undefined)" /> Ad-hoc process (nodes marked autoStart begin on their own)</label>
+                @if (meta('adHoc') === true) {
+                  <label class="fld"><span>Completion condition</span><input [ngModel]="meta('completionCondition')" (ngModelChange)="setMeta('completionCondition', $event)" placeholder="done === true" /></label>
+                }
+              </details>
               @for (v of procVars(); track $index) {
                 <div class="vrow">
                   <input placeholder="name" [(ngModel)]="v.name" (ngModelChange)="markDirty()" />
                   <select [(ngModel)]="v.type" (ngModelChange)="markDirty()">
                     <option>string</option><option>int</option><option>long</option><option>double</option><option>bool</option><option>date</option><option>object</option><option>list</option><option>map</option>
                   </select>
+                  <label class="vtag" title="Must be supplied when the process starts"><input type="checkbox" [checked]="hasTag(v,'required')" (change)="toggleTag(v,'required')" /> required</label>
+                  <label class="vtag" title="Scripts and API updates cannot change it after start"><input type="checkbox" [checked]="hasTag(v,'readonly')" (change)="toggleTag(v,'readonly')" /> read-only</label>
                   <button class="x" (click)="rmVar($index)" aria-label="Remove variable"><app-icon name="close" [size]="13" /></button>
                 </div>
               }
@@ -608,6 +624,8 @@ const COL_W = NW + 100, ROW_H = NH + 46;
     .cheat-pill:hover { background: var(--primary-50, rgba(99,102,241,0.15)); border-color: var(--primary); }
     .mr-2 { margin-right: 8px; }
     .modal-body { padding: 16px 18px; overflow: auto; }
+    .vtag { display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap; }
+    .pprops { margin-bottom:10px; } .pprops summary { cursor:pointer; font-weight:600; font-size:12.5px; margin-bottom:6px; }
     .vrow { display: flex; gap: 8px; margin-bottom: 8px; }
     .vrow input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
     .vrow select { flex: 0 0 120px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
@@ -705,7 +723,9 @@ export class ProcessCanvasComponent implements OnChanges {
   linkError = signal<string>('');
   saveState = signal<'saved' | 'saving' | 'dirty'>('saved');
   showVars = signal(false);
-  procVars = signal<{ name: string; type: string }[]>([]);
+  procVars = signal<{ name: string; type: string; tags?: string[] }[]>([]);
+  /** Process-level fields the canvas does not draw (description, SLA, version, ad-hoc, imported extras) — kept so saving never drops them. */
+  private procExtra: Record<string, any> = {};
   processName = signal('');
   q = '';
   addQ = '';
@@ -961,12 +981,14 @@ export class ProcessCanvasComponent implements OnChanges {
     if (!proc) return;
     this.processName.set(proc.name || this.processId);
     this.procVars.set([...(proc.vars || [])]);
+    const { id: _i, name: _n, package: _p, vars: _v, nodes: _no, flows: _f, ...extra } = proc;
+    this.procExtra = extra;
     const hasExistingPositions = (proc.nodes || []).some((n: any) => n.x != null && n.y != null);
     const cn: CNode[] = (proc.nodes || []).map((n: any, i: number) => ({
       ...n, x: n.x ?? (100 + (i % 4) * 230), y: n.y ?? (90 + Math.floor(i / 4) * 150),
     }));
     this.nodes.set(cn);
-    this.edges.set((proc.flows || []).map((f: any, i: number) => ({ id: f.id || `e${i}_${f.from}_${f.to}`, from: f.from, to: f.to, when: f.when, lang: f.lang, label: f.label })));
+    this.edges.set((proc.flows || []).map((f: any, i: number) => ({ id: f.id || `e${i}_${f.from}_${f.to}`, from: f.from, to: f.to, when: f.when, lang: f.lang, label: f.label, priority: f.priority })));
     // Preserve saved / imported coordinates; auto-layout only if fresh/unpositioned
     if (!hasExistingPositions) {
       this.applyAutoLayout();
@@ -980,9 +1002,10 @@ export class ProcessCanvasComponent implements OnChanges {
 
   private buildProcess() {
     return {
+      ...this.procExtra,
       id: this.processId, name: this.processName(), package: 'com.acme', vars: this.procVars(),
       nodes: this.nodes().map((n) => ({ ...n })),
-      flows: this.edges().map((e) => ({ id: e.id, from: e.from, to: e.to, ...(e.when ? { when: e.when, lang: 'js' } : {}), ...(e.label ? { label: e.label } : {}) })),
+      flows: this.edges().map((e) => ({ id: e.id, from: e.from, to: e.to, ...(e.when ? { when: e.when, lang: 'js' } : {}), ...(e.label ? { label: e.label } : {}), ...(e.priority ? { priority: Number(e.priority) } : {}) })),
     };
   }
 
@@ -1442,6 +1465,10 @@ export class ProcessCanvasComponent implements OnChanges {
 
   // ---- process variables (this process's own variables) ----
   openVars() { this.showVars.set(true); }
+  meta(k: string): any { return this.procExtra[k] ?? (k === 'adHoc' ? false : ''); }
+  setMeta(k: string, v: any) { if (v === '' || v === undefined || v === false) delete this.procExtra[k]; else this.procExtra[k] = v; this.markDirty(); }
+  hasTag(v: { tags?: string[] }, t: string) { return !!v.tags?.includes(t); }
+  toggleTag(v: { tags?: string[] }, t: string) { const s = new Set(v.tags || []); s.has(t) ? s.delete(t) : s.add(t); v.tags = [...s]; if (!v.tags.length) delete v.tags; this.markDirty(); }
   addVar() { this.procVars.set([...this.procVars(), { name: '', type: 'string' }]); this.markDirty(); }
   rmVar(i: number) { const v = [...this.procVars()]; v.splice(i, 1); this.procVars.set(v); this.markDirty(); }
   closeVars() { this.showVars.set(false); this.saveNow(); }

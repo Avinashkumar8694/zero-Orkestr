@@ -426,6 +426,9 @@ export const RULES: Rule[] = [
     return out;
   } },
 
+  { id: 'conditional-start', description: 'A start event cannot be triggered by a condition', run: (c) => c.nodes.filter((n) => n.type === 'start' && ((n as any).on?.condition || (n as any).event?.condition)).map((n) =>
+    P('conditional-start', 'warning', `Start "${n.name || n.id}" has a condition trigger, which the engine does not start instances from. Use a signal, message or timer start, or start with a gateway after it.`, { nodeId: n.id })) },
+
   // In BPMN 2.0 and jBPM, Events (start, end, catch, throw, boundary) and Gateways are graphic shapes
   // that are standardly unnamed; only activities, tasks, and sub-processes require meaningful names for clarity.
   { id: 'node-name', description: 'Nodes should be named', run: (c) => c.nodes.filter((n) => n.type !== 'start' && n.type !== 'end' && n.type !== 'gateway' && n.type !== 'catch' && n.type !== 'throw' && n.type !== 'boundary' && (!n.name || !n.name.trim())).map((n) => P('node-name', 'warning', `${n.type} "${n.id}" has no name`, { nodeId: n.id })) },

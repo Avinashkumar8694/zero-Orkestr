@@ -8,7 +8,7 @@ export const def: NodeDef = {
   ],
   ports: { maxIn: 1, maxOut: 1 },
   schema: [GENERAL, { title: 'Event', fields: [
-    { key: 'event', label: 'Catch', widget: 'event', options: ['timer', 'message', 'signal', 'condition'] },
+    { key: 'event', label: 'Catch', widget: 'event', options: ['timer', 'message', 'signal', 'escalation', 'condition', 'link'] },
   ] }],
   diagram: { icon: 'clock', color: '#7c3aed', shape: 'circle' },
   typeLabel: 'Catch event',
