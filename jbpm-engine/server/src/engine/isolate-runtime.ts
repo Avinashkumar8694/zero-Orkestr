@@ -42,7 +42,21 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
       isNull: function () { return data == null; },
       isMissingNode: function () { return data === undefined; },
       size: function () { return Array.isArray(data) ? data.length : (typeof data === 'object' && data !== null ? Object.keys(data).length : 0); },
-      toString: function () { return typeof data === 'string' ? data : JSON.stringify(data); }
+      toString: function () { return typeof data === 'string' ? data : JSON.stringify(data); },
+      // a node placed inside another node serializes as its content; a MissingNode (absent path) serializes as null, like Jackson
+      toJSON: function () { return data === undefined ? null : data; },
+      // a JsonNode is Iterable<JsonNode>: array elements, or an object's values; scalars and missing nodes have none
+      elements: function () { return self[Symbol.iterator](); },
+      isObject: function () { return data !== null && typeof data === 'object' && !Array.isArray(data); },
+      isTextual: function () { return typeof data === 'string'; },
+      isNumber: function () { return typeof data === 'number'; },
+      isBoolean: function () { return typeof data === 'boolean'; },
+      isEmpty: function () { return data == null || (typeof data === 'object' && Object.keys(data).length === 0); }
+    };
+    self[Symbol.iterator] = function () {
+      var items = Array.isArray(data) ? data : (data !== null && typeof data === 'object' ? Object.keys(data).map(function (k) { return data[k]; }) : []);
+      var i = 0;
+      return { next: function () { return i < items.length ? { value: makeJacksonNode(items[i++]), done: false } : { value: undefined, done: true }; } };
     };
     return self;
   }
@@ -51,7 +65,17 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
     return {
       addObject: function () { var o = {}; data.push(o); return makeJacksonNode(o); },
       add: function (v) { data.push(v); return this; },
-      toString: function () { return JSON.stringify(data); }
+      addPOJO: function (v) { data.push(v === undefined ? null : v); return this; },
+      toString: function () { return JSON.stringify(data); },
+      toJSON: function () { return data; },
+      size: function () { return data.length; },
+      isEmpty: function () { return data.length === 0; },
+      get: function (i) { return data[i] === undefined ? null : makeJacksonNode(data[i]); },
+      path: function (i) { return makeJacksonNode(data[i]); },
+      isArray: function () { return true; },
+      addNull: function () { data.push(null); return this; },
+      elements: function () { return this[Symbol.iterator](); },
+      [Symbol.iterator]: function () { var i = 0; return { next: function () { return i < data.length ? { value: makeJacksonNode(data[i++]), done: false } : { value: undefined, done: true }; } }; }
     };
   }
   function makeArrayList(initial) { return initial ? initial.slice() : []; }
@@ -256,7 +280,19 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
         return {
           createObjectNode: function () { return makeJacksonNode({}); },
           createArrayNode: function () { return makeJacksonArray([]); },
-          readTree: function (str) { try { return makeJacksonNode(typeof str === 'string' ? JSON.parse(str) : str); } catch (e) { return makeJacksonNode({}); } },
+          readTree: function (str) {
+            if (str == null) throw new Error('IllegalArgumentException: argument "content" is null');
+            if (typeof str !== 'string') return makeJacksonNode(str);
+            if (!str.trim()) return makeJacksonNode(undefined);                 // empty content is a MissingNode
+            try { return makeJacksonNode(JSON.parse(str)); } catch (e) { throw new Error('JsonParseException: ' + e.message); }   // Jackson throws on malformed JSON
+          },
+          // readValue(json, Map.class) / convertValue(obj, Map.class): plain data back (the target class is irrelevant in JS)
+          readValue: function (str) {
+            if (str == null) throw new Error('IllegalArgumentException: argument "content" is null');
+            try { var v = typeof str === 'string' ? JSON.parse(str) : JSON.parse(JSON.stringify(str)); return v !== null && typeof v === 'object' && !Array.isArray(v) ? makeHashMap(v) : v; } catch (e) { throw new Error('JsonParseException: ' + e.message); }
+          },
+          convertValue: function (obj) { if (obj == null) return null; var v = JSON.parse(JSON.stringify(obj)); return v !== null && typeof v === 'object' && !Array.isArray(v) ? makeHashMap(v) : v; },
+          valueToTree: function (obj) { return makeJacksonNode(obj == null ? null : JSON.parse(JSON.stringify(obj))); },
           writeValueAsString: function (obj) { return JSON.stringify(obj); }
         };
       },

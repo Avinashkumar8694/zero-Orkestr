@@ -51,7 +51,7 @@ export interface HandlerCtx {
   abort(targetInstanceId: string): Promise<void>;
   /** Run compensation handlers for completed activities in reverse order (all, or a single host). */
   compensate(ref?: string): Promise<Record<string, unknown>>;
-  resolveCalled?: (processId: string) => Promise<{ dep: Deployment; processId: string } | undefined>;
+  resolveCalled?: (processId: string, from?: Deployment) => Promise<{ dep: Deployment; processId: string } | undefined>;
 }
 
 export type NodeHandler = (c: HandlerCtx) => Promise<HandlerResult> | HandlerResult;

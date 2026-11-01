@@ -1082,7 +1082,13 @@ policyRouter.post('/enrollment/file/validation/notification', (req, res) => res.
 policyRouter.post('/takeover/file/notification', (req, res) => res.json({ status: 'SUCCESS', sent: true, message: 'Takeover notification sent' }));
 policyRouter.post('/policy/certificate/send-email', (req, res) => res.json({ status: 'SUCCESS', sent: true, message: 'Certificate email sent' }));
 policyRouter.post('/policy/id-card/send-email', (req, res) => res.json({ status: 'SUCCESS', sent: true, message: 'ID card email sent' }));
-policyRouter.post('/policy/certificate/send-communication', (req, res) => res.json({ status: 'SUCCESS', sent: true, message: 'Communication sent' }));
+// the send wrappers answer like POST /communications/send: one results[] entry per channel of the primary recipient (send_communication_with_retry parses this)
+const commSendResponse = (req, res) => {
+  const b = req.body || {};
+  res.json({ status: 'SUCCESS', sent: true, message: 'Communication sent', results: [{ partyId: b.party_id || b.partyId || 'PRT-MOCK', role: 'PRIMARY', channel: 'EMAIL', isCc: false, status: 'SENT', shipmentId: 'SHP-' + Date.now() }] });
+};
+policyRouter.post('/policy/certificate/send-communication', commSendResponse);
+policyRouter.post('/communications/send', commSendResponse);
 policyRouter.post('/certificate/available/notify', (req, res) => res.json({ status: 'SUCCESS', sent: true, message: 'Certificate available notified' }));
 policyRouter.post('/communications/retry', (req, res) => res.json({ status: 'SUCCESS', retried: true, message: 'Communications retry queued' }));
 

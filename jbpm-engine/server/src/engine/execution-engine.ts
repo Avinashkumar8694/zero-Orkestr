@@ -39,7 +39,7 @@ export class ExecutionEngine {
     private ctx: AppContext,
     private emit: (e: EngineEvent) => void = () => {},
     /** resolve a called process id -> its active deployment (enables call-activity child instances) */
-    private resolveCalled?: (processId: string) => Promise<{ dep: Deployment; processId: string } | undefined>,
+    private resolveCalled?: (processId: string, from?: Deployment) => Promise<{ dep: Deployment; processId: string } | undefined>,
   ) {}
   private inst() { return this.ctx.store.repo<Instance>(Collections.instances); }
   private deps() { return this.ctx.store.repo<Deployment>(Collections.deployments); }
@@ -565,7 +565,7 @@ export class ExecutionEngine {
       const childVars: Record<string, unknown> = n.miInline ? { ...parent.variables } : {};
       for (const v of (n.pass || [])) childVars[v] = parent.variables[v];
       if (n.as) childVars[n.as] = item;
-      const resolved = n.miInline ? { dep: pdep, processId: n.process } : this.resolveCalled ? await this.resolveCalled(n.process) : undefined;
+      const resolved = n.miInline ? { dep: pdep, processId: n.process } : this.resolveCalled ? await this.resolveCalled(n.process, pdep) : undefined;
       if (resolved) {
         await this.startChild(resolved.dep, resolved.processId, childVars, parent.startedBy, parent.id, token.id);
         siblings = (await this.inst().query((i) => i.tenantId === this.ctx.tenantId && i.parentInstanceId === parent.id && i.parentTokenId === token.id))

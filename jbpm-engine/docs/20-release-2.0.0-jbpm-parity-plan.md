@@ -479,3 +479,17 @@ The same tests with Redis switched off fail (LIVE-2, LIVE-3), so they do detect 
 | Finding | the running dev server was started before the node-definition changes and did not reload them; restart after upgrading |
 | Finding | process starts were limited to a hard-coded 120 per minute per caller; now `RATE_START_PER_MIN` (default unchanged) |
 
+## 17. Real project import: `MySpace_policy_system (9).zip`
+Imported through `POST /import/jbpm/deploy` on a running server (23 processes, nothing reported unsupported; the only skipped asset is `WorkDefinitions.wid`, custom work-item definitions, which have no equivalent kind) and run against `mock_server` with the environment keys the processes read (`INTEGRATION_LAYER_URL`, `APL_POLICY_MS_URL`, `APL_BROKER_MS_BASE_URL`, `APL_QUOTATION_MS_URL`, `QUOTATION_BASE_URL`, `APL_BROKER_DATA_FABRIC_BASE_URL`, all pointing at the mock; without `APL_POLICY_MS_URL` the project falls back to `localhost:8200`). The zip is identical to `extracted_projects/policy_system`.
+
+Result: all seven `policy_management_process` journeys (certificate resend, file feed, takeover, claims, termination, escalation, enrollment) run to completion once their user tasks are completed and their signals sent, including `certificate_resend` → `rest-executor` → `send_communication_with_retry`. Processes started standalone wait or fail only where a caller normally supplies inputs (for example `commEntityContext`, a REST `Url`).
+
+Defects this found and fixed:
+| # | Defect | Fix |
+|---|---|---|
+| 1 | A call activity ran the sub-process of the **first active deployment** that had that process id, not the caller's own (two versions or environments of one project mixed) | the caller's deployment first, then its environment, then others (`test/call-resolution.test.ts`) |
+| 2 | Imported Java `String.replace(a, b)` (replaces every occurrence) became JS `replace` (first only); it produced invalid JSON in the error-handler context | `replace` → `replaceAll`, Java `replaceAll(regex, b)` → global regex replace |
+| 3 | Jackson shim: a missing path put into another node serialized as `{}` instead of `null`, and nested nodes lost their content | `toJSON` on nodes |
+| 4 | Jackson shim: `readTree` swallowed malformed JSON; a `JsonNode` was not iterable (`for (JsonNode r : node.path("results"))`); `ArrayNode` lacked `size/get/addPOJO`; `ObjectMapper.readValue/convertValue` missing | all added; `readTree` / `readValue` now throw like Jackson (`test/java-replace.test.ts`) |
+| 5 | `mock_server` answered the send-communication endpoints without the `results[]` the process parses, so every send took the retry path | realistic `results[...SENT]` response, plus `/communications/send` |
+

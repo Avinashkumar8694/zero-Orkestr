@@ -130,7 +130,37 @@ export function convertAssets(engine: EngineProject): AssetImportReport {
   return report;
 }
 
-export function javaScriptify(code?: string): string {
+export /** Splits the argument list of a call whose "(" is at `open`; returns the top-level args and the index after ")" (string/char literals and nesting respected). */
+function callArgs(src: string, open: number): { args: string[]; end: number } | undefined {
+  const args: string[] = []; let depth = 0, start = open + 1, quote = '';
+  for (let i = open; i < src.length; i++) {
+    const c = src[i]!;
+    if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') { depth--; if (depth === 0) { args.push(src.slice(start, i)); return { args, end: i + 1 }; } }
+    else if (c === ',' && depth === 1) { args.push(src.slice(start, i)); start = i + 1; }
+  }
+  return undefined;
+}
+
+/** Java String.replace(a, b) replaces EVERY literal occurrence and replaceAll(regex, b) is a global regex replace; JS replace() with a string only replaces the first. */
+function javaReplaceSemantics(js: string): string {
+  const rewrite = (src: string, name: string, make: (a: string, b: string) => string): string => {
+    let out = '', i = 0;
+    const re = new RegExp('\\.' + name + '\\s*\\(', 'g');
+    for (let m = re.exec(src); m; m = re.exec(src)) {
+      const open = m.index + m[0].length - 1; const call = callArgs(src, open);
+      if (!call || call.args.length !== 2) continue;
+      out += src.slice(i, m.index) + make(call.args[0]!.trim(), call.args[1]!.trim()); i = call.end; re.lastIndex = call.end;
+    }
+    return out + src.slice(i);
+  };
+  const step1 = rewrite(js, 'replaceAll', (a, b) => `.replace(new RegExp(${a}, 'g'), ${b})`);
+  return rewrite(step1, 'replace', (a, b) => `.replaceAll(${a}, ${b})`);
+}
+
+function javaScriptify(code?: string): string {
   if (!code) return '';
   let js = code;
 
@@ -162,6 +192,7 @@ export function javaScriptify(code?: string): string {
   js = js.replace(/for\s*\(\s*(?:[a-zA-Z0-9_\\.<>]+)\s+([a-zA-Z0-9_]+)\s*:\s*([^)]+)\)/g, 'for (let $1 of $2)');
   js = js.replace(/for\s*\(\s*int\s+([a-zA-Z0-9_]+)\s*=/g, 'for (let $1 =');
 
+  js = javaReplaceSemantics(js);
   return js;
 }
 

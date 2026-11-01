@@ -19,7 +19,7 @@ export function mapChildOutputs(n: any, child: Instance): Record<string, unknown
 export const handler: NodeHandler = async (c) => {
   const n = c.node;
   if (!c.resolveCalled || !n.process) return {};
-  const resolved = await c.resolveCalled(n.process);
+  const resolved = await c.resolveCalled(n.process, c.dep);
   if (!resolved) return { outcome: 'called-process-not-deployed' };
   const token = c.inst.tokens.find((t) => t.nodeId === n.id)!;
   const childVars: Record<string, unknown> = {};

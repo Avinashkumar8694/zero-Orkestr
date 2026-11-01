@@ -12,8 +12,11 @@ import { SettingsService } from '../settings/service.ts';
 import { notFound, conflict, validation, quotaExceeded } from '../../infra/errors.ts';
 
 export function makeResolveCalled(ctx: AppContext) {
-  return async (processId: string): Promise<{ dep: Deployment; processId: string } | undefined> => {
-    const deps = await ctx.store.repo<Deployment>(Collections.deployments).query((d) => d.tenantId === ctx.tenantId && d.status === 'active');
+  return async (processId: string, from?: Deployment): Promise<{ dep: Deployment; processId: string } | undefined> => {
+    const active = await ctx.store.repo<Deployment>(Collections.deployments).query((d) => d.tenantId === ctx.tenantId && d.status === 'active');
+    // the caller's own deployment first (a project calls its own sub-processes), then its environment, then any other active deployment
+    const rank = (d: Deployment) => (from && d.id === from.id ? 0 : from && d.workflowId === from.workflowId && d.environment === from.environment ? 1 : from && d.environment === from.environment ? 2 : 3);
+    const deps = [from && !active.some((d) => d.id === from.id) ? from : undefined, ...active].filter(Boolean).map((d) => d!).sort((a, b) => rank(a) - rank(b));
     for (const dep of deps) {
       // the id first, then the process NAME (jBPM's "called element by name")
       const p = (dep.engine?.processes || []).find((x) => x.id === processId) ?? (dep.engine?.processes || []).find((x) => x.name === processId);
