@@ -13,8 +13,9 @@ import { Collections, type Instance, type Task } from '../src/domain.ts';
 export const T0 = '2025-01-01T00:00:00.000Z';
 export const at = (s: number) => new Date(Date.parse(T0) + s * 1000).toISOString();
 
-export function kit(tenantId = 't1') {
-  const store = new MemoryStore();
+export function kit(tenantId = 't1', opts: { copies?: boolean } = {}) {
+  const raw = new MemoryStore();
+  const store = opts.copies ? cloningStore(raw) : raw;
   let n = 0;
   const ctx = makeContext({ store, tenantId, clock: fakeClock(T0).clock, newId: () => `id${++n}` });
   const deploy = async (name: string, nodes: any[], flows: any[], vars: any[] = []) => {
@@ -43,4 +44,27 @@ export function kit(tenantId = 't1') {
     error: i.error?.message ?? null,
   });
   return { store, ctx, deploy, line, start, get, tick, tasks, completeTask, instances, trace };
+}
+
+/** A store that hands out COPIES like a real database does (the plain MemoryStore shares object references, which hides lost updates). */
+export function cloningStore(inner: MemoryStore) {
+  const c = <T>(v: T): T => (v === undefined ? v : structuredClone(v));
+  // a real database yields to other work on every round trip; a seeded jitter reproduces the interleavings deterministically enough
+  let seed = 7;
+  const io = async () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; for (let n = seed % 4; n >= 0; n--) await new Promise((r) => setImmediate(r)); };
+  return new Proxy(inner, {
+    get(target, prop, recv) {
+      if (prop !== 'repo') return Reflect.get(target, prop, recv);
+      return (name: string) => {
+        const r = target.repo<any>(name);
+        return {
+          get: async (id: string) => { await io(); return c(await r.get(id)); },
+          list: async () => c(await r.list()),
+          query: async (pred: (t: any) => boolean) => { await io(); return c(await r.query(pred)); },
+          put: async (e: any) => { await io(); return r.put(c(e)); },
+          delete: (id: string) => r.delete(id),
+        };
+      };
+    },
+  }) as MemoryStore;
 }

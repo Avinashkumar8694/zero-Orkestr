@@ -11,6 +11,7 @@ import { computeDue, parseCycleRepeatCount } from '../../engine/duration.ts';
 import { notFound, conflict, validation } from '../../infra/errors.ts';
 import { config } from '../../infra/config.ts';
 import { logger } from '../../infra/logger.ts';
+import { isBusy } from '../../engine/instance-lock.ts';
 
 /** Multi-replica guards for tick(): `admit` says whether this replica may work this workspace's timers at all (checked
  *  once, and only when something is due), `claim` takes exclusive ownership of ONE job so two replicas never fire it. */
@@ -123,7 +124,11 @@ export class TimerService {
               // consumes its own wait) removes the token, so this naturally stops recurring on its own.
               if (job.cycle && inst.tokens.some((t) => t.id === job.tokenId)) await this.reschedule(job, nowIso);
             }
-          } catch { /* token gone / instance finished / deployment inactive — ignore */ }
+          } catch (e) {
+            // the instance was busy for the whole wait: the job was claimed (marked fired) but did NOT run — put it back for the next tick
+            if (isBusy(e)) { job.status = 'scheduled'; job.fired = Math.max(0, (job.fired || 1) - 1); await this.repo().put(job); fired--; }
+            /* otherwise: token gone / instance finished / deployment inactive — ignore */
+          }
         } finally { await release?.(); }
       }
       return fired;

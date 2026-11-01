@@ -3,6 +3,7 @@ import { enforceInstanceStart } from '../plans/plans.ts';
 import { effectiveLimitsFor } from '../platform/limits.ts';
 import type { AppContext } from '../../context.ts';
 import { Collections, type AuditEvent, type Deployment, type Instance, type TimerJob } from '../../domain.ts';
+import { withInstanceLock } from '../../engine/instance-lock.ts';
 import { ExecutionEngine, type EngineEvent } from '../../engine/execution-engine.ts';
 import { DeploymentService } from '../deployments/service.ts';
 import { ErrorService } from '../errors/service.ts';
@@ -151,7 +152,8 @@ export class InstanceService {
     return this.engine.fireSla(inst, dep, job.tokenId);
   }
 
-  async failAsync(inst: Instance, nodeId: string, message: string): Promise<Instance> {
+  async failAsync(stale: Instance, nodeId: string, message: string): Promise<Instance> {
+    const inst = await this.get(stale.id);                           // reloaded inside the instance lock (see bottom of file)
     const dep = await this.deployments.get(inst.deploymentId);
     return this.recordIfFailed(await this.engine.failInstanceAt(inst, dep, nodeId, message));
   }
@@ -388,4 +390,16 @@ export class InstanceService {
     }
     return results;
   }
+}
+
+// Every method that loads an instance, changes it and saves it runs under the per-instance lock (engine/instance-lock.ts). The methods
+// load the instance themselves, so the load happens INSIDE the lock and is never stale. The first argument is an instance id, a timer
+// job (which names its instance) or, for failAsync, an instance.
+for (const name of ['resume', 'failToken', 'fireTimer', 'fireAsync', 'fireSla', 'failAsync', 'abort', 'signal', 'retry', 'suspend', 'resumeInstance', 'updateVariables'] as const) {
+  const proto = InstanceService.prototype as unknown as Record<string, (this: InstanceService, ...a: any[]) => Promise<unknown>>;
+  const orig = proto[name]!;
+  proto[name] = function (this: InstanceService, first: any, ...rest: any[]) {
+    const id = typeof first === 'string' ? first : (first.instanceId ?? first.id);
+    return withInstanceLock((this as any).ctx.tenantId, id, () => orig.call(this, first, ...rest));
+  };
 }

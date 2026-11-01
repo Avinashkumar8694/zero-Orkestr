@@ -10,6 +10,7 @@ import { varTypesOf, kcontextInfoOf, onActionOf, scriptLimitsOf } from './nodes/
 import * as boundaryHandler from './nodes/boundary/handler.ts';
 import { computeDue, parseDuration, dueFrom } from './duration.ts';
 import { kickWorker, ASYNC_CAPABLE } from './async-kick.ts';
+import { withInstanceLock, deferAfterLock } from './instance-lock.ts';
 import { runScript } from './sandbox.ts';
 import { config } from '../infra/config.ts';
 import { conflict, quotaExceeded } from '../infra/errors.ts';
@@ -221,8 +222,9 @@ export class ExecutionEngine {
     }
     // Notify the parent's waiting call/sub-process token: completed → resume; aborted/failed → propagate.
     if (inst.parentInstanceId) {
-      if (inst.status === 'completed') await this.tryResumeParent(inst);
-      else if (inst.status === 'aborted' || inst.status === 'failed') await this.tryFailParent(inst);
+      // after this instance's lock is released: two instances must never wait on each other's lock (see instance-lock.ts)
+      if (inst.status === 'completed') await deferAfterLock(() => this.tryResumeParent(inst));
+      else if (inst.status === 'aborted' || inst.status === 'failed') await deferAfterLock(() => this.tryFailParent(inst));
     }
     return inst;
   }
@@ -282,7 +284,10 @@ export class ExecutionEngine {
 
   /** A child instance aborted/failed → remove the parent's waiting token and raise an error there
    *  (routes to an error boundary if one is attached, otherwise the parent fails and cascades). */
-  private async tryFailParent(child: Instance): Promise<void> {
+  private tryFailParent(child: Instance): Promise<void> {
+    return withInstanceLock(this.ctx.tenantId, child.parentInstanceId!, () => this.tryFailParentLocked(child));
+  }
+  private async tryFailParentLocked(child: Instance): Promise<void> {
     const parent = await this.inst().get(child.parentInstanceId!);
     if (!parent || parent.status === 'completed' || parent.status === 'aborted' || parent.status === 'failed') return;
     const token = parent.tokens.find((t) => t.state === 'waiting' &&
@@ -303,7 +308,10 @@ export class ExecutionEngine {
   }
 
   /** A child instance completed → map its outputs into the parent and continue the parent flow. */
-  private async tryResumeParent(child: Instance): Promise<void> {
+  private tryResumeParent(child: Instance): Promise<void> {
+    return withInstanceLock(this.ctx.tenantId, child.parentInstanceId!, () => this.tryResumeParentLocked(child));
+  }
+  private async tryResumeParentLocked(child: Instance): Promise<void> {
     const parent = await this.inst().get(child.parentInstanceId!);
     if (!parent) return;
     const token = parent.tokens.find((t) => t.state === 'waiting' &&
@@ -471,11 +479,16 @@ export class ExecutionEngine {
       if (correlationValue !== undefined && other.correlationKey !== correlationValue) continue;
       const hit = other.tokens.some((t) => t.state === 'waiting' && (t.waitFor?.kind === 'signal' || t.waitFor?.kind === 'message') && t.waitFor?.ref === name);
       if (!hit) continue;
-      const dep = await this.deps().get(other.deploymentId);
-      if (dep) {
-        await this.signalInstance(other, dep, name, payload);
-        count++;
-      }
+      // each delivery under the instance's lock, on a FRESH copy (the one above may be stale by now); idempotent: it only acts if a token is still waiting
+      const delivered = await withInstanceLock(this.ctx.tenantId, other.id, async () => {
+        const fresh = await this.inst().get(other.id);
+        if (!fresh || !fresh.tokens.some((t) => t.state === 'waiting' && (t.waitFor?.kind === 'signal' || t.waitFor?.kind === 'message') && t.waitFor?.ref === name)) return false;
+        const dep = await this.deps().get(fresh.deploymentId);
+        if (!dep) return false;
+        await this.signalInstance(fresh, dep, name, payload);
+        return true;
+      });
+      if (delivered) count++;
     }
     if (correlationValue === undefined) await this.startTriggeredProcesses(name);
     return { signaled: count };
