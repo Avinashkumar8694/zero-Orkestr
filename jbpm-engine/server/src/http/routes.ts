@@ -87,6 +87,7 @@ import { buildWorkflowInstanceRoutes } from './routes/workflow-instances.ts';
 import { buildTeamRoutes } from './team-routes.ts';
 import { PlanService } from '../modules/plans/plans.ts';
 import { buildCaseServiceRoutes } from './routes/case-service.ts';
+import { buildAnalyticsBuilderRoutes } from './routes/analytics-builder.ts';
 import { hub } from '../infra/ws-hub.ts';
 import { requirePermission, callerPermissions } from './auth-middleware.ts';
 import { PERMISSION_CATALOG } from '../modules/iam/permissions.ts';
@@ -731,6 +732,7 @@ export function buildRoutes(): Router {
 
   // --- Workflow Instance Management (Case Management) ---
   r.use(buildWorkflowInstanceRoutes());
+  r.use(buildAnalyticsBuilderRoutes());
   r.use(buildTeamRoutes());   // workspace members, invitations, ownership
 
   // --- Case Service (Consolidated Claim Case API) ---

@@ -28,6 +28,8 @@ export type VarSource = 'own' | 'ownRef' | 'called';
 export interface UiField {
   key: string; label: string; widget: Widget; options?: string[]; placeholder?: string; help?: string;
   assetKind?: string; varSource?: VarSource; keySource?: VarSource; valueSource?: VarSource;
+  /** show this field only while another field has one of these values — e.g. an operation's own parameters */
+  when?: { key: string; in: string[] };
 }
 export interface UiSection { title: string; fields: UiField[]; }
 
@@ -97,7 +99,7 @@ export interface NodeDef {
   typeLabel: string;
 }
 
-export const CATEGORIES = ['Events', 'Tasks', 'Gateways', 'Sub-process', 'Data'];
+export const CATEGORIES = ['Events', 'Tasks', 'Gateways', 'Sub-process', 'Instances', 'Data'];
 
 // shared "General" section reused by every node's schema
 export const GENERAL: UiSection = { title: 'General', fields: [

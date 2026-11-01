@@ -37,6 +37,7 @@ with zero Java/KIE server required, and a one-click escape hatch to export to re
 | 15 | [Scripting & jBPM export](./15-scripting-and-jbpm-export.md) | How JavaScript scripts/conditions map to exported jBPM |
 | 16 | [jBPM Parity & Capability](./16-jbpm-parity.md) | Feature-by-feature comparison to jBPM + test evidence (28 unit + 12 live) |
 | 18 | [Async execution & node properties](./18-async-and-node-properties.md) | Background starts, Is Async nodes, SLA, user-task deadlines, jBPM property gap analysis |
+| 19 | [Analytics builder & instance nodes](./19-analytics-builder.md) | Query-builder analytics published as slug APIs (joins, recursion, authorization), and the Case / Process instance flow nodes |
 
 ## Tech stack (decided)
 
