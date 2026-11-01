@@ -15,11 +15,13 @@ Branch: `release/2.0.0` (built on top of the async / node-properties / analytics
 |---|---|---|
 | R1 | **Additive only.** Every new property is optional. A process that does not set it behaves exactly as before. | Compat harness (§5.1): old process JSON must produce identical results. |
 | R2 | **Defaults never change.** Where jBPM's default differs from ours (e.g. `skippable`), we keep ours unless the process opts in. | Per-gap "default" column; a test per gap asserts the unset case. |
-| R3 | **No data migration.** New fields are absent on existing rows; readers treat absent as "off". Engine JSON stays valid for the SDK. | Load-old-data tests (§5.2). |
+| R3 | **No destructive migration.** New fields are absent on existing rows; readers treat absent as "off". The only data work is additive, versioned backfills (F2), run once per workspace, with the old code path kept until the backfill is marked done. Engine JSON stays valid for the SDK. | Load-old-data tests (§5.2). |
 | R4 | **Security can only get tighter.** Multi-owner tasks must never widen who can claim or complete. | Dedicated authorization tests (§5.5). |
 | R5 | **One gap, one commit, one test file section.** Each commit leaves the whole suite green. | Phase exit criteria (§4). |
 | R6 | **Honest non-goals.** Anything that cannot make sense in a JavaScript engine is documented as unsupported, and import reports it explicitly. | §6, and the SDK import report (S08). |
 | R7 | **Docs move with code.** Node reference, parity table, in-app node docs and API spec are updated in the same change. | Phase exit checklist (§7). |
+| R8 | **Nothing waits in memory.** Every wait (timer, condition, listener, suspended task, SLA, deadline, async hop) is a durable row or token in the store; a restart or a different replica can always continue it. In-process state is only ever a hint (a kick, a cache). | §9 principles, restart and replica tests (§5.9). |
+| R9 | **Bounded memory.** A request may not load a whole collection to answer a question about a few rows; every result, scan, join and history has a hard cap enforced *while fetching*, not after. | §9 foundations F1, F2, F4; memory tests (§5.9). |
 
 ### Baseline to protect (measured on this branch)
 * Server suite: **522 pass / 30 fail**; the 30 are environmental (Java sidecar needs a JVM; kjar journeys) and must stay exactly those
@@ -111,6 +113,7 @@ Legend — **Risk**: L low (isolated, optional field) · M medium (touches a sha
 
 ## 3. Delivery order and why
 1. **Phase 0 — safety net first** (no behaviour change): golden fixtures and compat harness (§5.1–5.2), so every later phase is checked against today's behaviour.
+1b. **Phase 0b — scale foundations** (§9): indexed store access, durable wait subscriptions, per-instance lease + revision, bounded analytics, bounded timer tick, instance size guards. Done **before** the features that depend on them (conditional events, event sub-processes, multi-owner tasks, analytics at scale), so no new feature is built on a memory-bound or single-replica-only base.
 2. **Phase 1** — the small items (and G01, the one with a security angle, early so it gets the longest soak).
 3. **Phase 2** — timers and events (shared machinery, done together so the timer code is touched once).
 4. **Phase 3** — structural items, one at a time, each only after the previous is green.
@@ -127,6 +130,7 @@ Each phase ends with its **exit gate** (§4). A failed gate blocks the next phas
 3. `ng build` (development and production) clean.
 4. Golden harness (§5.1) unchanged.
 5. Live smoke (§5.6) passes on a restarted server.
+5b. Replica and memory gates (§5.9) pass for every gap that adds waiting state, jobs or queries.
 6. Docs checklist (§7) ticked for every gap in the phase.
 7. One commit per gap, message names the gap id.
 
@@ -209,6 +213,35 @@ upgrade test (data from the pre-2.0.0 branch loads and runs); docs link check; c
 
 ---
 
+### 5.9 Scale and multi-replica tests (new, from §9)
+
+**Replica harness.** `replicas(n)` builds *n* independent engine instances (each with its own `Coordinator`, worker tick and
+in-process caches) over **one shared store and one shared coordinator backend**, so tests can run real concurrency without Redis.
+When `TEST_PG_URL` / `TEST_REDIS_URL` are set the same suite runs against real Postgres / Redis; otherwise those variants are
+skipped (never silently passed). A **fault injector** can drop a replica's claim without releasing it (simulating a crash) and
+advance the fake clock past the lease TTL.
+
+| Area | Tests |
+|---|---|
+| **Exactly-once jobs** | 3 replicas tick concurrently over 200 due jobs (async, SLA, deadline, cron, suspend-until): each fires once; total fires = 200; no job lost |
+| **Cron under downtime** | stop all workers for 3 simulated hours, restart: the cron job fires **once**, next row exists, no catch-up storm (P7) |
+| **Instance lease (F3)** | randomized interleavings of {signal, timer fire, task complete, variable edit, abort} on one instance from 2–3 replicas, 500 runs: no lost update (every accepted write visible), `rev` strictly increasing, final state equals one valid serial order |
+| **Parent / child across replicas** | child completes on replica A while replica B holds the parent lease: the parent is resumed by a durable `resume-parent` job, no deadlock, no double resume; deep chain (depth 50) does not grow the call stack |
+| **Crash takeover** | replica dies mid-step holding an instance lease: after TTL another replica continues; the step is idempotent (P3), the history shows no duplicate visit |
+| **Subscriptions (F2)** | invariant checker run after every randomized scenario: *every waiting listening token has exactly one `wait_subs` row, and every row points to a waiting token*; a signal reads only subscriber rows (store read counter ≤ subscribers + constant) with 50 000 unrelated waiting instances present |
+| **Backfill** | old waiting instances (fixtures from before F2) still receive signals before and after the backfill; backfill is idempotent and runs once per workspace (marker); two replicas backfilling at once produce no duplicates |
+| **Restart survival** | for each waiting kind (timer, condition, event sub-process listener, suspended task, SLA, deadline, async hop, cron): create state, drop every in-memory object, rebuild the engine from the store only, and the item still fires / resumes |
+| **Bounded analytics (F4)** | 200 000 synthetic process rows + 400 000 tasks: peak heap growth stays under the budget (target ≤ 150 MB, measured with `--expose-gc` and `process.memoryUsage`), result identical to the reference evaluator on a 5 000-row sample (differential test), scan cap reported as `truncated` *before* memory is spent, recursion over a 100 000-node tree touches only the frontier |
+| **Bounded tick (F5)** | 50 000 due jobs: tick memory stays flat, batch honoured, backlog drains across ticks, no tick longer than its budget |
+| **Size guards (F6)** | a loop producing 100 000 visits ends with a compacted history (≤ limit) and the audit trail intact; an over-size variable write is refused with a clear message; both limits can be switched off to reproduce old behaviour |
+| **Cache** | per-replica cache bytes bounded (insert 10 000 results, size ≤ budget); shared cache (when Redis) returns a result computed by another replica; never served across workspaces or to an unauthorized caller (existing SEC-6 still green) |
+| **Cap enforcement** | MI-on-any-task with 5 000 items is refused or chunked per the cap, never allocates 5 000 children at once; event sub-process listeners per instance are capped |
+| **Latency guard** | p95 start-to-first-wait and signal-delivery latency measured with 1, 2, 3 replicas; may not exceed baseline + 15 % |
+
+**Exit gate additions (apply to every gap that adds waiting state, jobs, or queries):** it appears in the restart test, the
+exactly-once test (if it uses jobs), the subscription invariant (if it listens), and the memory test (if it queries); and its row in
+§9.4 is true.
+
 ## 6. Explicit non-goals (documented, reported on import, never silent)
 | jBPM feature | Why not | What we do instead |
 |---|---|---|
@@ -230,8 +263,92 @@ upgrade test (data from the pre-2.0.0 branch loads and runs); docs link check; c
 | Phase | Gaps | Status |
 |---|---|---|
 | 0 | compat harness, golden fixtures | not started |
+| 0b | F1 indexed store · F2 wait subscriptions · F3 instance lease + revision · F4 bounded analytics · F5 bounded tick · F6 size guards | not started |
 | 1 | G01 G02 G03 G05 G05b G06 G07 G08 G09 G10 G11 G12 G13 G14 G15 G16 | not started |
 | 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | not started |
 | 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | not started |
 | 4 | S01–S08 | not started |
 | 5 | U01–U06, docs, release checks | not started |
+
+---
+
+## 9. Memory and multi-replica design
+
+This section exists because the same question applies to every gap: *what is held in memory, what is durable, and what happens
+with two or more replicas?* The answer for timers is the model to copy — a durable row, claimed atomically by exactly one
+replica, safe across restarts. Below: what the code does **today** (verified), the principles, the foundation work that makes the
+principles true, and how every gap behaves.
+
+### 9.1 Findings in the current code (verified)
+| # | Finding | Consequence |
+|---|---|---|
+| A | The Postgres store's `query(pred)` **loads every row of the collection** and filters in JavaScript. The only SQL-level exception is `claimDueTimers` (`SKIP LOCKED`). | Any `query(pred)` on instances / tasks / audit is O(collection) in memory per call. |
+| B | `broadcastSignal` (every signal, message and throw) **loads all running and waiting instances of the workspace** (full blobs: variables, tokens, history) to find the few waiting on a name. | Cost grows with total live instances, not with subscribers; one signal on a big workspace can spike memory. |
+| C | There is **no per-instance lock and no revision** on `Instance`. The coordinator's `mutex()` just runs the function when state is not shared, and nothing in the engine takes an instance lease. `maxReplicasCap` defaults to 0 (no cap), so several replicas can serve one workspace. | Two replicas mutating the same instance at once (a signal and a timer, two task completions, an API edit during a run) can **lose an update**. Today this is safe only when a workspace is pinned to one replica. |
+| D | The Analytics Builder (built earlier in this release) loads **whole tenant tables** per run (`env.table`) before filtering, builds join indexes over them, and the recursive relations load the entire process table; its result cache is **per replica, counted in entries not bytes**. | Correct but not memory-safe on large workspaces: the scan cap truncates *after* the load. Must be fixed before it is relied on at scale. |
+| E | `tick()` with a replica gate loads **all due jobs** of the workspace then slices to the batch size; the non-gate path uses the bounded SQL claim. | A backlog (for example after downtime) can load thousands of job rows at once. |
+| F | An instance's `history` array grows with every node visit and is stored inside the instance row; loops make it unbounded. Instance lists page **after** loading all rows. | Large rows, slow loads, memory spikes in list screens. |
+| G | What already works and is the pattern to reuse: timer jobs are durable and claimed per job (Redis lease or SQL); async / SLA / deadline jobs ride the same path; seed migrations use deterministic ids; the worker kick is only a hint. | Reuse, do not reinvent. |
+
+### 9.2 Principles
+* **P1 Durable first.** State that must survive lives in the store: tokens (`waitFor`), `TimerJob` rows, subscription rows. No business
+  `setTimeout`, no in-memory queues, no "listeners" held by a process.
+* **P2 One owner at a time.** A job or an instance mutation is performed by one replica at a time, enforced by an atomic claim /
+  lease with a TTL (a dead replica's claim expires; another continues). Never "check then act" without the claim.
+* **P3 Idempotent steps.** Every step re-checks the state it expects (token still waiting, job not yet fired, task still open) so a
+  retry, a double delivery or a takeover cannot do it twice.
+* **P4 Index, don't scan.** Look rows up by the key you have (instance id, name, parent id, due time) through an indexed query;
+  page with a cursor; never `query(() => true)` for a request path.
+* **P5 Cap while fetching.** Row, join, group, depth, history and result limits are enforced at fetch time and reported as
+  `truncated`; memory is O(page + group map), not O(table).
+* **P6 Never block while holding.** A step that holds one instance lease never waits for another; if the second lease is busy the
+  work becomes a durable job and the first lease is released (no deadlocks).
+* **P7 Missed work is bounded.** After downtime a recurring job fires **once** and reschedules from "now" (no catch-up storm); a
+  backlog is drained in bounded batches.
+
+### 9.3 Foundations (Phase 0b)
+| Id | Foundation | Design | Fixes |
+|---|---|---|---|
+| F1 | **Indexed store access** (optional capability, same pattern as `claimDueTimers`) | `Store.findBy?(collection, tenantId, field, values[], {limit, afterId})` returning a page + cursor; Postgres implements it in SQL on the jsonb column with lazily created expression indexes (tenantId + status / parentInstanceId / instanceId / name / dueAt); memory and file stores fall back to `query`. A helper picks the capability so callers do not care. `list()` of instances / tasks pages in the store. | A, F |
+| F2 | **Durable wait subscriptions** | New collection `wait_subs`: one row per waiting token that listens for a name (signal, message, condition, event sub-process, link-free). Written in the same step that parks the token, removed when it resumes, is cancelled, or the instance ends (exactly like timer cancellation). `broadcastSignal` becomes `findBy('wait_subs', name)` → deliver to only those instances, each under its lease. **Backfill migration** (versioned, once per workspace, like the analytics seed) writes rows for tokens already waiting; until it has run for a workspace the old scan is used, so nothing existing breaks. A reconciler (rare, bounded) repairs any drift. | B |
+| F3 | **Per-instance lease + revision** | `Instance.rev` incremented on every save. Every load-mutate-save of an instance (resume, signal, timer / async / SLA fire, task complete, API edit, abort, retry) runs inside `withInstance(id, fn)`: `coordinator.claim('inst:'+id)` (Redis lease with TTL + heartbeat when shared, in-process mutex otherwise) **plus** an optional `Store.putIfRev` (SQL `WHERE rev = old`) as a second line of defence. Contention: short bounded retry; for jobs, leave the job scheduled and try next tick. A child finishing never *blocks* on its parent's lease (P6): try-lock, and if busy enqueue a durable `resume-parent` job. This also removes deep recursive in-process resume chains. | C |
+| F4 | **Bounded analytics** | Source rows come from `findBy` pages with the from-source conditions pushed down; joins are page-wise semi-joins (batch of ≤1 000 keys per fetch) hash-joined for that page only; aggregation streams over pages into the group map (cap 50 000 groups); row mode keeps a **top-K heap** (K = offset + limit) instead of sorting everything; recursive relations walk **level by level** with `findBy(parentInstanceId in frontier)` (cap 50 000 nodes, depth 20); scan caps are enforced while paging. Cache: shared through the coordinator backend when Redis is configured, otherwise per-replica **bounded by bytes** (default 8 MB) with TTL; the key already carries workspace + version. | D |
+| F5 | **Bounded tick** | The tick path always uses the atomic claim (`claimDueTimers`) or `findBy(timers, status, dueAt ≤ now, limit)`; never loads all due rows. Batch size and a per-tick time budget are honoured; backlog drains over ticks. | E |
+| F6 | **Instance size guards** | `maxHistoryEntries` (default 5 000): older visits are compacted into a count + first/last record, audit keeps the full trail; per-instance variable size cap (default 1 MB) checked on write with a clear error; list endpoints use F1 paging. All limits configurable per workspace and off-able for compatibility. | F |
+
+### 9.4 How every gap behaves (memory · durable state · multi-replica · restart)
+| Gap | Memory | Durable state | Multi-replica | After restart / replica loss |
+|---|---|---|---|---|
+| G01–G03 multi-owner task fields | O(owners) per task | on the `Task` row | claim / complete go through the task + instance lease (F3); authorization evaluated per request | unchanged |
+| G05 child-failure policy | none extra | the parent token's wait + the child row | parent resumed under its lease; busy ⇒ durable `resume-parent` job (P6) | job survives |
+| G06 flow priority | sort of the outgoing list | none | none | n/a |
+| G07 MI completion | counters on the parent token | token | evaluated under the parent lease; remaining children aborted idempotently | resumes from token |
+| G08 variable tags | snapshot of *tagged* variables only | none | n/a | n/a |
+| G09–G11 process SLA / description / version | none | `sla` job (existing pattern) | claimed per job | job survives |
+| G12 autostart | none | tokens | n/a | n/a |
+| G14–G15 REST auth / async delay | none | the async job (dueAt = now + delay) | claimed per job | job survives |
+| G17 cron | O(1) | one `scheduled` row = next fire; the next row is created when it fires | claimed per job; **fires once** across replicas; after downtime fires once then reschedules from now (P7) | survives |
+| G18–G19 `#{var}` / short delay | none | resolved at schedule time, stored as `dueAt` | n/a | survives |
+| G20 link events | none | n/a (a jump) | n/a | n/a |
+| G21 conditional catch | evaluated per instance on variable change only; **no polling, no global scan** | token `waitFor: condition` + a `wait_subs` row | evaluated by whichever replica changed the variables, under the instance lease | survives; backfill covers old tokens |
+| G22 conditional boundary | same | boundary token + sub row | same | survives |
+| G24 signal scope | none | n/a | `instance` scope never leaves the instance (no cross-replica traffic) | n/a |
+| G25 suspend until | none | one `deadline` job | claimed per job | survives |
+| G27–G28 event sub-process | O(listeners) per instance | listener tokens + `wait_subs` rows, removed when the scope ends | delivery per subscriber under its lease; **no scan of all instances (F2)** | survives |
+| G29 ad-hoc sub-process | O(open nodes) | tokens | API actions take the instance lease | survives |
+| G30 assignment strategy | needs per-user open-task counts: **indexed count** (`findBy` count by assignee + status), never a scan | task rows | counts may be momentarily stale across replicas; documented, ties broken deterministically | n/a |
+| G31 swimlane autoclaim | one lookup by (instance, lane) | task history | n/a | n/a |
+| G32 gateway instantiate | none | start-subscription rows | one instance per event: dedupe by event id under a claim | survives |
+| G33 transaction cancel | recorded compensation list on the instance | instance | under the instance lease | survives |
+| G34 MI on any task | **cap N per node** (default 1 000) and chunked creation; sequential mode holds one child at a time | child instances | children are ordinary instances; parent counters under lease | survives |
+| G35 complex gateway | counts of arrived tokens | history count | n/a | n/a |
+| S01–S08 SDK | streaming parse is per process file | n/a | n/a | n/a |
+| Analytics (existing) | F4: O(page + groups) | definitions + seed marker | cache shared (Redis) or per-replica bounded | n/a |
+| Async / SLA / deadline (existing) | none | jobs | claimed per job | survive |
+
+### 9.5 Compatibility of the foundations
+* F1: purely additive; stores without the capability keep working.
+* F2: guarded by a per-workspace backfill marker; old scan remains the fallback until the marker is set.
+* F3: `rev` absent on old rows is read as 0; the lease adds no behaviour change on a single replica beyond a tiny in-process lock.
+* F4: same query language and results (verified by the analytics golden tests); only the execution strategy changes.
+* F5, F6: limits are configurable and default to values far above current usage; F6's compaction only touches instances over the limit.
