@@ -102,11 +102,13 @@ export function boundaryTimerHosts(nodes: EngineNode[], hostNodeId: string): Eng
  *  Escalation has no dedicated WaitSpec kind (see domain.ts) and buckets into 'signal' — consistent
  *  with throw/handler.ts's own broadcast(name), which never distinguished escalation from signal on
  *  the SENDING side either. */
-export function messageBoundaryHosts(nodes: EngineNode[], hostNodeId: string): { node: EngineNode; kind: 'message' | 'signal'; name: string }[] {
+export function messageBoundaryHosts(nodes: EngineNode[], hostNodeId: string): { node: EngineNode; kind: 'message' | 'signal' | 'condition'; name: string }[] {
   return nodes
     .filter((b) => b.type === 'boundary' && onList(b).includes(hostNodeId))
-    .flatMap((b) => {
+    .flatMap((b): { node: EngineNode; kind: 'message' | 'signal' | 'condition'; name: string }[] => {
       const ev = (b as any).event || {};
+      // a conditional boundary waits as a 'condition' token the engine re-checks when variables change
+      if (ev.condition && !ev.message && !ev.signal && !ev.escalation) return [{ node: b, kind: 'condition' as const, name: b.id! }];
       const name = ev.message || ev.signal || ev.escalation;
       if (!name) return [];
       return [{ node: b, kind: (ev.message ? 'message' : 'signal') as 'message' | 'signal', name }];

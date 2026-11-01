@@ -60,3 +60,25 @@ one unset and the node behaves as it always did. Maintained per phase of release
 | `authType` (`basic`, `bearer`), `username`, `password`, `token` | Builds the Authorization header. Values may be literals, `$variable` (process variable, then deployment env) or `${ENV}`. | none |
 | `headers` | Explicit headers; they override the generated ones whatever their case. | none |
 | `timeoutSeconds` | Per-node timeout. | workspace setting |
+
+## Timers (start, catch and boundary events)
+| Form | Meaning |
+|---|---|
+| `PT30M`, `1h 30m`, `90m`, `2d` | delay from now |
+| `{ date: "2030-01-01T00:00:00Z" }` or an ISO date string | once, at that instant |
+| `{ cycle: "R3/PT1H" }` | repeat (existing behaviour) |
+| `{ cron: "0 9 * * MON-FRI" }`, `"cron:0 9 * * *"`, `{ cycle: "…", language: "cron" }` | schedule, UTC. 5 fields (minute hour day month weekday) or Quartz (seconds first, `?`, year) |
+| `#{variable}` in any of the above | filled from the process variables when the timer is set; a missing variable is an error |
+
+A recurring timer is one durable row; after downtime it fires once and reschedules from the current time.
+
+## Events
+| Property | Does |
+|---|---|
+| catch `event.condition` (+ `lang`) | waits until the condition is true; re-checked only when this instance's variables change |
+| boundary `event.condition` | same, attached to an activity; interrupting or not |
+| throw / catch `event.link` | "go to": the throw jumps to the catch with the same name in the same process |
+| throw / end `scope: "instance"` | signal, message or escalation delivered only inside this instance |
+| user task `suspendUntil` | the task is created suspended and becomes available at that time (duration, date or `#{var}`) |
+
+Conditional **start** events are not supported (see plan §11, G23).

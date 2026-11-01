@@ -21,6 +21,7 @@ export const handler: NodeHandler = async (c) => {
   if (name) {
     const ck = c.node.throw?.correlationKey;
     const correlationValue = typeof ck === 'string' && ck.startsWith('$') ? (c.inst.variables[ck.slice(1)] as string | undefined) : undefined;
+    if (c.node.throw?.scope === 'instance') return { end: 'complete', outcome: `threw:${name} (this instance)`, signalLocal: name };
     await c.broadcast(name, correlationValue);
     return { end: 'complete', outcome: `threw:${name}` };
   }

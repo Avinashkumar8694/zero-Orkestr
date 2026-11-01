@@ -4,7 +4,7 @@
 import type { EngineFlow, EngineNode, EngineProcess } from '../../sdk/index.ts';
 import { NODE_DEF_BY_TYPE } from '../../engine/nodes/index.ts';
 import { ASYNC_CAPABLE } from '../../engine/async-kick.ts';
-import { parseDuration, dueFrom } from '../../engine/duration.ts';
+import { parseDuration, parseDelay, dueFrom, cronValid } from '../../engine/duration.ts';
 import { DEADLINE_TYPES, parseDeadlines } from '../../engine/deadlines.ts';
 import { validateJavaSupport } from '../../engine/java-compat.ts';
 import { validateJava } from '../../engine/java-sidecar.ts';
@@ -71,6 +71,7 @@ const isBoundary = (n: EngineNode) => n.type === 'boundary';
 // sub-process is specifically exempt from (it has no incoming/outgoing flow by design; see boundary/
 // handler.ts's own isErrorCatch, which already gets this right via hasOwnProperty).
 const isEventSub = (n: EngineNode) => n.type === 'subprocess' && !!(n as any).on && Object.prototype.hasOwnProperty.call((n as any).on, 'error');
+const isLink = (n: EngineNode) => (n.type === 'catch' || n.type === 'throw') && !!(n as any).event?.link;
 const isAdHoc = (c: GraphCtx) => (c.process as any).adHoc === true;
 const label = (n: EngineNode) => n.name || n.id || n.type;
 
@@ -81,6 +82,16 @@ function buildCtx(process: EngineProcess): GraphCtx {
   const outgoing = new Map<string, EngineFlow[]>();
   const incoming = new Map<string, EngineFlow[]>();
   for (const f of flows) {
+    (outgoing.get(f.from) || outgoing.set(f.from, []).get(f.from)!).push(f);
+    (incoming.get(f.to) || incoming.set(f.to, []).get(f.to)!).push(f);
+  }
+  // a link throw "flows" to the catch with the same name: give the graph that edge so reachability / dead-end rules see through the jump
+  const linkCatch = new Map(nodes.filter((n) => n.type === 'catch' && (n as any).event?.link).map((n) => [String((n as any).event.link), n] as const));
+  for (const n of nodes) {
+    if (n.type !== 'throw' || !(n as any).event?.link) continue;
+    const t = linkCatch.get(String((n as any).event.link));
+    if (!t) continue;
+    const f = { id: `link:${n.id}`, from: n.id!, to: t.id! } as EngineFlow;
     (outgoing.get(f.from) || outgoing.set(f.from, []).get(f.from)!).push(f);
     (incoming.get(f.to) || incoming.set(f.to, []).get(f.to)!).push(f);
   }
@@ -112,12 +123,56 @@ const P = (rule: string, severity: Severity, message: string, extra: Partial<Pro
 const deg = (ctx: GraphCtx, id: string) => ({ in: (ctx.incoming.get(id) || []).length, out: (ctx.outgoing.get(id) || []).length });
 
 export const RULES: Rule[] = [
+  { id: 'link-events', description: 'Every link throw needs exactly one catch with the same name in the same process', run: (c) => {
+    const out: Problem[] = [];
+    const catches = new Map<string, EngineNode[]>();
+    for (const n of c.nodes) if (n.type === 'catch' && (n as any).event?.link) { const k = String((n as any).event.link); catches.set(k, [...(catches.get(k) ?? []), n]); }
+    for (const [name, list] of catches) if (list.length > 1) out.push(P('link-events', 'error', `Link "${name}" has ${list.length} catch events; there must be exactly one`, { nodeId: list[1]!.id }));
+    for (const n of c.nodes) {
+      if (n.type === 'throw' && (n as any).event?.link && !catches.has(String((n as any).event.link))) out.push(P('link-events', 'error', `Link throw "${label(n)}" has no catch named "${(n as any).event.link}"`, { nodeId: n.id }));
+    }
+    const thrown = new Set(c.nodes.filter((n) => n.type === 'throw' && (n as any).event?.link).map((n) => String((n as any).event.link)));
+    for (const [name, list] of catches) if (!thrown.has(name)) out.push(P('link-events', 'warning', `Link catch "${label(list[0]!)}" is never thrown to`, { nodeId: list[0]!.id }));
+    return out;
+  } },
+  { id: 'timer-spec', description: 'Timer expressions (duration, date, cycle, cron) must be readable', run: (c) => {
+    const out: Problem[] = [];
+    const check = (n: EngineNode, spec: any): void => {
+      if (spec === undefined || spec === null || spec === '') return;
+      const bad = (what: string) => out.push(P('timer-spec', 'error', `"${label(n)}": ${what}`, { nodeId: n.id }));
+      const readable = (v: unknown, kind: 'delay' | 'date' | 'cron'): boolean => {
+        const t = String(v);
+        if (t.includes('#{')) return true;                                    // resolved from variables at run time
+        if (kind === 'cron') return cronValid(t.replace(/^cron:/, ''));
+        if (kind === 'date') return !Number.isNaN(Date.parse(t));
+        return t.startsWith('cron:') ? cronValid(t.slice(5)) : /^\d{4}-\d{2}-\d{2}/.test(t) ? !Number.isNaN(Date.parse(t)) : parseDelay(t) > 0;
+      };
+      if (typeof spec === 'string') { if (!readable(spec, 'delay')) bad(`timer "${spec}" is not a duration (PT30M, 1h 30m), a date, or cron:<expression>`); return; }
+      if (spec.cron !== undefined && !readable(spec.cron, 'cron')) bad(`cron expression "${spec.cron}" is not valid (5 fields: minute hour day month weekday; or Quartz with seconds first)`);
+      if (spec.date !== undefined && !readable(spec.date, 'date')) bad(`timer date "${spec.date}" is not a date`);
+      if (spec.duration !== undefined && !readable(spec.duration, 'delay')) bad(`timer duration "${spec.duration}" is not a duration (PT30M, 1h 30m)`);
+      if (spec.cycle !== undefined) {
+        const cy = String(spec.cycle);
+        if (spec.language === 'cron' || cy.startsWith('cron:')) { if (!readable(cy, 'cron')) bad(`cron expression "${cy}" is not valid`); }
+        else if (!cy.includes('#{') && !(parseDelay(cy) > 0)) bad(`timer cycle "${cy}" is not readable (R/PT1H, PT1H)`);
+      }
+    };
+    for (const n of c.nodes) {
+      const a = n as any;
+      if (n.type === 'catch') check(n, a.event?.timer);
+      else if (n.type === 'boundary') check(n, a.event?.timer);
+      else if (n.type === 'start') check(n, a.on?.timer ?? a.timer);
+    }
+    return out;
+  } },
   { id: 'node-timing', description: 'SLA due dates and user-task deadlines must be readable', run: (c) => {
     const out: Problem[] = [];
     for (const n of c.nodes) {
       const a = n as any;
       if (typeof a.slaDueDate === 'string' && a.slaDueDate.trim() && !/#\{/.test(a.slaDueDate) && !dueFrom(a.slaDueDate, new Date(0).toISOString()))
         out.push(P('node-timing', 'error', `"${label(n)}": SLA due date "${a.slaDueDate}" is not a duration (try 2h, 1d, PT30M) or a date`, { nodeId: n.id }));
+      if (typeof a.suspendUntil === 'string' && a.suspendUntil.trim() && !/#\{/.test(a.suspendUntil) && !dueFrom(a.suspendUntil, new Date(0).toISOString()))
+        out.push(P('node-timing', 'error', `"${label(n)}": suspend-until "${a.suspendUntil}" is not a duration or a date`, { nodeId: n.id }));
       if (n.type === 'userTask') for (const t of DEADLINE_TYPES) {
         const r = parseDeadlines(a[t], t);
         if (r.error) out.push(P('node-timing', 'error', `"${label(n)}": ${t} — ${r.error}`, { nodeId: n.id }));
@@ -220,7 +275,7 @@ export const RULES: Rule[] = [
   { id: 'node-connected', description: 'Activities/gateways/events must be connected (no floating nodes)', run: (c) => {
     const out: Problem[] = [];
     for (const n of c.nodes) {
-      if (isStart(n) || isEnd(n) || isEventSub(n) || (n as any).isForCompensation === true || (isAdHoc(c) && (n as any).autoStart === true)) continue;   // a compensation handler is reached through its boundary; an ad-hoc autostart node needs no incoming flow
+      if (isStart(n) || isEnd(n) || isEventSub(n) || (n as any).isForCompensation === true || (isAdHoc(c) && (n as any).autoStart === true) || isLink(n)) continue;   // a link event is a jump, not a flow; a compensation handler is reached through its boundary; an ad-hoc autostart node needs no incoming flow
       const d = deg(c, n.id!);
       if (isBoundary(n)) { if (d.out === 0) out.push(P('node-connected', 'error', `Boundary "${label(n)}" has no outgoing (handler) connection`, { nodeId: n.id })); continue; }
       if (d.in === 0 && d.out === 0) out.push(P('node-connected', 'error', `Node "${label(n)}" is not connected`, { nodeId: n.id }));
@@ -233,7 +288,7 @@ export const RULES: Rule[] = [
   { id: 'reachable', description: 'Every node must be reachable from a start', run: (c) => {
     const out: Problem[] = [];
     for (const n of c.nodes) {
-      if (isStart(n) || isEventSub(n) || (n as any).isForCompensation === true || (isAdHoc(c) && (n as any).autoStart === true)) continue;
+      if (isStart(n) || isEventSub(n) || (n as any).isForCompensation === true || (isAdHoc(c) && (n as any).autoStart === true) || isLink(n)) continue;
       const d = deg(c, n.id!);
       if ((d.in > 0 || d.out > 0) && !c.reachable.has(n.id!)) out.push(P('reachable', 'error', `Node "${label(n)}" is not reachable from a start`, { nodeId: n.id }));
     }
@@ -248,7 +303,7 @@ export const RULES: Rule[] = [
     while (q.length) { const id = q.shift()!; if (reachesEnd.has(id) || !c.byId.has(id)) continue; reachesEnd.add(id); for (const f of c.incoming.get(id) || []) q.push(f.from); }
     const out: Problem[] = [];
     for (const n of c.nodes) {
-      if (isEnd(n) || isEventSub(n)) continue;
+      if (isEnd(n) || isEventSub(n) || isLink(n)) continue;
       if (c.reachable.has(n.id!) && !reachesEnd.has(n.id!)) out.push(P('ends-at-end', 'error', `"${label(n)}" does not lead to an end event — every process path must finish at an End`, { nodeId: n.id }));
     }
     return out;
@@ -311,15 +366,15 @@ export const RULES: Rule[] = [
 
   { id: 'event-trigger', description: 'Catch/throw/boundary events must define a trigger', run: (c) => {
     const out: Problem[] = [];
-    const hasTrigger = (e: any) => e && (e.signal != null || e.message != null || e.error != null || e.escalation != null || e.condition != null || e.timer != null || e.compensation != null || e.compensate != null);
+    const hasTrigger = (e: any) => e && (e.signal != null || e.message != null || e.error != null || e.escalation != null || e.condition != null || e.timer != null || e.compensation != null || e.compensate != null || e.link != null);
     for (const n of c.nodes) {
       const a = n as any;
       if ((n.type === 'catch' || n.type === 'throw' || n.type === 'boundary') && !hasTrigger(a.event))
         out.push(P('event-trigger', 'error', `${n.type} event "${label(n)}" has no trigger defined`, { nodeId: n.id }));
       // timer completeness
       const timer = a.event?.timer || (n.type === 'start' && a.on?.timer);
-      if (timer && typeof timer === 'object' && !timer.duration && !timer.cycle && !timer.date)
-        out.push(P('event-trigger', 'error', `Timer on "${label(n)}" has no duration/cycle/date`, { nodeId: n.id }));
+      if (timer && typeof timer === 'object' && !timer.duration && !timer.cycle && !timer.date && !timer.cron)
+        out.push(P('event-trigger', 'error', `Timer on "${label(n)}" has no duration/cycle/date/cron`, { nodeId: n.id }));
     }
     return out;
   } },

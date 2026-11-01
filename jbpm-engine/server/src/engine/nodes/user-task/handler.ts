@@ -1,7 +1,7 @@
 // User task — creates a Task work item and waits until it is completed (which resumes the token).
 import type { NodeHandler } from '../types.ts';
 import { Collections, type Task, type TaskComment, type TimerJob } from '../../../domain.ts';
-import { computeDue, parseDelay } from '../../duration.ts';
+import { computeDue, parseDelay, dueFrom } from '../../duration.ts';
 import { DEADLINE_TYPES, parseDeadlines } from '../../deadlines.ts';
 import { SettingsService } from '../../../modules/settings/service.ts';
 
@@ -44,7 +44,13 @@ export const handler: NodeHandler = async (c) => {
     status: 'created', inputs: { ...mapTaskInputs(n, c.inst.variables), ...(n.content ? { Content: resolveText(n.content, c.inst.variables) } : {}) }, createdAt: now,
     ...(dueAt ? { dueAt } : {}),
   };
+  // "suspend until": the task exists but is hidden from claiming until the time (a durable job makes it available)
+  const resumeAt = typeof n.suspendUntil === 'string' && n.suspendUntil.trim() ? dueFrom(n.suspendUntil, now, c.inst.variables) : null;
+  if (resumeAt && resumeAt > now) task.status = 'suspended';
   await c.app.store.repo<Task>(Collections.tasks).put(task);
+  if (task.status === 'suspended' && resumeAt) {
+    await c.app.store.repo<TimerJob>(Collections.timers).put({ id: c.app.newId(), tenantId: c.app.tenantId, instanceId: c.inst.id, tokenId: task.tokenId, nodeId: n.id, kind: 'deadline', dueAt: resumeAt, fired: 0, status: 'scheduled', taskId: task.id, deadline: { type: 'resumeTask', action: {} } });
+  }
   if (typeof n.comment === 'string' && n.comment.trim()) {
     await c.app.store.repo<TaskComment>(Collections.comments).put({ id: c.app.newId(), tenantId: c.app.tenantId, taskId: task.id, author: task.createdBy || 'system', body: resolveText(n.comment, c.inst.variables).trim(), at: now });
   }

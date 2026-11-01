@@ -8,7 +8,7 @@ import { NODE_HANDLERS, CHILD_OUTPUT_MAPPERS, buildMultiInstanceResult, type Han
 import { varTypesOf, kcontextInfoOf, onActionOf, scriptLimitsOf } from './nodes/kcontext-info.ts';
 // Aliased (not `boundary`) since fireBoundary()'s own parameter below is already named `boundary`.
 import * as boundaryHandler from './nodes/boundary/handler.ts';
-import { computeDue, parseDuration, parseDelay, dueFrom } from './duration.ts';
+import { computeDue, cycleOf, parseDuration, parseDelay, dueFrom } from './duration.ts';
 import { kickWorker, ASYNC_CAPABLE } from './async-kick.ts';
 import { withInstanceLock, deferAfterLock } from './instance-lock.ts';
 import { findRows } from '../store/find.ts';
@@ -99,6 +99,33 @@ export class ExecutionEngine {
     return inst;
   }
 
+  /** Conditional events (catch / boundary): a token waiting on a condition is released when the condition becomes true. Called whenever an
+   *  instance has nothing left to run (so after any node, signal, task completion or variable edit) — only THIS instance's waiting condition
+   *  tokens are looked at, so there is no polling and no scan of other instances. Returns true when something woke up. */
+  private async wakeConditions(inst: Instance, p: EngineProcess, dep: Deployment): Promise<boolean> {
+    const waiting = inst.tokens.filter((t) => t.state === 'waiting' && t.waitFor?.kind === 'condition');
+    if (!waiting.length) return false;
+    const nodes = this.nodeMap(p);
+    let woke = false;
+    for (const t of waiting) {
+      const node = nodes.get(t.nodeId) as any;
+      if (!node?.event?.condition) continue;
+      const c = this.buildCtx(node, inst, p, {}, dep, t.id);
+      const ok = await evalCondition(String(node.event.condition), node.event.lang, inst.variables, undefined, varTypesOf(c), { ...kcontextInfoOf(c), ...(await scriptLimitsOf(c)), onAction: onActionOf(c) });
+      if (!ok) continue;
+      if (node.type === 'boundary') await this.activateBoundary(inst, dep, node, t.id);
+      else { t.state = 'active'; t.waitFor = undefined; }               // the catch runs again, sees its condition true, and passes
+      woke = true;
+    }
+    return woke;
+  }
+  /** After an outside change to an instance's variables: let any satisfied condition proceed. */
+  async recheckConditions(inst: Instance, dep: Deployment): Promise<Instance> {
+    if (!inst.tokens.some((t) => t.state === 'waiting' && t.waitFor?.kind === 'condition')) return inst;
+    if (inst.status === 'waiting') inst.status = 'running';
+    return this.runToQuiescence(inst, dep);
+  }
+
   /** Variable tags (jBPM): `required` — the instance cannot start without a value for it. */
   private assertRequiredVars(p: EngineProcess, vars: Record<string, unknown>): void {
     const missing = (p.vars || []).filter((v) => (v as any).tags?.includes?.('required') && (vars[v.name] === undefined || vars[v.name] === null || vars[v.name] === '')).map((v) => v.name);
@@ -131,11 +158,17 @@ export class ExecutionEngine {
     const nodes = this.nodeMap(p);
     const joins: Record<string, Set<string>> = {};
     let guard = 0;
+    const pendingLocal: string[] = [];
     const roVars = (p.vars || []).filter((v) => (v as any).tags?.includes?.('readonly')).map((v) => v.name);
     try {
       while (inst.status === 'running') {
         const token = inst.tokens.find((t) => t.state === 'active');
-        if (!token) break;
+        if (!token) {
+          // signals thrown with scope 'instance' are delivered now that this step has settled (never re-entering the loop mid-step)
+          if (pendingLocal.length) { for (const nm of pendingLocal.splice(0)) await this.signalInstance(inst, dep, nm); continue; }
+          if (await this.wakeConditions(inst, p, dep)) continue;
+          break;
+        }
         if (++guard > 100000) throw new Error('step budget exceeded (possible loop)');
         const node = nodes.get(token.nodeId);
         if (!node) { this.removeToken(inst, token.id); continue; }
@@ -163,6 +196,7 @@ export class ExecutionEngine {
         this.emit({ kind: 'node.exited', instanceId: inst.id, nodeId: node.id!, tokenId: token.id });
 
         if (result.abort) { inst.tokens = []; inst.status = 'aborted'; break; }
+        if (result.signalLocal) pendingLocal.push(result.signalLocal);
         if (result.wait?.kind === 'async') {
           // jBPM "Is Async": park the token (the instance is saved), hand the node to the worker, and let the caller go
           token.state = 'waiting'; token.waitFor = result.wait; visit.outcome = 'queued';
@@ -184,8 +218,8 @@ export class ExecutionEngine {
             // still needs this.ctx.newId()/clock() and the timer repo, so that part stays here.
             for (const b of boundaryHandler.boundaryTimerHosts(p.nodes, node.id!)) {
               const spec = (b as any).event.timer;
-              const cycle = typeof spec === 'object' ? spec.cycle : undefined;
-              await this.scheduleTimer(inst, token.id, b.id!, computeDue(spec, this.ctx.clock()), cycle);
+              const cycle = cycleOf(spec);
+              await this.scheduleTimer(inst, token.id, b.id!, computeDue(spec, this.ctx.clock(), inst.variables), cycle);
             }
           } catch (e) {
             // couldn't durably schedule the timer (e.g. maxActiveTimers quota) — fail this node the
@@ -782,7 +816,7 @@ export class ExecutionEngine {
    *  via broadcast()/resumeToken() instead of a fired TimerJob, so the host has to be found by its
    *  current waiting token rather than passed in directly (that's still the SAME host token id
    *  fireBoundary takes; this just discovers it a different way). */
-  private async fireMessageBoundary(inst: Instance, dep: Deployment, boundary: EngineNode, boundaryTokenId: string): Promise<Instance> {
+  private async activateBoundary(inst: Instance, dep: Deployment, boundary: EngineNode, boundaryTokenId: string): Promise<Instance> {
     this.removeToken(inst, boundaryTokenId);
     const p = this.proc(inst, dep);
     const hostIds = boundaryHandler.onList(boundary);
@@ -793,8 +827,12 @@ export class ExecutionEngine {
     }
     for (const t of this.defaultTargets(p, boundary, inst)) inst.tokens.push({ id: this.ctx.newId(), nodeId: t, state: 'active', enteredAt: this.ctx.clock() });
     inst.status = 'running';
+    return inst;
+  }  private async fireMessageBoundary(inst: Instance, dep: Deployment, boundary: EngineNode, boundaryTokenId: string): Promise<Instance> {
+    await this.activateBoundary(inst, dep, boundary, boundaryTokenId);
     return this.runToQuiescence(inst, dep);
   }
+
 
   // ---- error handling: route a raised error to a matching error-catch (boundary, or an event
   // sub-process with an error start — jBPM's other common "global error handler" idiom) ----

@@ -314,6 +314,10 @@ export class InstanceService {
     for (const c of changes) i.variables[c.name] = c.to;
     await this.repo().put(i);
     await this.ctx.audit({ actor, kind: 'instance.variables.updated', workflowId: i.workflowId, instanceId: id, data: { changes } });
+    if (i.tokens.some((t) => t.state === 'waiting' && t.waitFor?.kind === 'condition')) {   // a conditional event may now be satisfied
+      const dep = await this.deployments.get(i.deploymentId);
+      return this.recordIfFailed(await this.engine.recheckConditions(i, dep));
+    }
     return i;
   }
 

@@ -238,6 +238,14 @@ export class TaskService {
     const t = job.taskId ? await this.repo().get(job.taskId) : undefined;
     const d = job.deadline;
     if (!t || !d || t.tenantId !== this.ctx.tenantId) return;
+    if (d.type === 'resumeTask') {                                  // "suspend until": the task becomes available now
+      if (t.status === 'suspended') {
+        t.status = t.assignee ? 'reserved' : 'created';
+        await this.repo().put(t);
+        await this.ctx.audit({ actor: 'system', kind: 'task.resumed.scheduled', instanceId: t.instanceId, taskId: t.id });
+      }
+      return;
+    }
     const open = t.status === 'created' || t.status === 'reserved';
     const working = open || t.status === 'inprogress' || t.status === 'suspended';
     if (d.type.startsWith('notStarted') ? !open : !working) return;

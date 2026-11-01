@@ -17,6 +17,7 @@ export interface HandlerResult {
   errorCode?: string;     // BPMN-style error code for error-boundary routing
   errorDetails?: Record<string, unknown>; // enriched error payload (HTTP status, body, headers, stack, etc.)
   rethrow?: boolean;
+  signalLocal?: string;   // deliver this signal to waiting tokens of THIS instance only, once the current step has settled (scope: 'instance')
   abort?: boolean;        // abort the whole instance (a call activity configured to abort its parent when the child fails)      // bubble up to outer/global error handler
 }
 

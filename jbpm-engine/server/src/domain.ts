@@ -187,7 +187,7 @@ export interface TimerJob extends Entity {
   // run (store/lock/engine exception — not a business error, which follows the normal error model) is retried.
   attempts?: number; maxAttempts?: number; retryDelayMs?: number; lastError?: string;
   // kind 'deadline' (user task NotStarted/NotCompleted Reassign/Notify): act on a task that is still open at dueAt
-  taskId?: string; deadline?: { type: 'notStartedReassign' | 'notCompletedReassign' | 'notStartedNotify' | 'notCompletedNotify'; action: Record<string, string> };
+  taskId?: string; deadline?: { type: 'notStartedReassign' | 'notCompletedReassign' | 'notStartedNotify' | 'notCompletedNotify' | 'resumeTask'; action: Record<string, string> };
   status: 'scheduled' | 'fired' | 'cancelled';
   // kind 'start' (timer/cron start event): begin a new instance instead of resuming a token.
   deploymentId?: string; processId?: string;

@@ -4,7 +4,7 @@ import type { AppContext } from '../../context.ts';
 import { inList } from '../../infra/filters.ts';
 import { Collections, type Branch, type Deployment, type TimerJob, type Version, type Workflow } from '../../domain.ts';
 import { conflict, notFound, validation } from '../../infra/errors.ts';
-import { computeDue } from '../../engine/duration.ts';
+import { computeDue, cycleOf } from '../../engine/duration.ts';
 import { NotificationService } from '../notifications/service.ts';
 import { VersionService } from '../versions/service.ts';
 import { WorkflowService } from '../workflows/service.ts';
@@ -144,7 +144,7 @@ export class DeploymentService {
         if (n.type !== 'start') continue;
         const spec = (n as any).on?.timer ?? (n as any).timer;   // ISO duration/date or { cycle: 'R/PT1H' }
         if (!spec) continue;
-        const cycle = typeof spec === 'object' ? spec.cycle : (typeof spec === 'string' && spec.startsWith('R') ? spec : undefined);
+        const cycle = cycleOf(spec);
         const job: TimerJob = {
           id: this.ctx.newId(), tenantId: this.ctx.tenantId, instanceId: '', tokenId: '', nodeId: n.id!,
           kind: 'start', dueAt: computeDue(cycle ? { cycle } : spec, now), cycle, fired: 0, status: 'scheduled',

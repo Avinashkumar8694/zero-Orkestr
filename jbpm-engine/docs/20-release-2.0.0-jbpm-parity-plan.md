@@ -264,7 +264,7 @@ exactly-once test (if it uses jobs), the subscription invariant (if it listens),
 | 0 | compat harness, golden fixtures | **done** — `test/golden.test.ts` (23 real processes + 16 flow traces), `test/flow-kit.ts` |
 | 0b | F1 indexed store · F2 signal delivery · F3 instance lock · F4 bounded analytics · F5 bounded tick · F6 size guards | **done** — see §9.6 |
 | 1 | G01 G02 G03 G05 G05b G06 G07 G08 G09 G10 G11 G12 G13 G14 G15 G16 | **done** (see §10) |
-| 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | not started |
+| 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | **done** (see §11) |
 | 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | not started |
 | 4 | S01–S08 | not started |
 | 5 | U01–U06, docs, release checks | not started |
@@ -390,3 +390,20 @@ All in `test/phase1.test.ts` (12 tests) with the golden fixtures unchanged. Prop
 Also fixed on the way (found by running the real project journeys): a **declared process variable that has no value yet is now in scope as `null`** inside scripts (jBPM behaviour) instead of raising `ReferenceError`.
 
 Still for Phase 5 (UI): flow priority and the process-level properties (description, SLA, version, ad-hoc, variable tags) are honoured by the engine and the API but have no editor control yet (U01–U03).
+
+## 11. Phase 2 — timers and events
+All in `test/phase2.test.ts` (10 tests; the cron test alone checks 23 expressions) with the golden fixtures unchanged.
+
+| Gap | Result |
+|---|---|
+| G17 | done: cron timers, POSIX (5 fields) and Quartz (6–7 fields, seconds first), names, ranges, steps, `?`, `L`, day-of-month OR weekday, leap day, year. Works for start timers, catch and boundary timers (interrupting or not). A recurring cron job is one durable row; after downtime it fires **once** and reschedules from now (no catch-up storm). Invalid or never-firing expressions are validation errors |
+| G18 | done: `#{variable}` (dotted paths) in any timer value; a missing variable fails the node with a clear message instead of firing at once |
+| G19 | done: short delays (`1h 30m`, `90m`, `2d`) alongside ISO-8601 |
+| G20 | done: link throw / catch pairs; the validator checks pairing and treats the jump as an edge, so nothing after the catch is reported unreachable |
+| G21 | done: conditional catch — passes at once when true, otherwise waits and is released when a variable change (an edit through the API, a task's outputs, a script, a signal payload) makes it true. Only the instance's own waiting tokens are examined, so there is no polling and no scan of other instances |
+| G22 | done: conditional boundary, interrupting or not, same mechanism |
+| G23 | **decision: conditional *start* is not supported.** It needs a rule engine watching facts across all data. Start by signal, message or timer, or start the process and use a conditional catch as its first step. Documented, and an import report entry (S08) |
+| G24 | done: `scope: "instance"` on signal / message / escalation throws and ends delivers only inside the instance, reliably, including to its own parallel branches (delivered after the current step settles). The default workspace-wide behaviour is unchanged (it has never reached the sender's own running branches, because the running instance is not stored yet; scope `instance` is the way to do that) |
+| G25 | done: `suspendUntil` — the task exists but is suspended (not claimable) until its time, then becomes available via one durable job |
+
+Also: the event-trigger validation rule now accepts `cron` timers and link events.
