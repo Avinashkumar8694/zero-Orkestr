@@ -19,7 +19,7 @@ interface PlanUsage {
 }
 
 const LIMIT_LABELS: Array<[string, string]> = [
-  ['concurrentRequests', 'Concurrent API requests'], ['requestsPerMinute', 'API requests per minute'], ['concurrentScripts', 'Parallel script executions'],
+  ['concurrentRequests', 'Concurrent API requests'], ['requestsPerMinute', 'API requests per minute'],
   ['instancesPerDay', 'Process starts per day'], ['instancesPerWeek', 'Process starts per week'], ['instancesPerMonth', 'Process starts per month'],
   ['maxActiveInstances', 'Active instances'], ['maxActiveTimers', 'Active timers'], ['maxWorkflows', 'Workflows'], ['maxTeamMembers', 'Team members'], ['maxDeployments', 'Deployments'],
 ];

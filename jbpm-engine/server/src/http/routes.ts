@@ -25,6 +25,8 @@ import { NotificationService } from '../modules/notifications/service.ts';
 import { effectiveLimitsFor } from '../modules/platform/limits.ts';
 import { SettingsService } from '../modules/settings/service.ts';
 import { planUsageFor } from '../modules/plans/plans.ts';
+
+const SCRIPT_SETTING_KEYS = ['maxConcurrentScripts', 'scriptPoolSize', 'scriptQueueMax', 'scriptOverflowMode', 'effectiveScriptConcurrency', 'effectiveScriptOverflowMode'];
 import { TimerService } from '../modules/timers/service.ts';
 import { NODE_DEFS, NODE_DEF_BY_TYPE, CATEGORIES } from '../engine/nodes/index.ts';
 import { exportKjar, validateJbpmExport } from '../modules/export/service.ts';
@@ -627,7 +629,11 @@ export function buildRoutes(): Router {
   // `effective*` = what the script pool actually applies (quota/default clamped by SCRIPT_POOL_MAX_SIZE; workspace
   // mode vs the SCRIPT_OVERFLOW_MODE env default) — so operators can see the real limit, not just the setting.
   // the workspace's plan, its limits and what it has used (every member may look; the platform admin edits plans)
-  r.get('/plan/usage', perm('team:read'), asyncHandler(async (req, res) => res.json(await planUsageFor(ctxOf(req)))));
+  r.get('/plan/usage', perm('team:read'), asyncHandler(async (req, res) => {
+    const u: any = await planUsageFor(ctxOf(req));
+    if (!(req as any).access?.platformAdmin) delete u.limits?.concurrentScripts;      // script parallelism is the platform administrator's tuning knob, not a plan feature customers see
+    res.json(u);
+  }));
   // the plans this workspace is offered (hidden ones are not listed) and switching itself to one it may select
   r.get('/plan/options', perm('team:read'), asyncHandler(async (req, res) => {
     const ctx = ctxOf(req);
@@ -647,15 +653,26 @@ export function buildRoutes(): Router {
     const isAdmin = permissionGrants(await callerPermissions(req), 'admin:iam');
     const s = await new SettingsService(ctxOf(req)).get(isAdmin);
     const { effective, caps } = await effectiveLimitsFor(ctxOf(req));
-    res.json({
+    const out: any = {
       ...s,
       effectiveScriptConcurrency: effective.scriptPoolSize, effectiveScriptOverflowMode: effective.scriptOverflowMode,
-      effectiveLimits: effective,   // what is really applied (read-only)
-      limitCaps: caps,              // what this workspace may not exceed (set by the platform administrator)
-    });
+      effectiveLimits: { ...effective },   // what is really applied (read-only)
+      limitCaps: { ...caps },              // what this workspace may not exceed (set by the platform administrator)
+    };
+    if (!(req as any).access?.platformAdmin) {   // script parallelism / queue / overflow are visible to the platform administrator only
+      for (const k of SCRIPT_SETTING_KEYS) delete out[k];
+      for (const k of ['scriptPoolSize', 'scriptQueueMax', 'scriptOverflowMode']) delete out.effectiveLimits[k];
+      for (const k of ['scriptPoolMaxSize', 'scriptQueueMaxCap', 'lockedOverflowMode']) delete out.limitCaps[k];
+    }
+    res.json(out);
   }));
   r.put('/settings/system', perm('admin:iam'), asyncHandler(async (req, res) => {
     const patch = { ...(req.body || {}) };
+    if (!(req as any).access?.platformAdmin) {     // only the system administrator tunes script parallelism, queue and overflow
+      const asked = SCRIPT_SETTING_KEYS.filter((k) => k in patch && !k.startsWith('effective'));
+      if (asked.length) throw forbidden('Script parallelism is controlled by the system administrator');
+      for (const k of SCRIPT_SETTING_KEYS) delete patch[k];
+    }
     if (patch.smtpPassword) patch.smtpPassword = decryptInTransit(patch.smtpPassword);
     // The outbound allow-list EXEMPTS hosts from the private-network (SSRF) block, so on a shared platform only the platform
     // administrator may change it. A normal save that merely echoes the current (or masked) value is fine.

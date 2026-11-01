@@ -362,8 +362,9 @@ export class TenantService {
     const plans = (await this.planRepo().query(() => true))
       .filter((p) => !(p as unknown as { deleted?: boolean }).deleted && statusOf(p) !== 'hidden')        // hidden plans are never listed
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-    if (plans.length > 0) return plans.map((p) => ({ ...p, status: statusOf(p) }));
-    return this.builtinPlans();
+    const hide = (p: Plan): Plan => { const limits = { ...(p.limits ?? {}) } as Record<string, unknown>; delete limits.concurrentScripts; return { ...p, limits } as Plan; };   // script parallelism is not advertised
+    if (plans.length > 0) return plans.map((p) => hide({ ...p, status: statusOf(p) }));
+    return this.builtinPlans().map(hide);
   }
 
   /** The plans every deployment starts with: a 7-day trial (the default) and a contact-us custom plan. */

@@ -34,6 +34,22 @@ class KvRow {
   updatedAt!: Date;
 }
 
+/** Real, typed table for platform administrators: flip `enabled` (a boolean column) in any DB tool to grant or revoke. */
+@TypeOrmEntity({ name: 'system_admins' })
+class SystemAdminRow {
+  @PrimaryColumn({ type: 'varchar', length: 255 })
+  email!: string;
+
+  @Column({ type: 'boolean', default: true })
+  enabled!: boolean;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  note!: string | null;
+
+  @Column({ type: 'timestamptz', default: () => 'now()' })
+  createdAt!: Date;
+}
+
 class PgRepo<T extends DomainEntity> implements Repository<T> {
   constructor(private collection: string, private getDs: () => Promise<DataSource>) {}
   private async orm() { return (await this.getDs()).getRepository(KvRow); }
@@ -79,7 +95,7 @@ export class PgStore implements Store {
       this.dsPromise = new DataSource({
         type: 'postgres',
         url: this.url,
-        entities: [KvRow],
+        entities: [KvRow, SystemAdminRow],
         // One trivial, schema-less table — safe to auto-create/reconcile; a real multi-table relational
         // rollout would want real migrations, but there's nothing here for synchronize to drift on.
         synchronize: true,
@@ -92,6 +108,16 @@ export class PgStore implements Store {
       }).initialize().then((ds) => (this.ds = ds));
     }
     return this.dsPromise;
+  }
+
+  async systemAdminEmails(): Promise<string[]> {
+    const rows = await (await this.ensureDataSource()).getRepository(SystemAdminRow).findBy({ enabled: true });
+    return rows.map((r) => r.email.trim().toLowerCase());
+  }
+
+  /** Makes sure the configured owner has a row (never overwrites an existing one). */
+  async seedSystemAdmin(email: string, note: string): Promise<void> {
+    await (await this.ensureDataSource()).query('INSERT INTO system_admins (email, enabled, note) VALUES ($1, true, $2) ON CONFLICT (email) DO NOTHING', [email.toLowerCase(), note]);
   }
 
   /** Attempts to acquire a PostgreSQL session-level advisory lock (non-blocking). Returns true if acquired. */

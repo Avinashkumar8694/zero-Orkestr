@@ -21,7 +21,7 @@ export const FALLBACK_PLANS: PublicPlan[] = [
     isCustom: false,
     trialDays: 7,
     contactConfig: null,
-    limits: { concurrentRequests: 50, requestsPerMinute: 600, concurrentScripts: 2, instancesPerDay: 200, instancesPerWeek: 1000, instancesPerMonth: 3000, maxActiveInstances: 50, maxActiveTimers: 100, maxWorkflows: 10, maxTeamMembers: 5, maxDeployments: 20 },
+    limits: { concurrentRequests: 50, requestsPerMinute: 600, instancesPerDay: 200, instancesPerWeek: 1000, instancesPerMonth: 3000, maxActiveInstances: 50, maxActiveTimers: 100, maxWorkflows: 10, maxTeamMembers: 5, maxDeployments: 20 },
     features: ['Visual Workflow Designer', 'Process Execution', 'Task Inbox', 'Decision Tables', 'Versioned Deployments'],
   },
   {

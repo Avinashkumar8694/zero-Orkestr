@@ -58,7 +58,7 @@ const ZERO_OK = new Set(['scriptQueueDefaultMax', 'scriptQueueMaxCap', 'maxActiv
 const envNum = (v: string | undefined, d: number) => { const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) ? n : d; };
 /** bootstrap defaults (env); a stored platform document overrides these field by field. */
 const ENV_DEFAULTS = (): PlatformLimits => ({
-  scriptPoolDefaultSize: envNum(process.env.SCRIPT_POOL_DEFAULT_SIZE, 2),
+  scriptPoolDefaultSize: envNum(process.env.SCRIPT_POOL_DEFAULT_SIZE, 1),
   scriptPoolMaxSize: envNum(process.env.SCRIPT_POOL_MAX_SIZE, 16),
   scriptQueueDefaultMax: envNum(process.env.SCRIPT_QUEUE_DEFAULT_MAX, 1000),
   scriptQueueMaxCap: envNum(process.env.SCRIPT_QUEUE_MAX, 1000),

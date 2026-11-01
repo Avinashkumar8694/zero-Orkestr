@@ -13,4 +13,6 @@ export interface Store {
   repo<T extends Entity>(collection: string): Repository<T>;
   /** Optional atomic job claiming for active-active concurrent workers (e.g. Postgres FOR UPDATE SKIP LOCKED). */
   claimDueTimers?(tenantId: string, nowIso: string, limit: number): Promise<any[]>;
+  /** Optional: e-mails flagged `enabled` in the real `system_admins` table (Postgres). Stores without it use the `systemAdmins` collection. */
+  systemAdminEmails?(): Promise<string[]>;
 }

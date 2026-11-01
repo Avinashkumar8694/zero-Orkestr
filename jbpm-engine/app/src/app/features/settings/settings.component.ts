@@ -5,6 +5,7 @@ import { AuthService } from '../../core/auth/auth.service';
 import { AuthApiService } from '../../core/auth/auth-api.service';
 import { ThemeService } from '../../core/theme.service';
 import { SystemApiService } from '../../core/api/system-api.service';
+import { TenantService } from '../../core/tenant/tenant.service';
 import { ToastService } from '../../shared/toast.service';
 import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
 import { IconComponent } from '../../shared/icon.component';
@@ -110,6 +111,7 @@ type SettingsTab = 'account' | 'system';
                 <div class="lbl">Max active timers<span class="shint">Scheduled boundary/catch timers at once.@if (s.limitCaps?.maxActiveTimersCap) { Capped by the platform at {{ s.limitCaps?.maxActiveTimersCap }}. }</span></div>
                 <input type="number" [min]="s.limitCaps?.maxActiveTimersCap ? 1 : 0" [max]="s.limitCaps?.maxActiveTimersCap || null" [(ngModel)]="s.maxActiveTimers" style="width:90px;" />
               </div>
+              @if (tenant.isPlatformAdmin()) {
               <div class="setting-row">
                 <div class="lbl">Script pool size<span class="shint">How many scripts run in parallel (each uses its own isolate, ≈64 MB worst case). Platform cap: {{ s.limitCaps?.scriptPoolMaxSize }}. Effective now: {{ s.effectiveLimits?.scriptPoolSize }}. Empty = platform default.</span></div>
                 <input type="number" min="1" [max]="s.limitCaps?.scriptPoolMaxSize || null" [(ngModel)]="s.scriptPoolSize" style="width:90px;" />
@@ -126,6 +128,7 @@ type SettingsTab = 'account' | 'system';
                   <option value="reject">Reject</option>
                 </select>
               </div>
+              }
             </section>
 
             <section class="card">
@@ -287,6 +290,7 @@ export class SettingsComponent {
   theme = inject(ThemeService);
   private authApi = inject(AuthApiService);
   private systemApi = inject(SystemApiService);
+  tenant = inject(TenantService);
   private toast = inject(ToastService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);

@@ -36,9 +36,9 @@ test('POOL-2 2000 parallel executions in one workspace: all correct, isolates â‰
   clearInterval(sampler);
   results.forEach((r, i) => assert.strictEqual(r.out, i * 2 + 1));
   const after = sandboxStats();
-  assert.ok(after.created - before.created <= sandboxConfig().poolDefaultSize, `created ${after.created - before.created}`);
+  assert.ok(after.created - before.created <= sandboxConfig().poolDefaultSize + Math.ceil(N / sandboxConfig().maxRuns), `created ${after.created - before.created}`);   // pool size + isolates replaced after max runs
   assert.ok(peakIsolates <= sandboxConfig().maxIsolates, `peak isolates ${peakIsolates}`);
-  assert.ok(after.isolatesAlive['pool-load'] <= sandboxConfig().poolDefaultSize);
+  assert.ok((after.isolatesAlive['pool-load'] ?? 0) <= sandboxConfig().poolDefaultSize);
   assert.ok((peakRss - rss0) / 1048576 < 500, `RSS growth ${(peakRss - rss0) / 1048576}MB`);
 });
 

@@ -14,3 +14,11 @@ Existing processes, deployments, instances, timers and APIs behave as before (go
 
 ## Known limits
 Postgres push-down and the Redis lease are now verified live with separate replica processes (`npm run test:live`, plan §15); ad-hoc sequential ordering and per-instance variable size cap are not implemented; Java scripts do not see `node.metaData`.
+
+## System administrator controls
+- **Script parallelism** (pool size, queue length, overflow mode) now defaults to **1** and is visible and editable by system administrators only. It is gone from the workspace settings screen, the plan usage page, the public plans and the workspace settings API; a workspace admin who tries to set it gets `403`. Plan caps (`concurrentScripts`) still apply and stay editable in the platform screens.
+- **Who is a system administrator** is now data, not just the configured e-mail: on Postgres a real `system_admins` table (`email`, boolean `enabled`, `note`); elsewhere the `systemAdmins` collection. Set `enabled = true` for any verified e-mail and they are an administrator within about 5 seconds, no restart; untick to revoke. The configured `PLATFORM_ADMIN_EMAIL` is always one and is seeded into the table at start.
+  ```sql
+  UPDATE system_admins SET enabled = true WHERE email = 'someone@company.com';   -- or INSERT a row
+  ```
+

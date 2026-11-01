@@ -226,12 +226,16 @@ test('PLAN-33 maxActiveInstances is a plan cap (flows through the platform-limit
   assert.strictEqual(up.status, 422, 'cannot raise it above the plan');
 });
 
-test('PLAN-34 concurrentScripts caps the workspace script pool size; the workspace cannot exceed it', async () => {
+test('PLAN-34 concurrentScripts still caps the workspace script pool (system administrator view); users do not see it', async () => {
   await mkPlan('qa-scripts', { concurrentScripts: 1 });
   const ws = await wsOn('scripts-ws', 'qa-scripts', []);
-  const s = await h.call('GET', '/settings/system', { token: ws.tokens.owner, tenant: ws.id });
-  assert.strictEqual(s.body.effectiveLimits.scriptPoolSize, 1);
-  assert.strictEqual((await h.call('PUT', '/settings/system', { token: ws.tokens.owner, tenant: ws.id, body: { scriptPoolSize: 5 } })).status, 422);
+  const { effectiveLimitsFor } = await import('../src/modules/platform/limits.ts');
+  const { makeContext } = await import('../src/context.ts');
+  const eff = await effectiveLimitsFor(makeContext({ store: h.store, tenantId: ws.id }));
+  assert.strictEqual(eff.effective.scriptPoolSize, 1);
+  assert.strictEqual(eff.caps.scriptPoolMaxSize, 1);
+  const usage = (await h.call('GET', '/plan/usage', { token: ws.tokens.owner, tenant: ws.id })).body;
+  assert.ok(!('concurrentScripts' in usage.limits));
 });
 
 test('PLAN-35 maxActiveTimers is a plan cap: the second timer cannot be scheduled', async () => {

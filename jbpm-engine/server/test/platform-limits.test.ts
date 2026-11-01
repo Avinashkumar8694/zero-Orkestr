@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import { boot, ROLE_NAMES } from './harness.ts';
 import { config, PLATFORM_ADMIN_EMAIL } from '../src/infra/config.ts';
 import { oidc } from '../src/infra/oidc.ts';
+import { resetSystemAdminCache } from '../src/modules/tenants/identity.ts';
 import { runScript, sandboxStats, configureSandbox, sandboxConfig } from '../src/engine/sandbox.ts';
 import { resolveLimits, capsOf, effectiveLimitsFor, PlatformLimitsService, type PlatformLimits } from '../src/modules/platform/limits.ts';
 import { Collections, type AuditEvent } from '../src/domain.ts';
@@ -44,8 +45,10 @@ test.before(async () => {
 test.after(async () => { configureSandbox(savedSandbox); await h.close(); await new Promise<void>((r) => idp.close(() => r())); });
 
 const platformCall = (method: string, path: string, body?: unknown, token = ROOT) => h.call(method, `/platform${path}`, { token, body });
-const putSettings = (w: typeof ws, body: unknown, role = 'owner') => h.call('PUT', '/settings/system', { token: w.tokens[role], tenant: w.id, body });
-const getSettings = (w: typeof ws, role = 'owner') => h.call('GET', '/settings/system', { token: w.tokens[role], tenant: w.id });
+// script parallelism is the system administrator's alone: those writes/reads go through the platform admin, everything else as the workspace role
+const SCRIPT_KEYS = ['scriptPoolSize', 'scriptQueueMax', 'scriptOverflowMode', 'maxConcurrentScripts'];
+const putSettings = (w: typeof ws, body: unknown, role = 'owner') => h.call('PUT', '/settings/system', { token: SCRIPT_KEYS.some((k) => k in (body as object)) && role === 'owner' ? ROOT : w.tokens[role], tenant: w.id, body });
+const getSettings = (w: typeof ws, role = 'owner', asRoot = true) => h.call('GET', '/settings/system', { token: asRoot && role === 'owner' ? ROOT : w.tokens[role], tenant: w.id });
 
 test('PLIM-1 every platform route is 403 for every workspace role (owner/admin included) and for the local admin; 200 only for the platform admin', async () => {
   const routes: Array<[string, string, unknown?]> = [
@@ -203,4 +206,30 @@ test('PLIM-7 every platform change is audited; usage endpoint reflects live pool
   assert.strictEqual((await platformCall('GET', '/limits/usage')).body.data.workspaces.find((w: any) => w.workspaceId === ws.id).pool.queued, 0);
   const svc = new PlatformLimitsService(h.store);
   assert.ok((await svc.getGlobal()).overriddenFields.length > 0);
+});
+
+test('PLIM-8 script parallelism is hidden from workspace users and only the system administrator can change it', async () => {
+  const own = (await h.call('GET', '/settings/system', { token: ws.tokens.owner, tenant: ws.id })).body;
+  for (const k of ['scriptPoolSize', 'scriptQueueMax', 'scriptOverflowMode', 'effectiveScriptConcurrency', 'effectiveScriptOverflowMode']) assert.ok(!(k in own), `${k} hidden`);
+  for (const k of ['scriptPoolSize', 'scriptQueueMax', 'scriptOverflowMode']) assert.ok(!(k in own.effectiveLimits), `effectiveLimits.${k} hidden`);
+  for (const k of ['scriptPoolMaxSize', 'scriptQueueMaxCap']) assert.ok(!(k in own.limitCaps), `limitCaps.${k} hidden`);
+  const put = await h.call('PUT', '/settings/system', { token: ws.tokens.owner, tenant: ws.id, body: { scriptPoolSize: 1 } });
+  assert.strictEqual(put.status, 403, 'a workspace owner cannot change it');
+  assert.strictEqual((await h.call('PUT', '/settings/system', { token: ws.tokens.owner, tenant: ws.id, body: { historyAuditLevel: 'full' } })).status, 200, 'other settings still save');
+  const root = (await h.call('GET', '/settings/system', { token: ROOT, tenant: ws.id })).body;
+  assert.ok('effectiveScriptConcurrency' in root && 'scriptPoolMaxSize' in root.limitCaps, 'the system administrator sees it');
+  const usage = (await h.call('GET', '/plan/usage', { token: ws.tokens.owner, tenant: ws.id })).body;
+  assert.ok(!('concurrentScripts' in usage.limits), 'not shown as a plan limit');
+});
+
+test('PLIM-9 a database flag makes another verified user a system administrator', async () => {
+  const other = 'second.admin@example.com';
+  const call = () => h.call('GET', '/platform/limits', { token: sso(other) });
+  assert.strictEqual((await call()).status, 403, 'not an administrator yet');
+  await h.store.repo<any>('systemAdmins').put({ id: other, tenantId: 'system', enabled: true });
+  resetSystemAdminCache(h.store);
+  assert.strictEqual((await call()).status, 200, 'enabled = true makes them one');
+  await h.store.repo<any>('systemAdmins').put({ id: other, tenantId: 'system', enabled: false });
+  resetSystemAdminCache(h.store);
+  assert.strictEqual((await call()).status, 403, 'unticking removes it');
 });

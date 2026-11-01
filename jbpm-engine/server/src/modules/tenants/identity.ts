@@ -63,8 +63,28 @@ export async function membershipsOf(store: Store, id: Identity): Promise<TenantM
 
 /** The single platform administrator is config.platformAdminEmail — nobody else is one, whatever their role,
  *  membership or local-IAM role says. An OIDC caller counts when that email is VERIFIED on their token. */
+/** System administrators flagged in the database (`system_admins.enabled` on Postgres, the `systemAdmins` collection elsewhere), cached
+ *  for a few seconds so ticking the box takes effect without a restart or a lookup per request. The configured e-mail is always one. */
+const adminCache = new WeakMap<object, { at: number; emails: Set<string> }>();
+export const resetSystemAdminCache = (store?: Store) => { if (store) adminCache.delete(store); };
+async function flaggedAdmins(store: Store): Promise<Set<string>> {
+  const hit = adminCache.get(store);
+  if (hit && Date.now() - hit.at < 5000) return hit.emails;
+  let emails: string[];
+  try {
+    emails = store.systemAdminEmails ? await store.systemAdminEmails()
+      : (await store.repo<{ id: string; enabled?: boolean }>('systemAdmins').list()).filter((r) => r.enabled !== false).map((r) => lower(r.id));
+  } catch { emails = []; }
+  const set = new Set(emails.map(lower));
+  adminCache.set(store, { at: Date.now(), emails: set });
+  return set;
+}
+
 export async function isPlatformAdmin(store: Store, id: Identity, memberships?: TenantMember[]): Promise<boolean> {
-  if (id.source === 'oidc' && id.emailVerified === true && lower(id.email) === config.platformAdminEmail) return true;
+  if (id.source === 'oidc' && id.emailVerified === true) {
+    const email = lower(id.email);
+    if (email === config.platformAdminEmail || (await flaggedAdmins(store)).has(email)) return true;
+  }
   // Local development without SSO: the bootstrap account (a REAL local user — matched by id or username — holding a `system_admin` seat — never an e-mail
   // placeholder seat, so a token merely carrying the platform e-mail does not qualify) may manage the platform. Off in production.
   if (config.platformAdminAllowLocal && id.source !== 'oidc' && id.sub) {
@@ -79,6 +99,8 @@ export async function isPlatformAdmin(store: Store, id: Identity, memberships?: 
 export async function ensurePlatformAdmin(store: Store, now: string, newId: () => string): Promise<void> {
   const email = config.platformAdminEmail;
   const repo = store.repo<TenantMember>(Collections.tenantMembers);
+  const pgSeed = (store as { seedSystemAdmin?: (e: string, n: string) => Promise<void> }).seedSystemAdmin;
+  if (pgSeed) await pgSeed.call(store, email, 'configured platform administrator').catch(() => {});
   const existing = await repo.query((m) => m.tenantId === config.defaultTenant && lower(m.email) === email);
   if (existing.length) {
     for (const m of existing) if (m.role !== 'system_admin' || m.status !== 'active') { m.role = 'system_admin'; m.status = 'active'; m.permissions = ['*']; await repo.put(m); }

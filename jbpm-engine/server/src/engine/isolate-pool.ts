@@ -36,7 +36,7 @@ export interface SandboxConfig {
 
 const num = (v: string | undefined, d: number) => { const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) ? n : d; };
 const cfg: SandboxConfig = {
-  poolDefaultSize: num(process.env.SCRIPT_POOL_DEFAULT_SIZE, 4),
+  poolDefaultSize: num(process.env.SCRIPT_POOL_DEFAULT_SIZE, 1),
   poolMaxSize: num(process.env.SCRIPT_POOL_MAX_SIZE, 16),
   overflowMode: isOverflowMode(process.env.SCRIPT_OVERFLOW_MODE) ? process.env.SCRIPT_OVERFLOW_MODE : 'queue',
   maxIsolates: num(process.env.SCRIPT_MAX_ISOLATES, Math.max(8, 2 * os.cpus().length)),
