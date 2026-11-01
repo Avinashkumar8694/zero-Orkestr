@@ -21,6 +21,6 @@ export const handler: NodeHandler = async (c) => {
   const composite = `${c.proc.id}::${n.id}`;
   const child = await c.startChild(c.dep, composite, { ...c.inst.variables }, token.id);
   if (child.status === 'completed') return { vars: mapChildOutputs(n, child), outcome: `sub:${child.id}` };
-  if (child.status === 'aborted' || child.status === 'failed') return { error: 'sub-process failed', errorCode: 'SUBPROCESS_ERROR', outcome: `sub:${child.id}` };
+  if (child.status === 'aborted' || child.status === 'failed') return { error: child.cancelled ? 'transaction cancelled' : 'sub-process failed', errorCode: child.cancelled ? 'TRANSACTION_CANCELLED' : 'SUBPROCESS_ERROR', outcome: `sub:${child.id}` };
   return { wait: { kind: 'child', ref: child.id }, outcome: `sub:${child.id}` };
 };

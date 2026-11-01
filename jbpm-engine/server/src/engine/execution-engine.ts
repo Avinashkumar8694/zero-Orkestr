@@ -13,6 +13,9 @@ import { kickWorker, ASYNC_CAPABLE } from './async-kick.ts';
 import { withInstanceLock, deferAfterLock } from './instance-lock.ts';
 import { findRows } from '../store/find.ts';
 import { compactHistory } from './history-cap.ts';
+
+/** a multi-instance activity seen as the for-each it runs as: one nested single-activity instance per item (see pick(): `parent::mi:<id>`) */
+const miView = (node: any, p: EngineProcess) => ({ ...node, ...node.multiInstance, miInline: true, type: 'forEach', process: `${p.id}::mi:${node.id}` });
 import { evalCondition } from './sandbox.ts';
 import { completionReached, collectCompleted } from './nodes/for-each/handler.ts';
 import { runScript } from './sandbox.ts';
@@ -50,9 +53,15 @@ export class ExecutionEngine {
     if (processId && processId.includes('::')) {
       const [parentId, nodeId] = processId.split('::');
       const parent = list.find((x) => x.id === parentId) || list[0];
+      if (nodeId!.startsWith('mi:')) {                                           // one item of a multi-instance activity: start -> the activity -> end
+        const act = parent?.nodes.find((n) => n.id === nodeId!.slice(3)) as any;
+        if (!act) throw new Error('multi-instance activity not found');
+        const { multiInstance: _mi, ...single } = act;
+        return { id: processId, name: act.name || 'Item', vars: parent!.vars, nodes: [{ id: 'mi_s', type: 'start' }, single, { id: 'mi_e', type: 'end' }], flows: [{ id: 'mi_f1', from: 'mi_s', to: act.id }, { id: 'mi_f2', from: act.id, to: 'mi_e' }] } as unknown as EngineProcess;
+      }
       const sub = parent?.nodes.find((n) => n.id === nodeId) as any;
       if (!sub) throw new Error('embedded sub-process not found');
-      return { id: processId, name: sub.name || 'Sub-process', nodes: sub.nodes || [], flows: sub.flows || [] } as EngineProcess;
+      return { id: processId, name: sub.name || 'Sub-process', nodes: sub.nodes || [], flows: sub.flows || [], ...(sub.adHoc ? { adHoc: true, completionCondition: sub.completionCondition } : {}) } as EngineProcess;
     }
     const p = (processId && list.find((x) => x.id === processId)) || list[0];
     if (!p) throw new Error('deployment has no process');
@@ -64,7 +73,7 @@ export class ExecutionEngine {
   private incoming(p: EngineProcess, nodeId: string): EngineFlow[] { return p.flows.filter((f) => f.to === nodeId); }
 
   // ---- lifecycle ----
-  async start(dep: Deployment, variables: Record<string, unknown>, actor: string, opts: { processId?: string; correlationKey?: string; parentInstanceId?: string; isErrorHandler?: boolean; async?: boolean } = {}): Promise<Instance> {
+  async start(dep: Deployment, variables: Record<string, unknown>, actor: string, opts: { processId?: string; correlationKey?: string; parentInstanceId?: string; isErrorHandler?: boolean; async?: boolean; startAt?: string } = {}): Promise<Instance> {
     const p = this.pick(dep, opts.processId);
     const startNode = p.nodes.find((n) => n.type === 'start') || p.nodes[0];
     if (!startNode) throw new Error('process has no start node');
@@ -79,6 +88,10 @@ export class ExecutionEngine {
       parentInstanceId: opts.parentInstanceId,
       isErrorHandler: opts.isErrorHandler,
     };
+    if (opts.startAt) {                                          // started by an instantiating event gateway: the triggering catch counts as done
+      inst.tokens = this.outgoing(p, opts.startAt).map((f) => ({ id: this.ctx.newId(), nodeId: f.to, state: 'active' as const, enteredAt: now }));
+      inst.history.push({ tokenId: '-', nodeId: opts.startAt, type: 'catch', enteredAt: now, exitedAt: now, outcome: 'triggered' });
+    }
     this.assertRequiredVars(p, inst.variables);
     this.applyProcessProperties(p, inst, now);
     this.emit({ kind: 'instance.started', instanceId: inst.id });
@@ -99,6 +112,65 @@ export class ExecutionEngine {
     return inst;
   }
 
+  /** Event sub-processes (signal / message / escalation / timer / condition triggers): while the instance lives, each one has a LISTENER token
+   *  (durable, like any waiting token; a timer trigger also has its ordinary timer job). The listener never keeps the instance alive on its own. */
+  private armEventSubprocesses(p: EngineProcess, inst: Instance, now: string): void {
+    for (const n of p.nodes as any[]) {
+      if (n.type !== 'subprocess' || !n.on || typeof n.on !== 'object' || 'error' in n.on) continue;
+      const on = n.on as Record<string, any>;
+      const id = this.ctx.newId();
+      if (on.timer) {
+        inst.tokens.push({ id, nodeId: n.id, state: 'waiting', waitFor: { kind: 'timer', ref: n.id }, listener: true, enteredAt: now });
+        void this.scheduleTimer(inst, id, n.id, computeDue(on.timer, now, inst.variables), cycleOf(on.timer));
+      } else if (on.signal || on.message || on.escalation) {
+        inst.tokens.push({ id, nodeId: n.id, state: 'waiting', waitFor: { kind: on.message ? 'message' : 'signal', ref: String(on.message || on.signal || on.escalation) }, listener: true, enteredAt: now });
+      } else if (on.condition) {
+        inst.tokens.push({ id, nodeId: n.id, state: 'waiting', waitFor: { kind: 'condition', ref: n.id }, listener: true, enteredAt: now });
+      }
+    }
+  }
+
+  /** An event sub-process trigger fired: (interrupting) end everything else in the scope, then run the sub-process body as a nested instance
+   *  that shares this instance's variables. A non-interrupting listener stays armed for the next event. */
+  private async fireEventSubprocess(inst: Instance, dep: Deployment, listener: Token): Promise<Instance> {
+    const p = this.proc(inst, dep);
+    const node = this.nodeMap(p).get(listener.nodeId) as any;
+    if (!node) { this.removeToken(inst, listener.id); return this.runToQuiescence(inst, dep); }
+    const interrupting = node.interrupting !== false;
+    if (interrupting) {
+      for (const t of [...inst.tokens]) {
+        this.removeToken(inst, t.id);
+        await this.cancelTimersForToken(inst, t.id);
+        if (!t.listener) await this.exitOpenTaskForToken(t.id);
+      }
+      await this.abortDescendants(inst.id);
+    } else if (listener.waitFor?.kind === 'condition') {
+      this.removeToken(inst, listener.id);                      // a condition is an edge: it fires once
+    }
+    const run: Token = { id: this.ctx.newId(), nodeId: node.id, state: 'waiting', waitFor: { kind: 'child' }, enteredAt: this.ctx.clock() };
+    inst.tokens.push(run);
+    const child = await this.startChild(dep, `${p.id}::${node.id}`, { ...inst.variables }, inst.startedBy, inst.id, run.id);
+    if (child.status === 'completed') { Object.assign(inst.variables, child.variables); this.removeToken(inst, run.id); }
+    else if (child.status === 'aborted' || child.status === 'failed') {
+      this.removeToken(inst, run.id);
+      if (!(await this.raiseError(inst, p, dep, node.id, 'SUBPROCESS_ERROR', `event sub-process ${child.status}: ${child.id}`))) { inst.status = 'failed'; inst.error ||= { nodeId: node.id, message: `event sub-process ${child.status}`, at: this.ctx.clock() }; return this.runToQuiescence(inst, dep); }
+    } else run.waitFor = { kind: 'child', ref: child.id };
+    inst.status = 'running';
+    return this.runToQuiescence(inst, dep);
+  }
+
+  /** Ad-hoc scope with a completion condition: complete when it becomes true. `completed` = node visits finished so far, `active` = tokens in play. */
+  private async adHocComplete(inst: Instance, p: EngineProcess, dep: Deployment): Promise<boolean> {
+    const expr = (p as any).completionCondition;
+    if (!(p as any).adHoc || !expr || !inst.tokens.some((t) => t.waitFor?.kind === 'adhoc')) return false;
+    const live = new Set(inst.tokens.map((t) => t.id));         // a step has finished when its token is gone
+    const completed = inst.history.filter((h) => h.tokenId !== '-' && !live.has(h.tokenId) && h.outcome !== 'queued').length + Object.values(inst.historyCompacted ?? {}).reduce((a, b) => a + b, 0);
+    const active = inst.tokens.filter((t) => !t.listener && t.waitFor?.kind !== 'adhoc').length;
+    const ok = await evalCondition(String(expr), 'js', { ...inst.variables, completed, active });
+    if (ok) inst.tokens = inst.tokens.filter((t) => t.listener).map((t) => t);
+    return ok;
+  }
+
   /** Conditional events (catch / boundary): a token waiting on a condition is released when the condition becomes true. Called whenever an
    *  instance has nothing left to run (so after any node, signal, task completion or variable edit) — only THIS instance's waiting condition
    *  tokens are looked at, so there is no polling and no scan of other instances. Returns true when something woke up. */
@@ -109,10 +181,12 @@ export class ExecutionEngine {
     let woke = false;
     for (const t of waiting) {
       const node = nodes.get(t.nodeId) as any;
-      if (!node?.event?.condition) continue;
+      const expr = node?.event?.condition ?? (t.listener ? node?.on?.condition : undefined);
+      if (!expr) continue;
       const c = this.buildCtx(node, inst, p, {}, dep, t.id);
-      const ok = await evalCondition(String(node.event.condition), node.event.lang, inst.variables, undefined, varTypesOf(c), { ...kcontextInfoOf(c), ...(await scriptLimitsOf(c)), onAction: onActionOf(c) });
+      const ok = await evalCondition(String(expr), node.event?.lang, inst.variables, undefined, varTypesOf(c), { ...kcontextInfoOf(c), ...(await scriptLimitsOf(c)), onAction: onActionOf(c) });
       if (!ok) continue;
+      if (t.listener) { await this.fireEventSubprocess(inst, dep, t); return true; }
       if (node.type === 'boundary') await this.activateBoundary(inst, dep, node, t.id);
       else { t.state = 'active'; t.waitFor = undefined; }               // the catch runs again, sees its condition true, and passes
       woke = true;
@@ -149,7 +223,10 @@ export class ExecutionEngine {
       for (const n of p.nodes as any[]) {
         if (n.autoStart === true && n.type !== 'start' && !p.flows.some((f) => f.to === n.id)) inst.tokens.push({ id: this.ctx.newId(), nodeId: n.id, state: 'active', enteredAt: now });
       }
+      // with a completion condition the scope stays open (people start activities on demand) until the condition is true
+      if (pp.completionCondition && !inst.tokens.some((t) => t.waitFor?.kind === 'adhoc')) inst.tokens.push({ id: this.ctx.newId(), nodeId: '__adhoc', state: 'waiting', waitFor: { kind: 'adhoc' }, enteredAt: now });
     }
+    this.armEventSubprocesses(p, inst, now);
   }
 
   /** Advance every active token until the instance waits, completes, aborts, or fails. */
@@ -167,6 +244,7 @@ export class ExecutionEngine {
           // signals thrown with scope 'instance' are delivered now that this step has settled (never re-entering the loop mid-step)
           if (pendingLocal.length) { for (const nm of pendingLocal.splice(0)) await this.signalInstance(inst, dep, nm); continue; }
           if (await this.wakeConditions(inst, p, dep)) continue;
+          if (await this.adHocComplete(inst, p, dep)) { inst.tokens = []; break; }
           break;
         }
         if (++guard > 100000) throw new Error('step budget exceeded (possible loop)');
@@ -195,7 +273,7 @@ export class ExecutionEngine {
         visit.outcome = result.outcome || (result.wait ? 'waiting' : result.end || (result.error ? 'error' : 'done'));
         this.emit({ kind: 'node.exited', instanceId: inst.id, nodeId: node.id!, tokenId: token.id });
 
-        if (result.abort) { inst.tokens = []; inst.status = 'aborted'; break; }
+        if (result.abort) { inst.tokens = []; inst.status = 'aborted'; if ((result as any).cancelled) { inst.cancelled = true; if (result.vars) Object.assign(inst.variables, result.vars); } break; }
         if (result.signalLocal) pendingLocal.push(result.signalLocal);
         if (result.wait?.kind === 'async') {
           // jBPM "Is Async": park the token (the instance is saved), hand the node to the worker, and let the caller go
@@ -276,7 +354,9 @@ export class ExecutionEngine {
       }
       // settle final status
       if (inst.status === 'running') {
-        inst.status = inst.tokens.some((t) => t.state === 'waiting') ? 'waiting' : 'completed';
+        const keepsAlive = inst.tokens.some((t) => t.state === 'waiting' && !t.listener);
+        inst.status = keepsAlive ? 'waiting' : 'completed';
+        if (!keepsAlive) inst.tokens = [];                          // only event sub-process listeners were left: the scope has ended, so they go with it
       }
       if (inst.status === 'completed' || inst.status === 'aborted' || inst.status === 'failed') inst.endedAt = this.ctx.clock();
       if (inst.status === 'completed' && inst.sla?.status === 'pending') inst.sla = { ...inst.sla, status: 'met', at: this.ctx.clock() };
@@ -395,7 +475,7 @@ export class ExecutionEngine {
       return;
     }
     const prefix = callNode?.type === 'call' ? 'CALL' : 'SUBPROCESS';
-    const code = `${prefix}_${child.status === 'aborted' ? 'ABORTED' : 'ERROR'}`;
+    const code = child.cancelled ? 'TRANSACTION_CANCELLED' : `${prefix}_${child.status === 'aborted' ? 'ABORTED' : 'ERROR'}`;
     await this.failParentWith(parent, p, pdep, token.nodeId, code, `child instance ${child.status}: ${child.id}`);
   }
 
@@ -473,18 +553,19 @@ export class ExecutionEngine {
    *  fail the node (any child aborted/failed — real MI default semantics), or resume with the
    *  collected itemResult array (every child completed). */
   private async settleMultiInstance(parent: Instance, pdep: Deployment, p: EngineProcess, token: Token): Promise<void> {
-    const n = p.nodes.find((node) => node.id === token.nodeId) as any;
-    if (!n) { this.removeToken(parent, token.id); return; }
+    const raw = p.nodes.find((node) => node.id === token.nodeId) as any;
+    if (!raw) { this.removeToken(parent, token.id); return; }
+    const n = raw.multiInstance ? miView(raw, p) : raw;
     const items = Array.isArray(parent.variables[n.over]) ? (parent.variables[n.over] as unknown[]) : [];
     let siblings = (await this.inst().query((i) => i.tenantId === this.ctx.tenantId && i.parentInstanceId === parent.id && i.parentTokenId === token.id))
       .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
     const alreadyFailed = siblings.some((s) => s.status === 'failed' || s.status === 'aborted');
     if (!n.parallel && !alreadyFailed && siblings.length < items.length && siblings.every((s) => s.status === 'completed')) {
       const item = items[siblings.length];
-      const childVars: Record<string, unknown> = {};
+      const childVars: Record<string, unknown> = n.miInline ? { ...parent.variables } : {};
       for (const v of (n.pass || [])) childVars[v] = parent.variables[v];
       if (n.as) childVars[n.as] = item;
-      const resolved = this.resolveCalled ? await this.resolveCalled(n.process) : undefined;
+      const resolved = n.miInline ? { dep: pdep, processId: n.process } : this.resolveCalled ? await this.resolveCalled(n.process) : undefined;
       if (resolved) {
         await this.startChild(resolved.dep, resolved.processId, childVars, parent.startedBy, parent.id, token.id);
         siblings = (await this.inst().query((i) => i.tenantId === this.ctx.tenantId && i.parentInstanceId === parent.id && i.parentTokenId === token.id))
@@ -523,10 +604,12 @@ export class ExecutionEngine {
     const child: Instance = {
       id: this.ctx.newId(), tenantId: this.ctx.tenantId, deploymentId: dep.id, workflowId: dep.workflowId, processId: p.id,
       status: 'running', variables: { ...seed, ...vars },
-      tokens: [{ id: this.ctx.newId(), nodeId: startNode!.id!, state: 'active', enteredAt: now }],
+      tokens: (p as any).adHoc ? [] : [{ id: this.ctx.newId(), nodeId: startNode!.id!, state: 'active', enteredAt: now }],
       history: [], startedAt: now, startedBy: actor, parentInstanceId, parentTokenId,
       ...(independent ? { independent: true } : {}),
     };
+    this.assertRequiredVars(p, child.variables);
+    this.applyProcessProperties(p, child, now);
     this.emit({ kind: 'instance.started', instanceId: child.id });
     return this.runToQuiescence(child, dep);
   }
@@ -611,6 +694,15 @@ export class ExecutionEngine {
         const on = startNode?.on;
         const kind = on?.signal === name ? 'signal' : on?.message === name ? 'message' : undefined;
         if (kind) await this.start(dep, {}, kind, { processId: p.id });
+        // an event-based gateway marked `instantiate` starts the process when ANY of the events after it arrives (one instance per event)
+        const gw = (p.nodes as any[]).find((n) => n.type === 'gateway' && n.mode === 'event' && n.instantiate === true);
+        if (gw) {
+          for (const f of p.flows.filter((x) => x.from === gw.id)) {
+            const t = p.nodes.find((n) => n.id === f.to) as any;
+            const ev = t?.type === 'catch' ? t.event : undefined;
+            if (ev && (ev.signal === name || ev.message === name)) { await this.start(dep, {}, ev.signal === name ? 'signal' : 'message', { processId: p.id, startAt: t.id }); break; }
+          }
+        }
       }
     }
   }
@@ -1113,13 +1205,14 @@ export class ExecutionEngine {
 
   private async handle(node: EngineNode, inst: Instance, p: EngineProcess, joins: Record<string, Set<string>>, dep: Deployment, tokenId: string): Promise<HandlerResult> {
     const h = NODE_HANDLERS[node.type];
-    if (!h) return {};   // e.g. 'boundary' — spawned by the error router, then follows its outgoing flow
+    if (!h) return {};
+    const mi = (node as any).multiInstance ? NODE_HANDLERS.forEach : undefined;   // e.g. 'boundary' — spawned by the error router, then follows its outgoing flow
     const tok = inst.tokens.find((t) => t.id === tokenId);
     if ((node as any).async === true && ASYNC_CAPABLE.has(node.type) && !tok?.asyncReady) return { wait: { kind: 'async', ref: node.id } };
     const c = this.buildCtx(node, inst, p, joins, dep, tokenId);
     const entryErr = await this.runLifecycle(node, 'onEntry', c);
     if (entryErr) return { error: entryErr, errorCode: 'SCRIPT_ERROR' };
-    const result = await h(c);
+    const result = mi ? await mi({ ...c, node: miView(node, p) }) : await h(c);
     // onExit fires exactly once, when the node instance actually completes — immediately here if it
     // didn't wait/error; if it DID wait (userTask/receive/etc.), onExit instead runs in resumeToken()
     // when the wait is actually over, matching real jBPM's onExit timing (never on error/abort paths).
@@ -1141,6 +1234,7 @@ export class ExecutionEngine {
     const token = inst.tokens.find((t) => t.id === tokenId);
     if (!token || token.state !== 'waiting') throw conflict('token is not waiting');
     if (vars) Object.assign(inst.variables, vars);
+    if (token.listener) return this.fireEventSubprocess(inst, dep, token);       // an event sub-process trigger, not the completion of a wait
     await this.cancelTimersForToken(inst, tokenId);   // host resumed → drop its pending boundary/catch timers
     if (token.sla) await this.settleSla(inst, tokenId, 'met');
     const p = this.proc(inst, dep);

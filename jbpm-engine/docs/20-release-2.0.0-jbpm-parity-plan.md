@@ -265,7 +265,7 @@ exactly-once test (if it uses jobs), the subscription invariant (if it listens),
 | 0b | F1 indexed store · F2 signal delivery · F3 instance lock · F4 bounded analytics · F5 bounded tick · F6 size guards | **done** — see §9.6 |
 | 1 | G01 G02 G03 G05 G05b G06 G07 G08 G09 G10 G11 G12 G13 G14 G15 G16 | **done** (see §10) |
 | 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | **done** (see §11) |
-| 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | not started |
+| 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | **done** (see §12) |
 | 4 | S01–S08 | not started |
 | 5 | U01–U06, docs, release checks | not started |
 
@@ -407,3 +407,17 @@ All in `test/phase2.test.ts` (10 tests; the cron test alone checks 23 expression
 | G25 | done: `suspendUntil` — the task exists but is suspended (not claimable) until its time, then becomes available via one durable job |
 
 Also: the event-trigger validation rule now accepts `cron` timers and link events.
+
+## 12. Phase 3 — structural items
+All in `test/phase3.test.ts` (12 tests), golden fixtures unchanged. Suite: 606 / 606.
+
+| Gap | Result |
+|---|---|
+| G27 G28 | done: event sub-processes triggered by **signal, message, escalation, timer or condition**, interrupting (default) or not. Each is a durable *listener token* (a timer trigger also has its ordinary timer job) that lives as long as the instance and **never keeps it alive by itself**: when only listeners remain the scope has ended, they are dropped and their timers cancelled. Interrupting: everything else in the scope is closed (tasks exited, timers cancelled, called instances aborted) before the body runs. Non-interrupting: stays armed for the next event (signals, recurring timers); a condition fires once (it is an edge). The body runs as a nested instance sharing the variables, which merge back; a body that waits (its own task) keeps the parent waiting |
+| G29 | done: ad-hoc sub-process (`adHoc`, `completionCondition`): `autoStart` steps begin, others are started on demand with the existing "re-trigger a node" operation; it ends when the condition holds (it sees `completed`, `active` and the variables) or, without one, when nothing is left running. **`ordering: sequential` is not enforced** (all steps may run in parallel) |
+| G30 | done: `assignmentStrategy` `leastLoaded` (fewest open tasks) or `roundRobin` (longest since this step last gave that person a task); candidates are the listed actors plus registered members of the offered groups, minus excluded owners; no candidates leaves the task in the queue. Stateless indexed queries, so no memory state and no cross-replica counter (two tasks created at the same instant may pick the same person) |
+| G31 | done: `swimlane` + `autoClaim` |
+| G32 | done: an event-based gateway with `instantiate` starts the process when any of the events after it arrives (**signal or message**; timers are not supported there: use a start timer), one instance per event; the validator treats such a gateway as a start |
+| G33 | done: `result: "cancel"` end inside a transaction sub-process compensates what completed, aborts the scope, and the parent sees `TRANSACTION_CANCELLED`, catchable by an error boundary on the sub-process |
+| G34 | done: `multiInstance: { over, as, parallel, collectInto, itemResult, completionCondition }` on user task, script, HTTP, work item, rule, send, manual and sub-process nodes; each item runs the single activity as a nested instance (it sees every process variable plus the item); early completion works as for for-each |
+| G35 | done: complex gateway `activationCondition` (sees `arrived`, `total`, variables); fires once per round, later arrivals of the round are absorbed |

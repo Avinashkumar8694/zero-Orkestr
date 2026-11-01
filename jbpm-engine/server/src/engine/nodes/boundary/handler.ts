@@ -17,7 +17,7 @@ import type { EngineNode } from '../../../sdk/index.ts';
 
 export const ENGINE_ERRORS = [
   'SCRIPT_ERROR', 'SERVICE_ERROR', 'RULE_ERROR', 'RUNTIME_ERROR',
-  'CALL_ERROR', 'CALL_ABORTED', 'SUBPROCESS_ERROR', 'SUBPROCESS_ABORTED', 'MULTIINSTANCE_ERROR',
+  'CALL_ERROR', 'CALL_ABORTED', 'SUBPROCESS_ERROR', 'SUBPROCESS_ABORTED', 'MULTIINSTANCE_ERROR', 'TRANSACTION_CANCELLED',
 ] as const;
 
 /** on: string | string[]; '*' = all nodes (process-global). Normalize to a list. (boundary only — an

@@ -13,6 +13,9 @@ export const def: NodeDef = {
     { key: 'groups', label: 'Groups (several)', widget: 'stringlist', help: 'Members of any listed group may claim the task (in addition to the single group above).' },
     { key: 'businessAdminGroups', label: 'Business administrator groups', widget: 'stringlist', help: 'Members may reassign and manage the task.' },
     { key: 'stakeholders', label: 'Stakeholders', widget: 'stringlist', help: 'People who follow the task; they get no right to claim or complete it.' },
+    { key: 'assignmentStrategy', label: 'Assignment strategy', widget: 'select', options: ['none', 'leastLoaded', 'roundRobin'], help: 'Pick an owner among the actors and group members instead of leaving the task in the queue: the person with the fewest open tasks, or whoever got a task from this step longest ago.' },
+    { key: 'swimlane', label: 'Swimlane', widget: 'text', placeholder: 'underwriting', help: 'A name shared by the tasks of one role in this process.' },
+    { key: 'autoClaim', label: 'Auto-claim in swimlane', widget: 'bool', help: 'Give the task to whoever completed the previous task of the same swimlane.' },
   ] }, { title: 'Form & behavior', fields: [
     { key: 'form', label: 'Form name', widget: 'assetRef', assetKind: 'forms' },
     { key: 'priority', label: 'Priority', widget: 'number' },

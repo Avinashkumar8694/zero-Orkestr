@@ -5,6 +5,8 @@
 import type { NodeHandler } from '../types.ts';
 export const handler: NodeHandler = async (c) => {
   if (c.node.result === 'terminate') return { end: 'terminate' };
+  // cancel end of a transaction: compensate what already completed in this scope, then abort the scope (the parent sees TRANSACTION_CANCELLED)
+  if (c.node.result === 'cancel') return { vars: await c.compensate(), abort: true, cancelled: true, outcome: 'cancelled' } as any;
   // Presence check, not truthiness: the properties panel writes `throw: { error: '' }` the instant
   // "error" is picked from the dropdown, before a code is typed in — a truthy check here would treat
   // that as "no error configured" and silently fall through to a normal completion instead (the exact

@@ -82,3 +82,19 @@ A recurring timer is one durable row; after downtime it fires once and reschedul
 | user task `suspendUntil` | the task is created suspended and becomes available at that time (duration, date or `#{var}`) |
 
 Conditional **start** events are not supported (see plan §11, G23).
+
+## Sub-processes and structure
+| Property | Does |
+|---|---|
+| sub-process `on: { signal | message | escalation | timer | condition }` | An **event sub-process**: an unconnected sub-process that starts when its trigger fires during the instance's life. `interrupting` (default true) stops the rest of the process; `false` runs beside it. Its body shares the process variables. |
+| sub-process `adHoc`, `completionCondition` | Ad-hoc scope: `autoStart` steps begin, others start on demand; ends when the condition (over `completed`, `active`, variables) is true, or when nothing is left running. |
+| sub-process `transaction` + end `result: "cancel"` | Cancel: compensate, abort the scope, raise `TRANSACTION_CANCELLED` in the parent. |
+| any activity `multiInstance` | `{ over, as, parallel, collectInto, itemResult, completionCondition }`: run once per item. Valid on userTask, script, http, workItem, rule, send, manual, subprocess. |
+| gateway (event) `instantiate` | The process starts when any event after the gateway arrives (signal / message). |
+| gateway (complex) `activationCondition` | Join fires when the condition holds (`arrived`, `total`, variables); once per round. |
+
+## User task (assignment)
+| Property | Does |
+|---|---|
+| `assignmentStrategy` | `leastLoaded` (fewest open tasks) or `roundRobin` (longest since this step gave that person a task) among actors and group members; none = queue. |
+| `swimlane`, `autoClaim` | With `autoClaim`, the task goes to whoever completed the previous task of the same swimlane in the instance (unless excluded). |

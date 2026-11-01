@@ -112,11 +112,13 @@ export type TokenState = 'active' | 'waiting';
 // tracks one). No `ref` — siblings are found by querying for Instance.parentTokenId === this token's
 // id (see execution-engine.ts's tryResumeParent/tryFailParent), so nothing about which children are
 // still outstanding needs to be stored on the token itself.
-export interface WaitSpec { kind: 'timer' | 'task' | 'message' | 'signal' | 'condition' | 'child' | 'multiInstance' | 'async'; ref?: string; dueAt?: string; }
+export interface WaitSpec { kind: 'timer' | 'task' | 'message' | 'signal' | 'condition' | 'child' | 'multiInstance' | 'async' | 'adhoc'; ref?: string; dueAt?: string; }
 export interface Token {
   id: string; nodeId: string; state: TokenState; scopeId?: string; waitFor?: WaitSpec; enteredAt: string;
   /** set when an async job released this token: the node now runs for real (it is not parked a second time) */
   asyncReady?: boolean;
+  /** an event sub-process waiting for its trigger: it lives as long as the instance, but never keeps the instance alive by itself */
+  listener?: boolean;
   /** the node's SLA clock, started when the node was triggered (it survives an async hop) */
   sla?: NodeSla;
 }
@@ -134,6 +136,10 @@ export interface Instance extends Entity {
   /** per-node count of visits dropped from `history` when it outgrew the cap (see engine/history-cap.ts); keeps join counting and the diagram right */
   historyCompacted?: Record<string, number>;
   /** readable title rendered once at start from the process's `description` template (`#{var}` filled from the start variables) */
+  /** a transaction sub-process ended through a cancel end event (compensation ran); the parent sees TRANSACTION_CANCELLED */
+  cancelled?: boolean;
+  /** complex gateway joins: tokens arrived in the current round and whether the activation condition already fired */
+  joinState?: Record<string, { count: number; fired: boolean }>;
   description?: string;
   /** process-level SLA (the process's `slaDueDate`): pending -> met when it completes in time, violated when the job fires first */
   sla?: NodeSla;
@@ -169,6 +175,8 @@ export interface Task extends Entity {
   /** groups whose members may reassign and manage the task; people who merely follow it (no right to claim or complete) */
   businessAdminGroups?: string[]; stakeholders?: string[];
   locale?: string; createdBy?: string;
+  /** swimlane name (jBPM): the task goes to whoever completed the previous task of the same lane, when `autoClaim` is on */
+  swimlane?: string;
   /** users who may NOT claim/complete this task even if they're in `group` (segregation of duties,
    *  e.g. the claim's own submitter can't also approve it) — not enforced against `businessAdmin`. */
   excludedOwners?: string[];

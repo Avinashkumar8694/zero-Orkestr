@@ -38,14 +38,14 @@ export function collectCompleted(children: Instance[], n: any): Record<string, u
 
 export const handler: NodeHandler = async (c) => {
   const n = c.node;
-  if (!c.resolveCalled || !n.process) return {};
-  const resolved = await c.resolveCalled(n.process);
+  if (!n.miInline && (!c.resolveCalled || !n.process)) return {};
+  const resolved = n.miInline ? { dep: c.dep, processId: n.process as string } : await c.resolveCalled!(n.process);
   if (!resolved) return { outcome: 'mi-process-not-deployed' };
   const items = Array.isArray(c.inst.variables[n.over]) ? (c.inst.variables[n.over] as any[]) : [];
   if (!items.length) return { vars: n.collectInto ? { [n.collectInto]: [] } : {}, outcome: 'multiInstance:0' };
   const parentToken = c.inst.tokens.find((t) => t.nodeId === n.id)!;
   const runOne = (item: unknown) => {
-    const childVars: Record<string, unknown> = {};
+    const childVars: Record<string, unknown> = n.miInline ? { ...c.inst.variables } : {};   // an inline activity sees every process variable
     for (const v of (n.pass || [])) childVars[v] = c.inst.variables[v];
     if (n.as) childVars[n.as] = item;
     return c.startChild(resolved.dep, resolved.processId, childVars, parentToken.id);

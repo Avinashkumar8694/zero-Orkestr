@@ -3,6 +3,7 @@ import type { NodeHandler } from '../types.ts';
 import { Collections, type Task, type TaskComment, type TimerJob } from '../../../domain.ts';
 import { computeDue, parseDelay, dueFrom } from '../../duration.ts';
 import { DEADLINE_TYPES, parseDeadlines } from '../../deadlines.ts';
+import { findRows } from '../../../store/find.ts';
 import { SettingsService } from '../../../modules/settings/service.ts';
 
 // taskVar ← $processVar (or a literal) — same "$name reads a process variable" convention as
@@ -20,6 +21,29 @@ const resolveText = (v: unknown, vars: Record<string, unknown>): string => {
   if (s.startsWith('$') && !s.startsWith('${')) return String(vars[s.slice(1)] ?? '');
   return s.replace(/\$\{([^}]+)\}/g, (_, name) => String(vars[name.trim()] ?? ''));
 };
+
+/** Candidates: the listed actors plus registered members of the offered groups (minus excluded owners). Both strategies are stateless queries on indexed
+ *  fields — nothing is held in memory or counted in a shared variable — so they behave the same with several replicas (two tasks created at the very same
+ *  moment may pick the same person; that is the price of not locking, and the next task balances it). */
+async function pickOwner(c: any, n: any, task: Task): Promise<string | undefined> {
+  const store = c.app.store, tenant = c.app.tenantId;
+  const candidates = new Set<string>(list(n.actors));
+  for (const g of new Set([task.group, ...list(n.groups)].filter((x): x is string => !!x))) {
+    for (const u of await findRows<{ id: string; username: string; active?: boolean }>(store, Collections.users, tenant, { contains: { path: 'groups', value: [g] } })) if (u.active !== false) candidates.add(u.username);
+  }
+  for (const x of task.excludedOwners ?? []) candidates.delete(x);
+  const people = [...candidates].sort();
+  if (!people.length) return undefined;
+  const score = async (u: string): Promise<string> => {
+    if (n.assignmentStrategy === 'leastLoaded') return String((await findRows(store, Collections.tasks, tenant, { eq: { assignee: u, status: ['created', 'reserved', 'inprogress'] } })).length).padStart(8, '0');
+    // roundRobin: whoever was given a task from THIS node longest ago (never = first)
+    const mine = await findRows<Task>(store, Collections.tasks, tenant, { eq: { assignee: u, nodeId: n.id } });
+    return mine.reduce((m, t) => (t.createdAt > m ? t.createdAt : m), '');
+  };
+  const scored = await Promise.all(people.map(async (u) => [u, await score(u)] as const));
+  scored.sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : a[0].localeCompare(b[0])));
+  return scored[0]![0];
+}
 
 export const handler: NodeHandler = async (c) => {
   const n = c.node;
@@ -44,6 +68,20 @@ export const handler: NodeHandler = async (c) => {
     status: 'created', inputs: { ...mapTaskInputs(n, c.inst.variables), ...(n.content ? { Content: resolveText(n.content, c.inst.variables) } : {}) }, createdAt: now,
     ...(dueAt ? { dueAt } : {}),
   };
+  // Swimlane auto-claim (jBPM): the task goes to whoever completed the previous task of the same lane in this instance
+  if (n.swimlane) {
+    task.swimlane = String(n.swimlane);
+    if (n.autoClaim === true) {
+      const done = (await findRows<Task>(c.app.store, Collections.tasks, c.app.tenantId, { eq: { instanceId: c.inst.id, swimlane: task.swimlane, status: 'completed' } }))
+        .filter((t) => t.completedBy).sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0];
+      if (done?.completedBy && !task.excludedOwners?.includes(done.completedBy)) { task.assignee = done.completedBy; task.status = 'reserved'; task.claimedAt = now; }
+    }
+  }
+  // Assignment strategy: pick an owner among the offered actors / group members instead of leaving the task in the queue
+  if (!task.assignee && (n.assignmentStrategy === 'leastLoaded' || n.assignmentStrategy === 'roundRobin')) {
+    const chosen = await pickOwner(c, n, task);
+    if (chosen) { task.assignee = chosen; task.status = 'reserved'; task.claimedAt = now; }
+  }
   // "suspend until": the task exists but is hidden from claiming until the time (a durable job makes it available)
   const resumeAt = typeof n.suspendUntil === 'string' && n.suspendUntil.trim() ? dueFrom(n.suspendUntil, now, c.inst.variables) : null;
   if (resumeAt && resumeAt > now) task.status = 'suspended';

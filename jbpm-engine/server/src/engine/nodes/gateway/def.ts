@@ -13,6 +13,8 @@ export const def: NodeDef = {
     { key: 'mode', label: 'Mode', widget: 'select', options: ['exclusive', 'parallel', 'inclusive', 'event', 'complex'] },
     { key: 'direction', label: 'Direction', widget: 'select', options: ['Diverging', 'Converging'] },
     { key: 'default', label: 'Default flow id', widget: 'text', help: 'Taken when no condition matches (exclusive/inclusive)' },
+    { key: 'activationCondition', label: 'Activation condition (complex)', widget: 'textarea', placeholder: 'arrived >= 2', help: 'Complex join: continue as soon as this is true; sees arrived (tokens so far this round), total (incoming flows) and the process variables.' },
+    { key: 'instantiate', label: 'Instantiate (event-based)', widget: 'bool', help: 'The process starts when any of the events after this gateway arrives (signal or message).' },
   ] }],
   diagram: { icon: 'branch', color: '#f59e0b', shape: 'diamond' },
   typeLabel: 'Gateway',

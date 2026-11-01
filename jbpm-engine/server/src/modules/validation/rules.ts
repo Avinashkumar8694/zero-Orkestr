@@ -61,7 +61,7 @@ export interface GraphCtx {
   boundaryByHost: Map<string, EngineNode[]>;
 }
 
-const isStart = (n: EngineNode) => n.type === 'start';
+const isStart = (n: EngineNode) => n.type === 'start' || (n.type === 'gateway' && (n as any).mode === 'event' && (n as any).instantiate === true);   // an instantiating event gateway starts the process
 const isEnd = (n: EngineNode) => n.type === 'end';
 const isBoundary = (n: EngineNode) => n.type === 'boundary';
 // Presence check, not truthy: a catch-all event sub-process is declared with `on: { error: '' }` (the
@@ -70,7 +70,7 @@ const isBoundary = (n: EngineNode) => n.type === 'boundary';
 // sub-process at all", wrongly subjecting it to the ordinary connectivity/reachability rules an event
 // sub-process is specifically exempt from (it has no incoming/outgoing flow by design; see boundary/
 // handler.ts's own isErrorCatch, which already gets this right via hasOwnProperty).
-const isEventSub = (n: EngineNode) => n.type === 'subprocess' && !!(n as any).on && Object.prototype.hasOwnProperty.call((n as any).on, 'error');
+const isEventSub = (n: EngineNode) => n.type === 'subprocess' && !!(n as any).on && typeof (n as any).on === 'object';   // an event sub-process: any trigger (error, signal, message, escalation, timer, condition)
 const isLink = (n: EngineNode) => (n.type === 'catch' || n.type === 'throw') && !!(n as any).event?.link;
 const isAdHoc = (c: GraphCtx) => (c.process as any).adHoc === true;
 const label = (n: EngineNode) => n.name || n.id || n.type;
@@ -123,6 +123,22 @@ const P = (rule: string, severity: Severity, message: string, extra: Partial<Pro
 const deg = (ctx: GraphCtx, id: string) => ({ in: (ctx.incoming.get(id) || []).length, out: (ctx.outgoing.get(id) || []).length });
 
 export const RULES: Rule[] = [
+  { id: 'multi-instance', description: 'Multi-instance activities need a collection; ad-hoc / event sub-processes need valid settings', run: (c) => {
+    const out: Problem[] = [];
+    const MI_TYPES = new Set(['userTask', 'script', 'http', 'workItem', 'rule', 'send', 'manual', 'subprocess']);
+    for (const n of c.nodes) {
+      const a = n as any;
+      if (a.multiInstance !== undefined) {
+        if (!MI_TYPES.has(n.type)) out.push(P('multi-instance', 'error', `"${label(n)}" (${n.type}) cannot run once per item (use a for-each or call activity)`, { nodeId: n.id }));
+        else if (!a.multiInstance || typeof a.multiInstance.over !== 'string' || !a.multiInstance.over.trim()) out.push(P('multi-instance', 'error', `"${label(n)}": multi-instance needs "over", the name of the list variable`, { nodeId: n.id }));
+      }
+      if (n.type === 'subprocess' && a.on && typeof a.on === 'object' && !('error' in a.on) && !(a.on.signal || a.on.message || a.on.escalation || a.on.timer || a.on.condition))
+        out.push(P('multi-instance', 'error', `Event sub-process "${label(n)}" has no trigger (signal, message, escalation, timer or condition)`, { nodeId: n.id }));
+      if (n.type === 'subprocess' && a.adHoc === true && a.on) out.push(P('multi-instance', 'error', `"${label(n)}" cannot be both ad-hoc and an event sub-process`, { nodeId: n.id }));
+      if (n.type === 'gateway' && a.mode === 'complex' && a.activationCondition !== undefined && (typeof a.activationCondition !== 'string' || !a.activationCondition.trim())) out.push(P('multi-instance', 'error', `Complex gateway "${label(n)}": the activation condition is empty`, { nodeId: n.id }));
+    }
+    return out;
+  } },
   { id: 'link-events', description: 'Every link throw needs exactly one catch with the same name in the same process', run: (c) => {
     const out: Problem[] = [];
     const catches = new Map<string, EngineNode[]>();

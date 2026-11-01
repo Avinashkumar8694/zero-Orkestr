@@ -28,6 +28,18 @@ export const handler: NodeHandler = async (c): Promise<HandlerResult> => {
   const varTypes = varTypesOf(c);
   const condCtx = { ...kcontextInfoOf(c), ...(await scriptLimitsOf(c)), onAction: onActionOf(c) };
 
+  if (converging && node.mode === 'complex' && typeof node.activationCondition === 'string' && node.activationCondition.trim()) {
+    // jBPM complex gateway: the join fires as soon as the activation condition holds for the tokens that have arrived (e.g. `arrived >= 2`),
+    // once per round; later arrivals of the same round are absorbed. `total` is the number of incoming flows.
+    const st = ((c.inst.joinState ??= {})[node.id] ??= { count: 0, fired: false });
+    st.count++;
+    let fire = false;
+    if (!st.fired) fire = await evalCondition(node.activationCondition, 'js', { ...c.inst.variables, arrived: st.count, total: ins.length });
+    if (fire) st.fired = true;
+    if (st.count >= ins.length) { st.count = 0; st.fired = false; }       // the round is over
+    if (!fire) return { consume: true, outcome: `complex ${st.count || ins.length}/${ins.length}` };
+    return { next: outs.map((f) => f.to), outcome: 'complex-fired' };
+  }
   if (converging && (node.mode === 'parallel' || node.mode === 'inclusive')) {
     // join: wait until a token has arrived via each incoming flow (supports cyclic looping paths via modulo)
     const arrived = visitCount(c.inst, node.id);

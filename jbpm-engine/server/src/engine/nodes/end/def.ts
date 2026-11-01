@@ -8,7 +8,7 @@ export const def: NodeDef = {
   ],
   ports: { maxOut: 0 },   // end: no outgoing; multiple paths may converge into an end (unlimited in)
   schema: [GENERAL, { title: 'End behavior', fields: [
-    { key: 'result', label: 'Result', widget: 'select', options: ['(normal)', 'terminate'], help: 'terminate cancels all other tokens and ends the whole instance' },
+    { key: 'result', label: 'Result', widget: 'select', options: ['(normal)', 'terminate', 'cancel'], help: 'terminate cancels all other tokens and ends the whole instance · cancel (inside a transaction sub-process) compensates what completed, aborts the scope and raises TRANSACTION_CANCELLED in the parent, where an error boundary can catch it' },
     { key: 'throw', label: 'Throw event', widget: 'event', options: ['none', 'signal', 'error', 'escalation', 'message'] },
     { key: 'throw.rethrow', label: 'Rethrow to Global Error Handler', widget: 'bool', help: 'If true, bubbles the error end event up to the project global error handler.' },
     { key: 'throw.correlationKey', label: 'Correlate to', widget: 'varRef', varSource: 'ownRef', placeholder: '$claimId', help: 'Deliver only to the waiting instance whose own correlationKey matches this variable’s value; blank = deliver to every instance waiting on this name' },
