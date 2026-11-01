@@ -33,7 +33,7 @@ flowchart LR
 ```
 
 ### Stress Test Benchmarks:
-- **Test File**: [`comprehensive-nodes-and-assets-stress.test.ts`](file:///Users/avinashgupta/Documents/Prudentials/pru-neu-integration-layer/docs/prudential-claims-bpm/jbpm-engine/server/test/comprehensive-nodes-and-assets-stress.test.ts)
+- **Test File**: [`comprehensive-nodes-and-assets-stress.test.ts`](../../server/test/comprehensive-nodes-and-assets-stress.test.ts)
 - **Concurrent Invocations**: 100 simultaneous complex parallel workflow instances (`Promise.all`).
 - **Total Execution Time**: **~450ms** across all 100 multi-branch processes (~222 instances/sec).
 - **Correctness**: 100% mathematical consistency across all instances (zero variable corruption, zero race conditions, zero orphaned tokens).

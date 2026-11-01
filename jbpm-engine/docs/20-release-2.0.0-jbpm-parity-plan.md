@@ -464,3 +464,18 @@ Checked in the running app: Process Variables dialog shows the properties block 
 | LIVE-5 | replica killed (SIGKILL) holding a lease: others refused, take over after the lease expires |
 
 The same tests with Redis switched off fail (LIVE-2, LIVE-3), so they do detect a missing lock. This closes the "Postgres SQL and Redis lease only unit-tested" limit of §9.6. The `test/pg/*` files share one database and are run one after another by the script; running them in parallel against the same database can make one fail.
+
+## 16. Release checks (run)
+| Check | Result |
+|---|---|
+| Server suite | 612 pass / 0 fail |
+| SDK suite | 201 pass (its `npm test` script fixed for current Node) |
+| Live multi-replica (Postgres + Redis, separate processes) | 43 pass (§15) |
+| Fresh install (empty data directory) | boots, seeds admin, plans, 12 analytics APIs, login works |
+| Upgrade (existing 1.x data directory, new code) | boots with no errors; analytics seed is versioned and does not override existing rows |
+| UI in the browser | node panel multi-instance fields, process properties, variable tags: written to the keys the engine reads; clearing a field removes it, and an emptied `multiInstance` object is dropped; unnamed variable rows are no longer saved (bug found and fixed) |
+| Load smoke (`test/load/load.ts`, in-process HTTP, in-memory store) | 1000 starts with a script at 40 concurrent: ~780/s, p95 131 ms; 500 signals resumed ~1070/s; 0 errors; +117 MB RSS. Not a Postgres or multi-pod figure |
+| Docs link check | 4 dead absolute links from another machine fixed |
+| Finding | the running dev server was started before the node-definition changes and did not reload them; restart after upgrading |
+| Finding | process starts were limited to a hard-coded 120 per minute per caller; now `RATE_START_PER_MIN` (default unchanged) |
+

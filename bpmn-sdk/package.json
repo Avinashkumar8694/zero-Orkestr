@@ -48,7 +48,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test test/",
+    "test": "npm run build && node --test test/*.mjs",
     "example": "npm run build && node examples/jbpm-project/01-basic-jbpm-project.mjs",
     "prepublishOnly": "npm run build"
   },

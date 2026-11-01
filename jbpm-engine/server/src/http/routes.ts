@@ -111,9 +111,10 @@ const taskSvc = (req: Request, e?: (ev: any) => void) => {
 // per-user (post-auth) limits on the routes most likely to be hammered by a runaway script or abused
 // for DoS — starting instances (cheapest to spam, so the tightest per-second ceiling), and the
 // heavier deploy/import operations (already permission-gated, but still worth bounding).
-const startLimiter = rateLimit({ windowMs: 60_000, max: 120 });
-const deployLimiter = rateLimit({ windowMs: 60_000, max: 20 });
-const importLimiter = rateLimit({ windowMs: 60_000, max: 20 });
+const perMin = (name: string, dflt: number) => { const n = Number(process.env[name]); return Number.isFinite(n) && n > 0 ? n : dflt; };
+const startLimiter = rateLimit({ windowMs: 60_000, max: perMin('RATE_START_PER_MIN', 120) });      // per caller; raise for integration clients that start many processes
+const deployLimiter = rateLimit({ windowMs: 60_000, max: perMin('RATE_DEPLOY_PER_MIN', 20) });
+const importLimiter = rateLimit({ windowMs: 60_000, max: perMin('RATE_IMPORT_PER_MIN', 20) });
 
 export function buildRoutes(): Router {
   const r = Router();

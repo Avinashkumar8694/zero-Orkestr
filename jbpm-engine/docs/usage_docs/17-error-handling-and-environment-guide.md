@@ -422,7 +422,7 @@ const url = isAbsolute ? n.url : `${baseUrl}${n.url}`;
 
 ## 10. Automated Edge Case Test Suite Matrix (16 Verified Scenarios)
 
-Every edge case across local boundaries, event subprocesses, Call Activities, soft-failures, sequential retries, and project-level environment inheritance is continuously tested and verified in [`hierarchical-error-handling.test.ts`](file:///Users/avinashgupta/Documents/Prudentials/pru-neu-integration-layer/docs/prudential-claims-bpm/jbpm-engine/server/test/hierarchical-error-handling.test.ts):
+Every edge case across local boundaries, event subprocesses, Call Activities, soft-failures, sequential retries, and project-level environment inheritance is continuously tested and verified in [`hierarchical-error-handling.test.ts`](../../server/test/hierarchical-error-handling.test.ts):
 
 | # | Edge Case Scenario | Automated Test Name | Verified Behavior | Status |
 | :--- | :--- | :--- | :--- | :--- |
@@ -488,11 +488,11 @@ sequenceDiagram
 
 ## 11. Authentic Prudential `policy_system` Imported Workflow Verification
 
-To prove 100% production fidelity, the engine was validated against the actual imported jBPM project from Prudential: [`policy_system_node_project.json`](file:///Users/avinashgupta/Documents/Prudentials/pru-neu-integration-layer/docs/prudential-claims-bpm/policy_system_node_project.json).
+To prove 100% production fidelity, the engine was validated against the actual imported jBPM project from Prudential: `policy_system_node_project.json` (kept outside this repository).
 
 In the original Red Hat PAM / jBPM environment, **configuring a global error handler completely broke local boundary error events** because the engine's global interceptor swallowed work item failures at the session level before the node's local boundary event could be triggered. In our enhanced engine, **both local and global error handlers work together seamlessly**, with local boundaries taking precedence.
 
-The automated verification suite in [`policy-system-imported-error-handling.test.ts`](file:///Users/avinashgupta/Documents/Prudentials/pru-neu-integration-layer/docs/prudential-claims-bpm/jbpm-engine/server/test/policy-system-imported-error-handling.test.ts) tests the three key production scenarios:
+The automated verification suite in [`policy-system-imported-error-handling.test.ts`](../../server/test/policy-system-imported-error-handling.test.ts) tests the three key production scenarios:
 
 ```mermaid
 flowchart TD
