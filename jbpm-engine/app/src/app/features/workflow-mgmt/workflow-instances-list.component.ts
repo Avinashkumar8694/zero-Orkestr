@@ -86,7 +86,7 @@ import type { WorkflowInstance } from '../../core/models';
     }
   `,
   styles: [`
-    .page { padding: 20px 24px; max-width: 1080px; }
+    .page { padding: 12px 14px; max-width: 1080px; }
     .crumbwrap { margin-bottom: 10px; }
     .pagehead { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
     .pagehead h1 { font-size: 19px; margin: 0; }

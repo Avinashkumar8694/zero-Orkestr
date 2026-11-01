@@ -353,7 +353,7 @@ type Tab = 'overview' | 'diagram' | 'processes' | 'history';
     </div>
   `,
   styles: [`
-    .page { padding: 8px 22px 28px; }
+    .page { padding: 6px 14px 20px; }
     .crumbwrap { margin-bottom: 8px; }
     .head { display: flex; align-items: center; gap: 14px; padding: 16px 20px; margin-bottom: 16px; flex-wrap: wrap; }
     .back { width: 38px; height: 38px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); color: var(--muted); }

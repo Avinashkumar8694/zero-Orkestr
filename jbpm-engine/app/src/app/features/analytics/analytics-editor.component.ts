@@ -172,7 +172,7 @@ const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').repla
     </div>
   `,
   styles: [`
-    .page { padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; } .err { color: var(--red); font-size: 13px; } .warn { color: var(--red); }
+    .page { padding: 12px 14px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; } .err { color: var(--red); font-size: 13px; } .warn { color: var(--red); }
     .cols { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; } .left, .right { display: grid; gap: 14px; }
     .card { padding: 16px 18px; display: grid; gap: 10px; } h3 { margin: 0; font-size: 15px; } h4 { margin: 6px 0 0; font-size: 13px; }
     .sticky { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }

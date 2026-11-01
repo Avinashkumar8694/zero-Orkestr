@@ -573,7 +573,7 @@ function downloadFile(content: string, filename: string, mimeType: string) {
   `,
   styles: [`
     :host { display: block; }
-    .page { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .page { padding: 12px 14px; max-width: 1400px; margin: 0 auto; }
     .pagehead { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
     h1 { font-size: 22px; margin: 4px 0 6px; font-weight: 700; }
     .head-sub { margin: 0; font-size: 13.5px; max-width: 680px; }

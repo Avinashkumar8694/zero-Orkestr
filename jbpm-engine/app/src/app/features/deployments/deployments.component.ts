@@ -141,7 +141,7 @@ import type { Deployment, Workflow } from '../../core/models';
     </div>
   `,
   styles: [`
-    .page { padding: 8px 22px 28px; }
+    .page { padding: 6px 14px 20px; }
     .crumbwrap { margin-bottom: 8px; }
     .pagehead { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
     .sub { margin-top: 4px; }

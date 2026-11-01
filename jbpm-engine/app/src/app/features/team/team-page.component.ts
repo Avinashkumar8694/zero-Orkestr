@@ -92,7 +92,7 @@ import { ToastService } from '../../shared/toast.service';
   `,
   styles: [`
     .crumbwrap { margin-bottom: 10px; }
-    .page { padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 1000px; }
+    .page { padding: 12px 14px; display: flex; flex-direction: column; gap: 16px; max-width: 1000px; }
     .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     h1 { margin: 0 0 4px; font-size: var(--text-xl); } h3 { margin: 0 0 10px; }
     .card { padding: 16px; border-radius: var(--radius-shell); }

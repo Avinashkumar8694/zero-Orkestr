@@ -116,7 +116,7 @@ const LIMIT_LABELS: Array<[string, string]> = [
     .opt ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; } .opt li { display: flex; justify-content: space-between; gap: 8px; } .opt li span { color: var(--muted); } .opt li.f { color: var(--text-secondary); justify-content: flex-start; }
     .act { margin-top: auto; padding-top: 6px; }
     .crumbwrap { margin-bottom: 10px; }
-    .page { padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
+    .page { padding: 12px 14px; display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
     h1 { margin: 0 0 4px; font-size: var(--text-xl); } h3 { margin: 0 0 12px; font-size: 15px; }
     .card { padding: 16px 18px; border-radius: var(--radius-shell); }
     .row { display: grid; grid-template-columns: 190px 1fr 130px; gap: 12px; align-items: center; padding: 6px 0; }

@@ -114,7 +114,7 @@ const TABS: { key: Tab; label: string }[] = [
     </div>
   `,
   styles: [`
-    .page { padding: 20px 24px; max-width: 900px; }
+    .page { padding: 12px 14px; max-width: 900px; }
     .crumbwrap { margin-bottom: 10px; }
     .pagehead { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 4px; }
     .pagehead h1 { font-size: 19px; margin: 0; display: flex; align-items: center; gap: 8px; }

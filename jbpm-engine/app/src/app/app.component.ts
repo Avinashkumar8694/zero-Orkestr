@@ -39,7 +39,7 @@ const isStandalone = (url: string) => { const u = url.split('?')[0].split('#')[0
     :host { display: flex; flex-direction: column; height: 100vh; padding: 0; }
     /* Full-bleed workspace: sidebar and content meet the window edges, separated by hairlines rather than a floating rounded card. */
     /* Floating cards on a lavender canvas: sidebar card on the left, header + content on the right. */
-    .layout { flex: 1; display: flex; gap: 18px; padding: 18px; min-height: 0; background: transparent; }
+    .layout { flex: 1; display: flex; gap: 8px; padding: 8px; min-height: 0; background: transparent; }
     .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: transparent; position: relative; }
     .page-content { flex: 1; min-height: 0; overflow: auto; position: relative; border-radius: var(--radius-shell); }
     @media (max-width: 900px) { .layout { padding: 0; gap: 0; } .page-content { border-radius: 0; } }

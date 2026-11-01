@@ -94,7 +94,7 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
     </div>
   `,
   styles: [`
-    .page { padding: 20px 28px; } .card { background: var(--surface); border-radius: 12px; padding: 18px 20px; margin: 14px 0; }
+    .page { padding: 12px 14px; } .card { background: var(--surface); border-radius: 12px; padding: 18px 20px; margin: 14px 0; }
     .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 8px 0; border-top: 1px solid var(--border); }
     .shint { display: block; font-size: 12px; color: var(--muted); font-weight: 400; } .actions { margin-top: 12px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; } th, td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--border); }

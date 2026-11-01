@@ -1224,7 +1224,7 @@ const TASK_STATUSES = [
     </div>
   `,
   styles: [`
-    .page { padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; margin: 0 auto; }
+    .page { padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; margin: 0 auto; }
     .head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
     h1 { font-size: var(--text-xl); letter-spacing: -.03em; font-weight: 650; margin: 0 0 4px; }
     .sub { margin: 0; color: var(--text-secondary); font-size: 13.5px; }

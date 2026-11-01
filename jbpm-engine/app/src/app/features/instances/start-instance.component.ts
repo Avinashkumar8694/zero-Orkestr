@@ -77,7 +77,7 @@ interface VarRow { name: string; value: string; }
     </div>
   `,
   styles: [`
-    .page { padding: 20px 24px; }
+    .page { padding: 12px 14px; }
     .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
     .crumbwrap { margin-left: 2px; }
     .wrap { max-width: 640px; }

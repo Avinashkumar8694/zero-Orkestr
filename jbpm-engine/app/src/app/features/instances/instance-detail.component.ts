@@ -563,7 +563,7 @@ interface DocRow { variable: string; filename: string; url?: string; mimeType?: 
        broken/cramped. :host needs an explicit block+height since the router-outlet host (app.component's
        .main, flex:1) only sizes ITS direct child, and a component host tag is inline by default. */
     :host { display: block; height: 100%; }
-    .page { padding: 20px 24px; height: 100%; box-sizing: border-box; }
+    .page { padding: 12px 14px; height: 100%; box-sizing: border-box; }
     .page.diagram-tab { display: flex; flex-direction: column; min-height: 0; }
     .page.diagram-tab .tabgrid.full { flex: 1; min-height: 0; align-items: stretch; }
     .page.diagram-tab .tabgrid.full .maincol { display: flex; flex-direction: column; min-height: 0; }

@@ -194,7 +194,7 @@ const DEFAULT_TASK_COLUMNS: TaskColumnDef[] = [
   `,
   styles: [`
     .ilink, .tlink { color: var(--primary); font-weight: 600; text-decoration: none; } .ilink:hover, .tlink:hover { text-decoration: underline; }
-    .page { padding: 20px 24px; }
+    .page { padding: 12px 14px; }
     .crumbwrap { margin-bottom: 10px; }
     .pagehead { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
     h1 { font-size: 19px; margin: 0; }

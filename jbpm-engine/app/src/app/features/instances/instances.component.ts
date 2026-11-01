@@ -314,7 +314,7 @@ const DEFAULT_COLUMNS: TableColumnDef[] = [
     </div>
   `,
   styles: [`
-    .page { padding: 20px 24px; }
+    .page { padding: 12px 14px; }
     .crumbwrap { margin-bottom: 10px; }
     .pagehead { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 4px; }
     h1 { font-size: 19px; margin: 0; }

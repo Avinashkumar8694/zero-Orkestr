@@ -243,7 +243,7 @@ const TABS: { key: Tab; label: string }[] = [
     }
   `,
   styles: [`
-    .page { padding: 20px 24px; }
+    .page { padding: 12px 14px; }
     .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
     .crumbwrap { margin-left: 4px; }
     h1 { font-size: 18px; margin: 0; }

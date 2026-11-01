@@ -1003,7 +1003,8 @@ export class ProcessCanvasComponent implements OnChanges {
   private buildProcess() {
     return {
       ...this.procExtra,
-      id: this.processId, name: this.processName(), package: 'com.acme', vars: this.procVars(),
+      id: this.processId, name: this.processName(), package: 'com.acme', vars: this.procVars().filter((v) => v.name?.trim()),   // an unnamed row is a half-typed variable, never saved
+     
       nodes: this.nodes().map((n) => ({ ...n })),
       flows: this.edges().map((e) => ({ id: e.id, from: e.from, to: e.to, ...(e.when ? { when: e.when, lang: 'js' } : {}), ...(e.label ? { label: e.label } : {}), ...(e.priority ? { priority: Number(e.priority) } : {}) })),
     };

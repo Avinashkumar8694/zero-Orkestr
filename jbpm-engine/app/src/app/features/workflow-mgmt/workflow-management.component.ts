@@ -216,7 +216,7 @@ interface ModalState {
   `,
   styles: [`
     :host { display: block; }
-    .page { padding: 20px 24px; max-width: 1160px; margin: 0 auto; }
+    .page { padding: 12px 14px; max-width: 1160px; margin: 0 auto; }
     .crumbwrap { margin-bottom: 10px; }
     .pagehead { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
     .pagehead h1 { font-size: 20px; margin: 0; font-weight: 700; }

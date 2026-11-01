@@ -247,7 +247,7 @@ type SettingsTab = 'account' | 'system';
     </div>
   `,
   styles: [`
-    .page { padding: 20px 24px; max-width: 760px; }
+    .page { padding: 12px 14px; max-width: 760px; }
     .crumbwrap { margin-bottom: 10px; }
     .pagehead { margin-bottom: 14px; }
     h1 { font-size: 19px; margin: 0; }

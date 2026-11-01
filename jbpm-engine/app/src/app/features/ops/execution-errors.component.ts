@@ -189,7 +189,7 @@ const TYPES = ['process', 'task', 'job', 'integration'] as const;
     </div>
   `,
   styles: [`
-    .page { padding: 24px; max-width: 1600px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .page { padding: 12px 14px; max-width: 1600px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .crumbwrap { margin-bottom: 2px; }
     .pagehead {
       display: flex;

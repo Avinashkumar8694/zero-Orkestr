@@ -48,7 +48,7 @@ import { AnalyticsBuilderApiService, type AnalyticsApiDef } from '../../core/api
     </div>
   `,
   styles: [`
-    .page { padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 1100px; }
+    .page { padding: 12px 14px; display: flex; flex-direction: column; gap: 16px; max-width: 1100px; }
     .head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; } h1 { margin: 0 0 4px; font-size: var(--text-xl); } .head p { margin: 0; max-width: 62ch; }
     .tbl { padding: 4px 8px; overflow-x: auto; } table { width: 100%; border-collapse: collapse; } th { text-align: left; font-size: 12px; color: var(--muted); padding: 10px 8px; } td { padding: 10px 8px; border-top: 1px solid var(--border); vertical-align: top; }
     .badge.pub { background: var(--green-bg); color: var(--green); } .small { font-size: 12px; } .acts { white-space: nowrap; text-align: right; }
