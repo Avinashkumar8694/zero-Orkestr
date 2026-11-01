@@ -1872,7 +1872,7 @@ function jsInstanceNodePreamble(code) {
   return out;
 }
 var JAVA_META_LOCALS = [
-  ["instanceId", "kcontext.getProcessInstance().getId()"],
+  ["instanceId", "String.valueOf(kcontext.getProcessInstance().getId())"],
   ["processId", "kcontext.getProcessInstance().getProcessId()"],
   ["processName", "kcontext.getProcessInstance().getProcessName()"],
   ["correlationKey", "kcontext.getProcessInstance().getCorrelationKey()"],

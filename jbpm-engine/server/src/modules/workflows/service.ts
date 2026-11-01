@@ -137,6 +137,17 @@ export class WorkflowService {
     for (const v of versions) {
       await this.ve().delete(v.id);
     }
+    // Everything that ran from it goes too: a purged project must not keep serving (its deployments answer starts and calls) or leave orphan runs behind.
+    const t = this.ctx.tenantId, st = this.ctx.store;
+    for (const d of await st.repo<any>(Collections.deployments).query((x) => x.tenantId === t && x.workflowId === id)) await st.repo<any>(Collections.deployments).delete(d.id);
+    const insts = await st.repo<any>(Collections.instances).query((x) => x.tenantId === t && x.workflowId === id);
+    const instIds = new Set(insts.map((i) => i.id));
+    const tasks = await st.repo<any>(Collections.tasks).query((x) => x.tenantId === t && instIds.has(x.instanceId));
+    const taskIds = new Set(tasks.map((x) => x.id));
+    for (const c of await st.repo<any>(Collections.comments).query((x) => x.tenantId === t && taskIds.has(x.taskId))) await st.repo<any>(Collections.comments).delete(c.id);
+    for (const x of tasks) await st.repo<any>(Collections.tasks).delete(x.id);
+    for (const x of await st.repo<any>(Collections.timers).query((y) => y.tenantId === t && instIds.has(y.instanceId))) await st.repo<any>(Collections.timers).delete(x.id);
+    for (const i of insts) await st.repo<any>(Collections.instances).delete(i.id);
     // Delete the workflow record itself
     await this.wf().delete(id);
     await this.ctx.audit({ actor, kind: 'workflow.purged', workflowId: id, data: { name: w.name, key: w.key } });

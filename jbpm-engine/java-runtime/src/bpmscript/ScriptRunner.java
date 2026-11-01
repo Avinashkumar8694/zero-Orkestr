@@ -196,6 +196,7 @@ public final class ScriptRunner {
                 String name = e.getKey();
                 if (!isBindableIdentifier(name)) continue;
                 if (!containsWord(scan, name)) continue;
+                if (declaresLocal(scan, name)) continue;          // the script declares its own local of that name (valid jBPM Java): do not add a clashing binding
                 String type = javaTypeFor(e.getValue());
                 bindings.append(type).append(' ').append(name)
                     .append(" = (").append(type).append(") kcontext.getVariable(\"")
@@ -208,9 +209,21 @@ public final class ScriptRunner {
             // precedence over this engine's synthetic convenience local.
             if (varTypes != null && varTypes.containsKey(name)) continue;
             if (!containsWord(scan, name)) continue;
+            if (declaresLocal(scan, name)) continue;
             bindings.append("String ").append(name).append(" = ").append(expr).append(";\n");
         }
         return bindings.toString() + code;
+    }
+
+    private static final java.util.Set<String> NOT_A_TYPE = new java.util.HashSet<String>(java.util.Arrays.asList(
+        "return", "new", "else", "case", "throw", "instanceof", "assert", "yield", "do", "in", "default", "goto"));
+    /** true when the (string/comment-blanked) script declares a local or parameter called `name`: `Type name =`, `Type name;`, `Type name,`, `for (Type name : xs)`, `catch (E name)`. */
+    private static boolean declaresLocal(String scan, String name) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+            .compile("(?<![\\w$.])([A-Za-z_][\\w$.]*(?:<[^>;()]*>)?(?:\\[\\])*)\\s+" + java.util.regex.Pattern.quote(name) + "\\s*(?==|;|,|\\)|:)")
+            .matcher(scan);
+        while (m.find()) if (!NOT_A_TYPE.contains(m.group(1))) return true;
+        return false;
     }
 
     /** Blanks out string/char literals and comments (replacing their contents with spaces, preserving
@@ -267,7 +280,7 @@ public final class ScriptRunner {
      *  targeting jBPM export is expected to use `kcontext.getProcessInstance().getState()`/
      *  `.getNodeInstances()` directly for those, not a Node-engine reinterpretation of them. */
     private static final String[][] META_LOCALS = {
-        { "instanceId", "kcontext.getProcessInstance().getId()" },
+        { "instanceId", "String.valueOf(kcontext.getProcessInstance().getId())" },
         { "processId", "kcontext.getProcessInstance().getProcessId()" },
         { "processName", "kcontext.getProcessInstance().getProcessName()" },
         { "correlationKey", "kcontext.getProcessInstance().getCorrelationKey()" },
@@ -306,10 +319,21 @@ public final class ScriptRunner {
      *  declared variable's value to its proper type on every read, not just for the bare-name
      *  binding preamble. See STRUCTURE_REF_TO_JAVA's javadoc for why that coercion is needed. */
     static String javaTypeFor(String declared) {
-        String mapped = declared == null ? null : STRUCTURE_REF_TO_JAVA.get(declared.trim());
+        String d = declared == null ? null : declared.trim();
+        String mapped = d == null ? null : STRUCTURE_REF_TO_JAVA.get(d);
+        // the engine's own type names (what an imported or authored process declares: string, int, bool, long, double, date, object, list, map)
+        if (mapped == null && d != null) mapped = ENGINE_TYPE_TO_JAVA.get(d.toLowerCase());
         return mapped != null ? mapped : "Object";
     }
 
+    static final Map<String, String> ENGINE_TYPE_TO_JAVA = new HashMap<String, String>();
+    static {
+        ENGINE_TYPE_TO_JAVA.put("string", "String"); ENGINE_TYPE_TO_JAVA.put("int", "Integer"); ENGINE_TYPE_TO_JAVA.put("integer", "Integer");
+        ENGINE_TYPE_TO_JAVA.put("long", "Long"); ENGINE_TYPE_TO_JAVA.put("double", "Double"); ENGINE_TYPE_TO_JAVA.put("float", "Float");
+        ENGINE_TYPE_TO_JAVA.put("bool", "Boolean"); ENGINE_TYPE_TO_JAVA.put("boolean", "Boolean");
+        ENGINE_TYPE_TO_JAVA.put("date", "java.util.Date"); ENGINE_TYPE_TO_JAVA.put("object", "Object");
+        ENGINE_TYPE_TO_JAVA.put("list", "java.util.List"); ENGINE_TYPE_TO_JAVA.put("map", "java.util.Map");
+    }
     static final Map<String, String> STRUCTURE_REF_TO_JAVA = new HashMap<String, String>();
     static {
         for (String s : new String[] { "String", "java.lang.String" }) STRUCTURE_REF_TO_JAVA.put(s, "String");

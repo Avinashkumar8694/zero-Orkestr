@@ -80,6 +80,9 @@ public class JsonNode implements Iterable<JsonNode> {
         return raw instanceof Map && ((Map<String, Object>) raw).containsKey(field);
     }
 
+    /** true when the field exists and is not JSON null (Jackson's hasNonNull). */
+    public boolean hasNonNull(String field) { return has(field) && !path(field).isNull(); }
+
     public boolean has(int index) {
         return raw instanceof List && index >= 0 && index < ((List<?>) raw).size();
     }

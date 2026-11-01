@@ -61,7 +61,7 @@ test('Java script using meta-locals gets String local declarations from real kco
   });
   const m = fromEngine(ep);
   const t = m.nodes.find((n) => n.id === 't');
-  assert.ok(t.script.includes('String instanceId = kcontext.getProcessInstance().getId();'));
+  assert.ok(t.script.includes('String instanceId = String.valueOf(kcontext.getProcessInstance().getId());'));
   assert.ok(t.script.includes('String currentNodeName = kcontext.getNodeInstance().getNodeName();'));
   assert.ok(!t.script.includes('processName'), 'unreferenced meta-locals are not injected');
 });

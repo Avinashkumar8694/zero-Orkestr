@@ -5,6 +5,7 @@
 // and with the right TIMING: onEntry always fires when the node is triggered; onExit fires once, when
 // the node instance actually completes — immediately for a node that completes synchronously, or on
 // resume for a node that waits (userTask) — never on error.
+import { numericIdOf } from '../src/infra/ids.ts';
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { MemoryStore } from '../src/store/memory-store.ts';
@@ -125,7 +126,7 @@ test('Java onEntry/onExit on a manual task, using the meta-locals (instanceId/cu
   );
   assert.strictEqual(inst.status, 'completed', JSON.stringify(inst.error));
   assert.strictEqual(inst.variables['entryNode'], 't');
-  assert.strictEqual(inst.variables['exitPid'], inst.id);
+  assert.strictEqual(inst.variables['exitPid'], numericIdOf(inst.id));   // jBPM numbers instances: the meta-local is that number;
 });
 
 test('Java onEntry/onExit on a userTask: onExit fires on resume, not on creation', { timeout: 30000 }, async () => {

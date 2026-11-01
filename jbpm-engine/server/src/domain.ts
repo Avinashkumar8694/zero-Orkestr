@@ -128,6 +128,7 @@ export interface NodeVisit { tokenId: string; nodeId: string; type: string; ente
 export interface Instance extends Entity {
   id: string; tenantId: string; deploymentId: string; workflowId: string;
   processId?: string;              // which process (definition) in the deployment this instance runs
+  numericId?: string;              // numericIdOf(id): the long a Java script sees as ProcessInstance.getId(); accepted wherever the id is
   correlationKey?: string;
   status: InstanceStatus;
   variables: Record<string, unknown>;

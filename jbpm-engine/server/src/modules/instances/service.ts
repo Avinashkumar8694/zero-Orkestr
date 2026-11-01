@@ -9,6 +9,7 @@ import { DeploymentService } from '../deployments/service.ts';
 import { ErrorService } from '../errors/service.ts';
 import { NotificationService } from '../notifications/service.ts';
 import { SettingsService } from '../settings/service.ts';
+import { findRows } from '../../store/find.ts';
 import { notFound, conflict, validation, quotaExceeded } from '../../infra/errors.ts';
 
 export function makeResolveCalled(ctx: AppContext) {
@@ -85,7 +86,9 @@ export class InstanceService {
   }
 
   async get(id: string): Promise<Instance> {
-    const i = await this.repo().get(id);
+    let i = await this.repo().get(id);
+    // a Java script's ProcessInstance.getId() is numeric (jBPM's long): resolve it back to the instance
+    if (!i && /^\d{1,19}$/.test(id)) i = (await findRows<Instance>(this.ctx.store, Collections.instances, this.ctx.tenantId, { eq: { numericId: id } }))[0];
     if (!i || i.tenantId !== this.ctx.tenantId) throw notFound('Instance');
     return i;
   }

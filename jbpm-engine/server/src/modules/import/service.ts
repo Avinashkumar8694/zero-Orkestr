@@ -13,6 +13,7 @@ import { VersionService } from '../versions/service.ts';
 import { DeploymentService } from '../deployments/service.ts';
 import { validation } from '../../infra/errors.ts';
 import { Collections } from '../../domain.ts';
+import { provisionAssignees, type Provisioned } from './assignees.ts';
 import { WORKITEM_HANDLERS } from '../../engine/workitems/registry.ts';
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -168,7 +169,7 @@ function javaScriptify(code?: string): string {
   // 1. Comments and system calls
   js = js.replace(/System\.out\.println\s*\(/g, 'console.log(');
   js = js.replace(/System\.out\.print\s*\(/g, 'console.log(');
-  js = js.replace(/System\.(getenv|getProperty)\s*\(\s*"([^"]+)"\s*\)/g, '((env && env["$2"]) || "")');
+  js = js.replace(/System\.(getenv|getProperty)\s*\(\s*"([^"]+)"\s*\)/g, '((env && env["$2"] != null) ? env["$2"] : null)');   // Java returns null (not "") for an unset variable, so `x == null` fallbacks still fire
   js = js.replace(/String\.valueOf\s*\(/g, 'String(');
   js = js.replace(/\.length\s*\(\s*\)/g, '.length');
 
@@ -246,7 +247,15 @@ export function convertProjectToNodeEngine(engine: EngineProject): EngineProject
 }
 
 /** Reconstruct an EngineProject from a kjar file map (writes to a temp dir, parses, converts) or native EngineProject JSON. */
-export function kjarToEngine(files: Record<string, string> | any): EngineProject {
+/** a script task with no body (a Business Central placeholder) still needs valid code */
+function noopEmptyScripts(engine: EngineProject): EngineProject {
+  const walk = (nodes: any[]) => { for (const n of nodes || []) { if (n.type === 'script' && !String(n.code || '').trim()) n.code = '// no-op'; if (Array.isArray(n.nodes)) walk(n.nodes); } };
+  for (const p of engine.processes || []) walk(p.nodes as any[]);
+  return engine;
+}
+
+/** `dialect: 'java'` keeps every Java script, onEntry/onExit and condition as Java (run on the JVM sidecar, exactly as jBPM would); the default converts them to JavaScript. */
+export function kjarToEngine(files: Record<string, string> | any, opts: { dialect?: 'js' | 'java' } = {}): EngineProject {
   if (!files || !Object.keys(files).length) throw validation('no files to import');
   if (Array.isArray(files.processes)) {
     return files as EngineProject;
@@ -262,7 +271,7 @@ export function kjarToEngine(files: Record<string, string> | any): EngineProject
       fs.writeFileSync(p, content as string | Uint8Array);
     }
     const engine = toEngineProject(parseProject(dir));
-    return convertProjectToNodeEngine(engine);
+    return opts.dialect === 'java' ? noopEmptyScripts(engine) : convertProjectToNodeEngine(engine);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -335,10 +344,26 @@ export class ImportService {
     return { users, groups };
   }
 
-  async importKjar(files: Record<string, string>, name: string | undefined, actor: string): Promise<{ workflowId: string; processes: number; report: ImportReport } & AssetImportReport> {
-    const engine = kjarToEngine(files);
+  /** Creates the users and groups the project's tasks are assigned to when this workspace lacks them (least permission), and says so in the report. */
+  private async provision(engine: EngineProject, actor: string, canProvision: boolean | undefined): Promise<Provisioned | undefined> {
+    return canProvision ? provisionAssignees(this.ctx, engine, actor) : undefined;
+  }
+  private withProvisioning(report: ImportReport, p: Provisioned | undefined, canProvision: boolean | undefined): ImportReport {
+    const add = (severity: ImportReportItem['severity'], code: string, message: string) => report.items.push({ process: '(workspace)', severity, code, message });
+    if (p?.createdGroups.length) add('info', 'assignee-group-created', `Created group${p.createdGroups.length > 1 ? 's' : ''} ${p.createdGroups.join(', ')}: no members yet, no permissions beyond what its members' roles give. Add members under Admin → Groups.`);
+    if (p?.createdUsers.length) add('info', 'assignee-user-created', `Created user${p.createdUsers.length > 1 ? 's' : ''} ${p.createdUsers.join(', ')} with the read-only viewer role, disabled: an administrator must set a password, enable the account and grant the roles it needs.`);
+    for (const f of p?.failed ?? []) add('warning', 'assignee-create-failed', `Could not create ${f.kind} "${f.name}": ${f.reason}`);
+    if (canProvision === false) add('info', 'assignee-not-created', 'Users and groups named by task assignments were not created because the importing account may not manage users; create them under Admin if they are missing (see the warnings above).');
+    const count = (sv: ImportReportItem['severity']) => report.items.filter((i) => i.severity === sv).length;
+    report.summary = { unsupported: count('unsupported'), warnings: count('warning'), info: count('info') };
+    return report;
+  }
+
+  async importKjar(files: Record<string, string>, name: string | undefined, actor: string, opts: { canProvision?: boolean; dialect?: 'js' | 'java' } = {}): Promise<{ workflowId: string; processes: number; report: ImportReport } & AssetImportReport> {
+    const engine = kjarToEngine(files, { dialect: opts.dialect });
     const assetReport = convertAssets(engine);
-    const report = buildImportReport(engine, files, await this.directory());
+    const provisioned = await this.provision(engine, actor, opts.canProvision);
+    const report = this.withProvisioning(buildImportReport(engine, files, await this.directory()), provisioned, opts.canProvision);
     const wf = await new WorkflowService(this.ctx).create({ name: name || (engine as any).name || (engine as any).id || 'Imported project' }, actor);
     await new VersionService(this.ctx).saveDraft(wf.defaultBranchId, engine, actor);
     await this.ctx.audit({ actor, kind: 'project.imported', workflowId: wf.id, data: { processes: engine.processes?.length || 0, ...assetReport, report: report.summary } });
@@ -353,11 +378,12 @@ export class ImportService {
    *  would desync it from whatever instances are already running against it. */
   async importAndDeploy(
     files: Record<string, string>, name: string | undefined, actor: string,
-    opts: { environment: string; tags?: string[]; env?: Record<string, string> },
+    opts: { environment: string; tags?: string[]; env?: Record<string, string>; canProvision?: boolean; dialect?: 'js' | 'java' },
   ): Promise<{ workflowId: string; processes: number; deploymentId: string; report: ImportReport } & AssetImportReport> {
-    const engine = kjarToEngine(files);
+    const engine = kjarToEngine(files, { dialect: opts.dialect });
     const assetReport = convertAssets(engine);
-    const report = buildImportReport(engine, files, await this.directory());
+    const provisioned = await this.provision(engine, actor, opts.canProvision);
+    const report = this.withProvisioning(buildImportReport(engine, files, await this.directory()), provisioned, opts.canProvision);
     const wf = await new WorkflowService(this.ctx).create({ name: name || (engine as any).name || (engine as any).id || 'Imported project' }, actor);
     const ver = new VersionService(this.ctx);
     const draft = await ver.saveDraft(wf.defaultBranchId, engine, actor);

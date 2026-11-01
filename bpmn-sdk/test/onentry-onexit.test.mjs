@@ -129,7 +129,7 @@ test('fromEngine: Java onEntry/onExit using bare declared-var names + meta-local
   const t = m.nodes.find((n) => n.id === 't');
   assert.ok(t.onEntry.includes('String currentNodeName = kcontext.getNodeInstance().getNodeName();'), 'meta-local bound for onEntry');
   assert.ok(t.onEntry.includes('String claimType = (String) kcontext.getVariable("claimType");'), 'declared bare-name var bound for onEntry (matches real jBPM\'s own auto-binding for scripts/onEntry/onExit)');
-  assert.ok(t.onExit.includes('String instanceId = kcontext.getProcessInstance().getId();'), 'meta-local bound for onExit');
+  assert.ok(t.onExit.includes('String instanceId = String.valueOf(kcontext.getProcessInstance().getId());'), 'meta-local bound for onExit');
   assert.strictEqual(t.onEntryFormat, 'http://www.java.com/java');
   assert.strictEqual(t.onExitFormat, 'http://www.java.com/java');
 });

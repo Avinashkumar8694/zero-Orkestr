@@ -22,12 +22,17 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
   // ---------------------------------------------------------------- Jackson / org.json / java.util shims
   function makeJacksonNode(data) {
     var self = {
-      put: function (k, v) { if (data && typeof data === 'object') data[k] = v; return self; },
+      put: function (k, v) { if (data && typeof data === 'object') data[k] = v === undefined ? null : v; return self; },
       putPOJO: function (k, v) { if (data && typeof data === 'object') data[k] = v; return self; },
       putNull: function (k) { if (data && typeof data === 'object') data[k] = null; return self; },
       putArray: function (k) { var a = []; if (data && typeof data === 'object') data[k] = a; return makeJacksonArray(a); },
-      set: function (k, v) { if (data && typeof data === 'object') data[k] = v; return self; },
-      get: function (k) { return (data && typeof data === 'object') ? data[k] : undefined; },
+      set: function (k, v) { if (data && typeof data === 'object') data[k] = v === undefined ? null : v; return self; },
+      get: function (k) {
+        if (!(data && typeof data === 'object')) return null;
+        var v = data[k];
+        if (v === undefined) return null;                                                    // Jackson: absent field -> null
+        return v !== null && typeof v === 'object' ? makeJacksonNode(v) : v;                // objects/arrays stay JsonNodes (toString() is JSON); scalars stay plain
+      },
       path: function (k) { return makeJacksonNode((data && typeof data === 'object') ? data[k] : undefined); },
       has: function (k) { return (data && typeof data === 'object') ? hasOwn.call(data, k) : false; },
       hasNonNull: function (k) { return (data && typeof data === 'object') ? data[k] != null : false; },
@@ -304,8 +309,8 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
     System: {
       out: { println: function () { logFn.apply(null, arguments); }, print: function () { logFn.apply(null, arguments); } },
       // env only — the host process environment is deliberately NOT reachable (it holds server secrets).
-      getenv: function (k) { return (envMap && envMap[k]) || ''; },
-      getProperty: function (k) { return (envMap && envMap[k]) || ''; },
+      getenv: function (k) { return envMap && envMap[k] != null ? envMap[k] : null; },
+      getProperty: function (k) { return envMap && envMap[k] != null ? envMap[k] : null; },
       currentTimeMillis: function () { return Date.now(); }
     }
   };
@@ -356,7 +361,7 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
       abortProcessInstance: function (pid) { actions.push({ kind: 'abort', targetInstanceId: pid }); }
     };
     var kcontext = {
-      getVariable: function (n) { return vars[n]; },
+      getVariable: function (n) { var v = vars[n]; return v === undefined ? null : v; },   // Java's Map.get: null (so "" + x is "null", as in jBPM), never undefined
       setVariable: function (n, v) { vars[n] = v; },
       getProcessInstance: function () { return instObj; },
       getNodeInstance: function () { return nodeInst; },
@@ -366,7 +371,7 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
       id: selfId, processId: info.processId, processName: info.processName, correlationKey: info.correlationKey,
       parentId: info.parentInstanceId, state: info.state || 'running', variables: vars,
       activeNodes: (info.activeNodeInstances || []).map(function (n) { return { id: n.id, nodeId: n.nodeId, name: n.nodeName == null ? '' : n.nodeName }; }),
-      getVariable: function (n) { return vars[n]; },
+      getVariable: function (n) { var v = vars[n]; return v === undefined ? null : v; },   // Java's Map.get: null (so "" + x is "null", as in jBPM), never undefined
       setVariable: function (n, v) { vars[n] = v; },
       hasVariable: function (n) { return hasOwn.call(vars, n); },
       getNodeInstances: function () {
@@ -395,7 +400,7 @@ export const ISOLATE_RUNTIME_SOURCE = String.raw`
     // (so kcontext/vars/console/Object/… can never be shadowed by a same-named variable).
     var fixed = {
       kcontext: kcontext, vars: vars, instance: instance, node: node, env: env,
-      getVariable: function (n) { return vars[n]; },
+      getVariable: function (n) { var v = vars[n]; return v === undefined ? null : v; },   // Java's Map.get: null (so "" + x is "null", as in jBPM), never undefined
       setVariable: function (n, v) { vars[n] = v; },
       instanceId: selfId, processId: info.processId == null ? '' : info.processId, processName: info.processName == null ? '' : info.processName,
       correlationKey: info.correlationKey == null ? '' : info.correlationKey, parentInstanceId: info.parentInstanceId == null ? '' : info.parentInstanceId,

@@ -376,7 +376,7 @@ function jsInstanceNodePreamble(code: string): string {
  *  targeting jBPM export already needs `kcontext.getProcessInstance().getState()`/`.getNodeInstances()`
  *  directly for those (real jBPM's own STATE_* int / List<NodeInstance>, not a reinterpretation). */
 const JAVA_META_LOCALS: Array<[string, string]> = [
-  ['instanceId', 'kcontext.getProcessInstance().getId()'],
+  ['instanceId', 'String.valueOf(kcontext.getProcessInstance().getId())'],
   ['processId', 'kcontext.getProcessInstance().getProcessId()'],
   ['processName', 'kcontext.getProcessInstance().getProcessName()'],
   ['correlationKey', 'kcontext.getProcessInstance().getCorrelationKey()'],

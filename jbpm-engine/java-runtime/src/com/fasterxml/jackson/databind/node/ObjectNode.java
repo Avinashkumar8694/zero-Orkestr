@@ -38,6 +38,8 @@ public class ObjectNode extends JsonNode {
         return this;
     }
 
+    public ObjectNode putNull(String field) { map().put(field, null); return this; }
+
     public ObjectNode remove(String field) { map().remove(field); return this; }
 
     /** Creates a new empty array, attaches it under `field`, and returns THAT array (not `this`) — a

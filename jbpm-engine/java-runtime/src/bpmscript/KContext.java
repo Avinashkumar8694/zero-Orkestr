@@ -46,6 +46,13 @@ import java.util.Map;
  * "undeclared process variable" in real jBPM).
  */
 public final class KContext {
+    /** jBPM ids are `long`: a stable 53-bit FNV-1a of the engine's string id (the server computes the same number, so the API resolves it back to the instance). */
+    static long stableLong(String s) {
+        long h = 0xcbf29ce484222325L;
+        if (s != null) for (int i = 0; i < s.length(); i++) { h ^= s.charAt(i); h *= 0x100000001b3L; }
+        return h & 0x1fffffffffffffL;   // 53 bits: survives a JSON number unchanged
+    }
+
     private final Map<String, Object> vars;
     private final Map<String, String> varTypes;
     private final String instanceId;
@@ -86,7 +93,20 @@ public final class KContext {
     /** Coerces a raw JSON-shaped value to the declared numeric type, if it isn't already that type.
      *  A no-op for non-numeric declared types (String/Boolean/Object/List/Map/Date/a custom POJO FQN
      *  this engine can't resolve anyway) and for a value that's already the right type. */
+    @SuppressWarnings("unchecked")
     private static Object coerce(Object value, String declaredType) {
+        // A JSON object/array held by a variable that is declared text or object (or not declared) was stored there as a Jackson node by an earlier script
+        // (jBPM keeps the object in memory, whatever the declared type); here it travelled as JSON, so give it back as a node: `(JsonNode) kcontext.getVariable(..)`.
+        // A variable declared Map / List keeps the plain collection.
+        if (value instanceof java.util.Map || value instanceof java.util.List) {
+            String t = declaredType == null ? "Object" : ScriptRunner.javaTypeFor(declaredType);
+            if ("String".equals(t) || "Object".equals(t)) {
+                return value instanceof java.util.Map
+                    ? new com.fasterxml.jackson.databind.node.ObjectNode((java.util.Map<String, Object>) value)
+                    : new com.fasterxml.jackson.databind.node.ArrayNode((java.util.List<Object>) value);
+            }
+            return value;
+        }
         if (value == null || declaredType == null) return value;
         if (!(value instanceof Number) && !(value instanceof String)) return value;
         String type = ScriptRunner.javaTypeFor(declaredType);
@@ -151,7 +171,9 @@ public final class KContext {
             this.pendingActions = pendingActions;
         }
 
-        public String getId() { return id; }
+        public long getId() { return stableLong(id); }
+        /** this engine's own (string) id */
+        public String getIdString() { return id; }
         public String getProcessId() { return processId; }
         public String getProcessName() { return processName; }
         public String getCorrelationKey() { return correlationKey; }
@@ -179,7 +201,9 @@ public final class KContext {
         /** the node-*instance* id (real jBPM: NodeInstance.getId()) — distinct from getNodeId()
          *  below, the node *definition* id (real jBPM: NodeInstance.getNode().getId()). This engine
          *  used to conflate the two into one field; they're genuinely different things. */
-        public String getId() { return id; }
+        public long getId() { return stableLong(id); }
+        /** this engine's own (string) id */
+        public String getIdString() { return id; }
         public String getNodeId() { return nodeId; }
         public String getNodeName() { return nodeName; }
     }
@@ -195,9 +219,12 @@ public final class KContext {
         /** targeted delivery to exactly one process instance by id (matches real jBPM's
          *  KieRuntime.signalEvent(type,event,processInstanceId) overload). */
         public void signalEvent(String type, Object event, String processInstanceId) { pendingActions.add(PendingAction.signal(type, event, processInstanceId)); }
+        /** real jBPM's id is a long (see ProcessInstance.getId()) */
+        public void signalEvent(String type, Object event, long processInstanceId) { pendingActions.add(PendingAction.signal(type, event, String.valueOf(processInstanceId))); }
         /** matches real jBPM's KieRuntime.abortProcessInstance(id) — works for this instance's own
          *  id (self-abort) or any other instance id the script names. */
         public void abortProcessInstance(String processInstanceId) { pendingActions.add(PendingAction.abort(processInstanceId)); }
+        public void abortProcessInstance(long processInstanceId) { pendingActions.add(PendingAction.abort(String.valueOf(processInstanceId))); }
     }
 
     public static final class Environment {

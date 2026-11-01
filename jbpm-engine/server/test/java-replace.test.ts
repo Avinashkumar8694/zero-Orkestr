@@ -1,5 +1,5 @@
 // Java String.replace replaces every occurrence and replaceAll is a global regex; imported Java scripts must keep that when run as JS.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { convertProjectToNodeEngine } from '../src/modules/import/service.ts';
 import { runScript } from '../src/engine/sandbox.ts';
@@ -67,3 +67,21 @@ kcontext.setVariable("bad", bad);`);
   assert.strictEqual(v.ids, '{"ids":["AGR-1"]}');
   assert.strictEqual(v.bad, 'threw');
 });
+
+import { numericIdOf } from '../src/infra/ids.ts';
+import { kit } from './flow-kit.ts';
+import { InstanceService } from '../src/modules/instances/service.ts';
+
+test('JID-1 a Java script sees ProcessInstance.getId() as a long (jBPM), the same number the server computes, and the API resolves it back to the instance', async () => {
+  const k = kit('t1');
+  const w = await k.deploy('jid', [{ id: 's', type: 'start' }, { id: 'j', type: 'script', lang: 'java', name: 'j', code: 'Long pid = kcontext.getProcessInstance().getId();\nlong again = kcontext.getProcessInstance().getId();\nkcontext.setVariable("pid", pid);\nkcontext.setVariable("same", pid == again);\nkcontext.setVariable("idString", kcontext.getProcessInstance().getIdString());' }, { id: 'u', type: 'userTask', name: 'wait', group: 'g' }, { id: 'e', type: 'end' }],
+    [{ id: 'f0', from: 's', to: 'j' }, { id: 'f1', from: 'j', to: 'u' }, { id: 'f2', from: 'u', to: 'e' }], [{ name: 'pid', type: 'long' }, { name: 'same', type: 'bool' }, { name: 'idString', type: 'string' }]);
+  const inst = await k.start(w.wf.id);
+  const done = await k.get(inst.id);
+  assert.strictEqual(String(done.variables.pid), numericIdOf(inst.id), 'the sidecar and the server agree on the number');
+  assert.strictEqual(done.variables.same, true);
+  assert.strictEqual(done.variables.idString, inst.id);
+  const viaNumber = await new InstanceService(k.ctx).get(String(done.variables.pid));
+  assert.strictEqual(viaNumber.id, inst.id, 'the numeric id resolves to the instance');
+});
+after(() => setTimeout(() => process.exit(0), 50).unref());   // the JVM sidecar / test server would otherwise keep this process alive

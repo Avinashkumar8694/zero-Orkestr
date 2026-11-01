@@ -36,3 +36,11 @@ export function fakeClock(startIso = '2025-01-01T00:00:00.000Z') {
     set: (iso: string) => { t = new Date(iso).getTime(); },
   };
 }
+
+/** jBPM's ProcessInstance.getId() is a long; this engine's ids are strings. Java scripts see this number (FNV-1a, 53 bits, identical to the sidecar's
+ *  KContext.stableLong) and the API resolves it back to the instance, so a payload carrying it can be called back (signals, lookups). */
+export function numericIdOf(id: string): string {
+  let h = 0xcbf29ce484222325n;
+  for (let i = 0; i < id.length; i++) { h ^= BigInt(id.charCodeAt(i)); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
+  return String(h & 0x1fffffffffffffn);   // 53 bits: the largest integer that survives a JSON number unchanged
+}

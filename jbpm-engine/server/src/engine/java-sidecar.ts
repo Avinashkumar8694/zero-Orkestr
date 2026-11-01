@@ -64,8 +64,11 @@ let starting: Promise<number> | undefined;
 function start(): Promise<number> {
   if (starting) return starting;
   starting = new Promise<number>((resolve, reject) => {
-    const proc = spawn(findJavaBinary(), ['-cp', config.javaSidecarClasspath, 'bpmscript.Server', '0'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+    // a bounded, small JVM (serial GC, client-tier JIT): the sidecar only compiles and runs short scripts, and the default heap of a quarter of the machine's RAM can get it killed under memory pressure
+    const jvmOpts = (process.env.JAVA_SIDECAR_OPTS ?? '-Xms32m -Xmx384m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xshare:auto').split(/\s+/).filter(Boolean);
+    const proc = spawn(findJavaBinary(), [...jvmOpts, '-cp', config.javaSidecarClasspath, 'bpmscript.Server', '0'], {
+      stdio: ['pipe', 'pipe', 'pipe'],                                  // stdin stays open: its closing tells the JVM its parent is gone
+      env: { ...process.env, BPMSCRIPT_EXIT_WITH_PARENT: '1' },
     });
     child = proc;
     let stderrBuf = '';
@@ -87,7 +90,7 @@ function start(): Promise<number> {
       }
     });
     proc.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString('utf8'); });
-    proc.on('exit', (code) => {
+    proc.on('exit', (code, signal) => {
       const wasRunning = child === proc;
       child = undefined;
       port = undefined;
@@ -96,7 +99,7 @@ function start(): Promise<number> {
         settled = true;
         clearTimeout(timer);
         reject(new JavaSidecarUnavailableError(
-          `The sidecar process exited during startup (code ${code}). This usually means no JDK is on PATH ` +
+          `The sidecar process exited during startup (code ${code}${signal ? `, signal ${signal}` : ''}). This usually means no JDK is on PATH ` +
           `(a JRE alone can't compile scripts — javax.tools.ToolProvider.getSystemJavaCompiler() needs a JDK), ` +
           `or the classpath "${config.javaSidecarClasspath}" doesn't have compiled bpmscript classes yet. stderr: ${stderrBuf.trim() || '(empty)'}`
         ));

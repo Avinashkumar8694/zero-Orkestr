@@ -52,6 +52,17 @@ public final class Server {
         http.createContext("/execute", server.new ExecuteHandler());
         http.createContext("/health", server.new HealthHandler());
         http.start();
+        // The engine that spawned this JVM owns it. It holds our stdin pipe open; when it exits or crashes the pipe closes and we exit too, so an engine that
+        // dies (or a test that calls process.exit) never leaves an orphan JVM behind. Only when the engine asks (BPMSCRIPT_EXIT_WITH_PARENT), so a hand-started
+        // sidecar with no stdin keeps running.
+        if ("1".equals(System.getenv("BPMSCRIPT_EXIT_WITH_PARENT"))) {
+            Thread watchdog = new Thread(() -> {
+                try { while (System.in.read() != -1) { /* ignore */ } } catch (IOException ignored) { /* pipe gone */ }
+                System.exit(0);
+            }, "parent-watchdog");
+            watchdog.setDaemon(true);
+            watchdog.start();
+        }
         // Printed once at startup, before any script can capture System.out — the Node.js parent
         // watches stdout for this line to know the sidecar is ready to accept requests. Read back the
         // actually-bound port (not the requested one) since port 0 means "OS picks an ephemeral port".

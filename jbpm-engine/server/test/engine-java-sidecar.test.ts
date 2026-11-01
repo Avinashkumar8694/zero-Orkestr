@@ -1,6 +1,7 @@
 // Proves 'java'-dialect script/condition nodes actually execute in the real JVM sidecar end to end
 // through the full engine (workflow -> publish -> deploy -> start -> step), not just that the static
 // validator accepts them. This spawns a real `java` child process (jbpm-engine/java-runtime).
+import { numericIdOf } from '../src/infra/ids.ts';
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { MemoryStore } from '../src/store/memory-store.ts';
@@ -149,7 +150,7 @@ test("kcontext.getProcessInstance().getNodeInstances() reflects currently-active
   assert.strictEqual(inst.variables['activeCount'], 2, "sees both probe's own token and the sibling userTask token");
   assert.strictEqual(inst.variables['myDefId'], 'probe', 'getNodeId() is the node DEFINITION id declared in the process');
   assert.notStrictEqual(inst.variables['myInstId'], 'probe', 'getId() is the node INSTANCE (token) id — a generated id, not the definition id');
-  assert.ok(typeof inst.variables['myInstId'] === 'string' && (inst.variables['myInstId'] as string).length > 0);
+  assert.ok(typeof inst.variables['myInstId'] === 'number' && (inst.variables['myInstId'] as number) > 0, 'getId() is a long, as in jBPM');
 });
 
 test('kcontext.getKieRuntime().signalEvent(type,event,processInstanceId) delivers to a SPECIFIC other instance, not a broadcast', { timeout: 30000 }, async () => {
@@ -204,7 +205,7 @@ test('Java meta-locals (instanceId/processName/correlationKey/currentNodeName/..
     { caseId: 'CASE-1' }, [], 'CORR-META-1',
   );
   assert.strictEqual(inst.status, 'completed', JSON.stringify(inst.error));
-  assert.strictEqual(inst.variables['iid'], inst.id, 'instanceId meta-local is the process INSTANCE id');
+  assert.strictEqual(inst.variables['iid'], numericIdOf(inst.id), 'instanceId meta-local is the process INSTANCE id as jBPM numbers it (the API resolves it back)');
   assert.strictEqual(inst.variables['pid'], inst.processId, 'processId meta-local is the process DEFINITION id — distinct from instanceId');
   assert.strictEqual(inst.variables['pname'], 'Java ste', 'processName matches the workflow name used to build this test process');
   assert.strictEqual(inst.variables['parent'], null, 'a root instance has no parent');

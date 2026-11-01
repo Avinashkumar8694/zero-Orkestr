@@ -1,6 +1,6 @@
 // jBPM user mapping survives an import: potentialOwner / ActorId / GroupId become actors and groups, the report lists them and flags unknown names,
 // and an actor entry that names a group admits that group's members (jBPM potential owners are users or groups).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { kjarToEngine, buildImportReport } from '../src/modules/import/service.ts';
 import { kit } from './flow-kit.ts';
@@ -56,3 +56,43 @@ test('ASSIGN-3 #{variable} in group / actors is filled from the instance variabl
   assert.deepStrictEqual(t.businessAdminGroups, ['ADMINS']);
   assert.strictEqual(t.name, 'Review ENR-9');
 });
+
+// ---- auto-provisioning of the users and groups an import refers to ----
+import { collectAssignees, provisionAssignees } from '../src/modules/import/assignees.ts';
+import { boot } from './harness.ts';
+
+test('ASSIGN-4 collectAssignees: groups from GroupId, users from actors, an actor entry that is also a group counts as the group, placeholders ignored', () => {
+  const files = bpmn(human('u1', 'krisv, Reviewers') + human('u2', '', 'Reviewers'));
+  const want = collectAssignees(kjarToEngine(files));
+  assert.deepStrictEqual(want, { users: ['krisv'], groups: ['Reviewers'] });
+  const dyn = collectAssignees({ processes: [{ id: 'p', nodes: [{ id: 'u', type: 'userTask', group: '#{g}', actors: ['${a}', 'real'] }], flows: [] }] } as any);
+  assert.deepStrictEqual(dyn, { users: ['real'], groups: [] });
+});
+
+test('ASSIGN-5 import creates the missing users (disabled, viewer) and groups, never touches existing ones, and only for callers who may manage users', async () => {
+  const h = await boot();
+  const ws = await h.workspace('assign-ws', ['admin', 'author']);
+  const files = bpmn(human('u1', 'krisv, Reviewers') + human('u2', '', 'Reviewers'));
+  // an author (workflow:edit, but not admin:iam) imports: nothing is created, the report says why
+  const noPerm = await h.call('POST', '/import/jbpm', { token: ws.tokens.author, tenant: ws.id, body: { files, name: 'a' } });
+  assert.strictEqual(noPerm.status, 201);
+  assert.ok(noPerm.body.report.items.some((i: any) => i.code === 'assignee-not-created'));
+  const listOf = (b: any): any[] => (Array.isArray(b) ? b : b.items ?? b.users ?? b.groups ?? []);
+  assert.strictEqual(listOf((await h.call('GET', '/groups', { token: ws.tokens.admin, tenant: ws.id })).body).some((g: any) => g.name === 'Reviewers'), false);
+  // an administrator imports: both are created
+  const ok = await h.call('POST', '/import/jbpm', { token: ws.tokens.admin, tenant: ws.id, body: { files, name: 'b' } });
+  assert.strictEqual(ok.status, 201);
+  const codes = ok.body.report.items.map((i: any) => i.code);
+  assert.ok(codes.includes('assignee-group-created') && codes.includes('assignee-user-created'), codes.join());
+  assert.ok(!codes.includes('task-assignee-unknown'), 'nothing is unknown any more');
+  const users = (await h.call('GET', '/users', { token: ws.tokens.admin, tenant: ws.id })).body;
+  const krisv = listOf(users).find((u: any) => u.username === 'krisv');
+  assert.ok(krisv && krisv.active === false && krisv.roles.every((r: string) => r === 'viewer'), JSON.stringify(krisv));   // disabled, and at most the read-only viewer role (none when the workspace has no such role)
+  const groups = (await h.call('GET', '/groups', { token: ws.tokens.admin, tenant: ws.id })).body;
+  assert.ok(listOf(groups).some((g: any) => g.name === 'Reviewers'));
+  // a second import creates nothing new and leaves the account as the administrator set it
+  const again = await h.call('POST', '/import/jbpm', { token: ws.tokens.admin, tenant: ws.id, body: { files, name: 'c' } });
+  assert.ok(!again.body.report.items.some((i: any) => /assignee-(user|group)-created/.test(i.code)));
+  await h.close();
+});
+after(() => setTimeout(() => process.exit(0), 50).unref());   // the JVM sidecar / test server would otherwise keep this process alive

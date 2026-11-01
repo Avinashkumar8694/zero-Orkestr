@@ -183,12 +183,12 @@ export function buildRoutes(): Router {
   r.post('/validate', asyncHandler(async (req, res) => res.json(await new ValidationService().validate((req.body?.engine?.processes?.[0]) || req.body?.process || req.body))));
 
   // --- import a jBPM kjar (file map) as a new project ---
-  r.post('/import/jbpm', perm('workflow:edit'), importLimiter, asyncHandler(async (req, res) => res.status(201).json(await new ImportService(ctxOf(req)).importKjar(req.body?.files, req.body?.name, actorOf(req)))));
+  r.post('/import/jbpm', perm('workflow:edit'), importLimiter, asyncHandler(async (req, res) => res.status(201).json(await new ImportService(ctxOf(req)).importKjar(req.body?.files, req.body?.name, actorOf(req), { canProvision: await isIamAdmin(req), dialect: req.body?.scriptDialect === 'java' ? 'java' : 'js' }))));
   // Import straight to a running deployment, no manual Publish/Deploy detour — jBPM's own
   // "deploy this artifact" ops flow. Requires deploy permission (a superset of the plain import above).
   r.post('/import/jbpm/deploy', perm('workflow:deploy'), importLimiter, asyncHandler(async (req, res) => res.status(201).json(await new ImportService(ctxOf(req)).importAndDeploy(
     req.body?.files, req.body?.name, actorOf(req),
-    { environment: req.body?.environment || 'prod', tags: req.body?.tags, env: req.body?.env },
+    { environment: req.body?.environment || 'prod', tags: req.body?.tags, env: req.body?.env, canProvision: await isIamAdmin(req), dialect: req.body?.scriptDialect === 'java' ? 'java' : 'js' },
   ))));
 
   // --- folders (organize the Projects page into a tree; purely presentational) ---

@@ -1,5 +1,6 @@
 // Token-based interpreter over the SDK engine JSON. See docs/08-execution-engine.md.
 // Deterministic core (clock/newId injected). Persists the instance after runToQuiescence.
+import { numericIdOf } from '../infra/ids.ts';
 import { effectiveLimitsFor } from '../modules/platform/limits.ts';
 import type { AppContext } from '../context.ts';
 import { Collections, type Deployment, type Instance, type NodeSla, type NodeVisit, type Task, type TimerJob, type Token } from '../domain.ts';
@@ -80,8 +81,9 @@ export class ExecutionEngine {
     const now = this.ctx.clock();
     const seed: Record<string, unknown> = {};
     for (const v of p.vars || []) seed[v.name] = undefined;
+    const newInstId = this.ctx.newId();
     const inst: Instance = {
-      id: this.ctx.newId(), tenantId: this.ctx.tenantId, deploymentId: dep.id, workflowId: dep.workflowId, processId: p.id,
+      id: newInstId, numericId: numericIdOf(newInstId), tenantId: this.ctx.tenantId, deploymentId: dep.id, workflowId: dep.workflowId, processId: p.id,
       correlationKey: opts.correlationKey, status: 'running', variables: { ...seed, ...variables },
       tokens: [{ id: this.ctx.newId(), nodeId: startNode.id!, state: 'active', enteredAt: now }],
       history: [], startedAt: now, startedBy: actor,
@@ -601,8 +603,9 @@ export class ExecutionEngine {
     const now = this.ctx.clock();
     const seed: Record<string, unknown> = {};
     for (const v of p.vars || []) seed[v.name] = undefined;
+    const childId = this.ctx.newId();
     const child: Instance = {
-      id: this.ctx.newId(), tenantId: this.ctx.tenantId, deploymentId: dep.id, workflowId: dep.workflowId, processId: p.id,
+      id: childId, numericId: numericIdOf(childId), tenantId: this.ctx.tenantId, deploymentId: dep.id, workflowId: dep.workflowId, processId: p.id,
       status: 'running', variables: { ...seed, ...vars },
       tokens: (p as any).adHoc ? [] : [{ id: this.ctx.newId(), nodeId: startNode!.id!, state: 'active', enteredAt: now }],
       history: [], startedAt: now, startedBy: actor, parentInstanceId, parentTokenId,
@@ -730,9 +733,16 @@ export class ExecutionEngine {
    *  a SEPARATE object from the one `runToQuiescence`'s loop is actively stepping through in memory.
    *  Mutating a fresh fetch would get silently overwritten when the loop persists its own reference
    *  at the end of its own processing — confirmed by a real test failure before this fix existed. */
+  /** an instance by its id, or by the numeric id a Java script saw as ProcessInstance.getId() (jBPM's long) */
+  private async instanceById(id: string): Promise<Instance | undefined> {
+    const direct = await this.inst().get(id);
+    if (direct || !/^\d{1,19}$/.test(String(id))) return direct;
+    return (await findRows<Instance>(this.ctx.store, Collections.instances, this.ctx.tenantId, { eq: { numericId: String(id) } }))[0];
+  }
+
   private async signalTargeted(callerInst: Instance, callerDep: Deployment, targetInstanceId: string, name: string, payload?: unknown): Promise<void> {
-    if (targetInstanceId === callerInst.id) { await this.signalInstance(callerInst, callerDep, name, payload); return; }
-    const target = await this.inst().get(targetInstanceId);
+    if (targetInstanceId === callerInst.id || targetInstanceId === callerInst.numericId) { await this.signalInstance(callerInst, callerDep, name, payload); return; }
+    const target = await this.instanceById(targetInstanceId);
     if (!target || target.tenantId !== this.ctx.tenantId) return;
     const dep = await this.deps().get(target.deploymentId);
     if (dep) await this.signalInstance(target, dep, name, payload);
@@ -744,8 +754,8 @@ export class ExecutionEngine {
    *  to an operator-triggered one. A no-op if the id doesn't resolve within this tenant. Self-targeted
    *  case: see signalTargeted's comment — same reasoning, same fix. */
   private async abortTargeted(callerInst: Instance, targetInstanceId: string): Promise<void> {
-    if (targetInstanceId === callerInst.id) { await this.abortInstance(callerInst); return; }
-    const target = await this.inst().get(targetInstanceId);
+    if (targetInstanceId === callerInst.id || targetInstanceId === callerInst.numericId) { await this.abortInstance(callerInst); return; }
+    const target = await this.instanceById(targetInstanceId);
     if (target && target.tenantId === this.ctx.tenantId) await this.abortInstance(target);
   }
 
