@@ -201,6 +201,20 @@ function parseBpmnAll(xml) {
     if (!asg) return void 0;
     return cdataText(kid(asg, "from"));
   };
+  function userTaskInputs(el) {
+    const spec = kid(el, "ioSpecification");
+    const out = {};
+    if (!spec) return out;
+    const nameOf = new Map(kids(spec, "dataInput").map((d) => [d.attrs.id, d.attrs.name]));
+    for (const a of kids(el, "dataInputAssociation")) {
+      const name = nameOf.get(targetText(a));
+      if (!name || name === "TaskName" || name === "Skippable" || name === "GroupId") continue;
+      const asg = kid(a, "assignment");
+      const v = asg ? cdataText(kid(asg, "from")) : void 0;
+      if (v !== void 0) out[name] = v;
+    }
+    return out;
+  }
   function applyOnEntryExit(el, nd) {
     const ext = kid(el, "extensionElements");
     if (!ext) return;
@@ -263,8 +277,10 @@ function parseBpmnAll(xml) {
     if (tm) {
       nd.eventType = "timer";
       const dur = kid(tm, "timeDuration"), cyc = kid(tm, "timeCycle"), dat = kid(tm, "timeDate");
-      if (cyc) nd.timeCycle = cdataText(cyc);
-      else if (dat) nd.timeDate = cdataText(dat);
+      if (cyc) {
+        nd.timeCycle = cdataText(cyc);
+        if (cyc.attrs.language) nd.timeCycleLanguage = cyc.attrs.language;
+      } else if (dat) nd.timeDate = cdataText(dat);
       else nd.timeDuration = cdataText(dur);
       return;
     }
@@ -300,6 +316,7 @@ function parseBpmnAll(xml) {
           if (el.attrs.eventGatewayType) nd.eventGatewayType = el.attrs.eventGatewayType;
           if (el.attrs.instantiate) nd.instantiate = el.attrs.instantiate === "true";
         }
+        applyOnEntryExit(el, nd);
         nodes.push(nd);
         continue;
       }
@@ -316,6 +333,7 @@ function parseBpmnAll(xml) {
           const nd = { ...base, type: "endEvent" };
           applyEventDef(nd, el);
           nd.subtype = nd.eventType === "terminate" ? "terminate" : nd.eventType;
+          applyOnEntryExit(el, nd);
           nodes.push(nd);
           break;
         }
@@ -337,11 +355,16 @@ function parseBpmnAll(xml) {
           nodes.push(nd);
           break;
         }
-        case "scriptTask":
-          nodes.push({ ...base, type: "scriptTask", script: cdataText(kid(el, "script")), scriptFormat: el.attrs.scriptFormat });
+        case "scriptTask": {
+          const nd = { ...base, type: "scriptTask", script: cdataText(kid(el, "script")), scriptFormat: el.attrs.scriptFormat };
+          applyOnEntryExit(el, nd);
+          nodes.push(nd);
           break;
+        }
         case "userTask": {
           const nd = { ...base, type: "userTask", taskName: assignTo(el, "_TaskNameInputX"), skippable: assignTo(el, "_SkippableInputX") !== "false", group: assignTo(el, "_GroupIdInputX") };
+          const ti = userTaskInputs(el);
+          if (Object.keys(ti).length) nd.taskInputs = ti;
           applyOnEntryExit(el, nd);
           nodes.push(nd);
           break;
@@ -385,7 +408,7 @@ function parseBpmnAll(xml) {
           break;
         }
         case "callActivity": {
-          const nd = { ...base, type: "callActivity", calledElement: el.attrs.calledElement };
+          const nd = { ...base, type: "callActivity", calledElement: el.attrs.calledElement, ...attr(el, "drools:abortParent") === "true" ? { abortParent: true } : {} };
           const mi = kid(el, "multiInstanceLoopCharacteristics");
           if (mi) {
             nd.subtype = "multiInstance";
@@ -398,7 +421,8 @@ function parseBpmnAll(xml) {
               itemVar: idi && idi.attrs.name || "item",
               itemOutVar: odi && odi.attrs.name || "result",
               collectionIn: firstIn ? sourceText(firstIn) : "",
-              collectionOut: firstOut ? targetText(firstOut) : ""
+              collectionOut: firstOut ? targetText(firstOut) : "",
+              ...kid(mi, "completionCondition") ? { completionCondition: cdataText(kid(mi, "completionCondition")) } : {}
             };
           } else if ((el.attrs.calledElement || "").endsWith("pru-rest-executor")) {
             nd.subtype = "rest";
@@ -460,6 +484,27 @@ function parseBpmnAll(xml) {
     }
     return { nodes, flows };
   }
+  function metaValues(el) {
+    const ext = kid(el, "extensionElements");
+    const out = {};
+    if (ext) for (const md of kids(ext, "metaData")) {
+      const name = md.attrs.name;
+      if (name) out[name] = cdataText(kid(md, "metaValue")) ?? "";
+    }
+    return out;
+  }
+  function procMeta(proc) {
+    const m = metaValues(proc);
+    const out = {};
+    const rest = {};
+    for (const [k, v] of Object.entries(m)) {
+      if (k === "customSLADueDate") out.slaDueDate = v;
+      else if (k === "customDescription") out.description = v;
+      else rest[k] = v;
+    }
+    if (Object.keys(rest).length) out.metaData = rest;
+    return out;
+  }
   function buildModel(proc) {
     const model = {
       id: proc.attrs.id || genId("process"),
@@ -467,6 +512,9 @@ function parseBpmnAll(xml) {
       packageName: attr(proc, "drools:packageName") || "org.jbpm",
       processType: proc.attrs.processType || "Public",
       isExecutable: proc.attrs.isExecutable !== "false",
+      version: attr(proc, "drools:version") || void 0,
+      ...attr(proc, "drools:adHoc") === "true" ? { adHoc: true } : {},
+      ...procMeta(proc),
       declarations: { signals, errors, messages, escalations },
       variables: [],
       dataObjects: [],
@@ -476,7 +524,8 @@ function parseBpmnAll(xml) {
       flows: []
     };
     kids(proc, "property").forEach((p) => {
-      model.variables.push({ name: p.attrs.name || p.attrs.id, type: itemTypes[p.attrs.itemSubjectRef] || "String" });
+      const tags = (metaValues(p).customTags || "").split(",").map((t) => t.trim()).filter(Boolean);
+      model.variables.push({ name: p.attrs.name || p.attrs.id, type: itemTypes[p.attrs.itemSubjectRef] || "String", ...tags.length ? { tags } : {} });
     });
     kids(proc, "dataObject").forEach((o) => {
       model.dataObjects.push({ id: o.attrs.id, name: o.attrs.name, type: itemTypes[o.attrs.itemSubjectRef], isCollection: o.attrs.isCollection === "true" });
@@ -553,15 +602,24 @@ function serializeProcess(proc) {
     if (nd.onExit) parts.push(`<drools:onExit-script scriptFormat="${nd.onExitFormat || JAVA}"><drools:script>${cdata(nd.onExit)}</drools:script></drools:onExit-script>`);
     return parts.length ? `<bpmn2:extensionElements>${parts.join("")}</bpmn2:extensionElements>` : "";
   }
+  function procExt(p) {
+    const md = (name, v) => `<drools:metaData name="${escAttr(name)}"><drools:metaValue>${cdata(v)}</drools:metaValue></drools:metaData>`;
+    const parts = [];
+    if (p.slaDueDate) parts.push(md("customSLADueDate", p.slaDueDate));
+    if (p.description) parts.push(md("customDescription", p.description));
+    for (const [k, v] of Object.entries(p.metaData || {})) parts.push(md(k, v));
+    return parts.length ? `<bpmn2:extensionElements>${parts.join("")}</bpmn2:extensionElements>` : "";
+  }
   function itemDef(id, structureRef) {
     if (seenItem.has(id)) return;
     seenItem.add(id);
     itemdefs.push(`<bpmn2:itemDefinition id="${id}" structureRef="${structureRef}"/>`);
   }
   (proc.variables || []).forEach((v) => {
+    var _a;
     const iid = `_${v.name}Item`;
     itemDef(iid, v.type || "String");
-    props.push(`<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"/>`);
+    props.push(((_a = v.tags) == null ? void 0 : _a.length) ? `<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"><bpmn2:extensionElements><drools:metaData name="customTags"><drools:metaValue>${cdata(v.tags.join(","))}</drools:metaValue></drools:metaData></bpmn2:extensionElements></bpmn2:property>` : `<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"/>`);
   });
   const d = proc.declarations || { signals: [], errors: [] };
   const signals = d.signals || [];
@@ -619,7 +677,7 @@ function serializeProcess(proc) {
         return `<bpmn2:conditionalEventDefinition id="${uid()}"><bpmn2:condition xsi:type="bpmn2:tFormalExpression" language="${nd.conditionExprLanguage || JAVA}">${cdata(nd.conditionExpr || "")}</bpmn2:condition></bpmn2:conditionalEventDefinition>`;
       case "timer": {
         let t = "";
-        if (nd.timeCycle) t = `<bpmn2:timeCycle xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeCycle}</bpmn2:timeCycle>`;
+        if (nd.timeCycle) t = `<bpmn2:timeCycle xsi:type="bpmn2:tFormalExpression"${nd.timeCycleLanguage ? ` language="${escAttr(nd.timeCycleLanguage)}"` : ""} id="${uid()}">${nd.timeCycle}</bpmn2:timeCycle>`;
         else if (nd.timeDate) t = `<bpmn2:timeDate xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeDate}</bpmn2:timeDate>`;
         else t = `<bpmn2:timeDuration xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeDuration || "PT1M"}</bpmn2:timeDuration>`;
         return `<bpmn2:timerEventDefinition id="${uid()}">${t}</bpmn2:timerEventDefinition>`;
@@ -671,7 +729,7 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
       assoc += `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:sourceRef>${v}</bpmn2:sourceRef><bpmn2:targetRef>${nd.id}_${v}</bpmn2:targetRef></bpmn2:dataInputAssociation>`;
     });
     assoc += `<bpmn2:dataOutputAssociation id="${uid()}"><bpmn2:sourceRef>${nd.id}_outcoll</bpmn2:sourceRef><bpmn2:targetRef>${mi.collectionOut}</bpmn2:targetRef></bpmn2:dataOutputAssociation>`;
-    const loop = `<bpmn2:multiInstanceLoopCharacteristics${mi.isSequential ? ' isSequential="true"' : ""}><bpmn2:loopDataInputRef>${nd.id}_incoll</bpmn2:loopDataInputRef><bpmn2:loopDataOutputRef>${nd.id}_outcoll</bpmn2:loopDataOutputRef><bpmn2:inputDataItem id="${nd.id}_item" name="${mi.itemVar}"/><bpmn2:outputDataItem id="${nd.id}_itemout" name="${mi.itemOutVar}"/></bpmn2:multiInstanceLoopCharacteristics>`;
+    const loop = `<bpmn2:multiInstanceLoopCharacteristics${mi.isSequential ? ' isSequential="true"' : ""}><bpmn2:loopDataInputRef>${nd.id}_incoll</bpmn2:loopDataInputRef><bpmn2:loopDataOutputRef>${nd.id}_outcoll</bpmn2:loopDataOutputRef><bpmn2:inputDataItem id="${nd.id}_item" name="${mi.itemVar}"/><bpmn2:outputDataItem id="${nd.id}_itemout" name="${mi.itemOutVar}"/>${mi.completionCondition ? `<bpmn2:completionCondition xsi:type="bpmn2:tFormalExpression" id="${uid()}">${cdata(mi.completionCondition)}</bpmn2:completionCondition>` : ""}</bpmn2:multiInstanceLoopCharacteristics>`;
     return `<bpmn2:callActivity id="${nd.id}" drools:independent="false" drools:waitForCompletion="true" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}<bpmn2:ioSpecification id="${uid()}">${dins.join("")}${douts.join("")}<bpmn2:inputSet id="${uid()}">${inrefs}</bpmn2:inputSet><bpmn2:outputSet id="${uid()}">${outrefs}</bpmn2:outputSet></bpmn2:ioSpecification>${assoc}${loop}</bpmn2:callActivity>`;
   }
   function genericTask(nd) {
@@ -694,13 +752,14 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
     return `<bpmn2:task id="${nd.id}" drools:taskName="${escAttr(nd.handlerName || "")}" name="${escAttr(nd.name || nd.handlerName || "")}">${extBlock(nd)}${inout(nd)}${iospec}${assocs}</bpmn2:task>`;
   }
   function userTask(nd) {
-    const ports = ["TaskName", "Skippable", ...nd.group ? ["GroupId"] : []];
+    const extra = Object.keys(nd.taskInputs || {});
+    const ports = ["TaskName", "Skippable", ...nd.group ? ["GroupId"] : [], ...extra];
     ports.forEach((p) => itemDef(`__${nd.id}_${p}InputXItem`, ""));
     const din = (p) => `<bpmn2:dataInput id="${nd.id}_${p}InputX" drools:dtype="Object" itemSubjectRef="__${nd.id}_${p}InputXItem" name="${p}"/>`;
     const asg = (p, v) => `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:targetRef>${nd.id}_${p}InputX</bpmn2:targetRef><bpmn2:assignment id="${uid()}"><bpmn2:from xsi:type="bpmn2:tFormalExpression" id="${uid()}">${cdata(v)}</bpmn2:from><bpmn2:to xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.id}_${p}InputX</bpmn2:to></bpmn2:assignment></bpmn2:dataInputAssociation>`;
     const dins = ports.map(din).join("");
     const refs = ports.map((p) => `<bpmn2:dataInputRefs>${nd.id}_${p}InputX</bpmn2:dataInputRefs>`).join("");
-    const asgs = asg("TaskName", nd.taskName || nd.name || "Task") + asg("Skippable", String(nd.skippable !== false)) + (nd.group ? asg("GroupId", nd.group) : "");
+    const asgs = asg("TaskName", nd.taskName || nd.name || "Task") + asg("Skippable", String(nd.skippable !== false)) + (nd.group ? asg("GroupId", nd.group) : "") + extra.map((p) => asg(p, nd.taskInputs[p])).join("");
     return `<bpmn2:userTask id="${nd.id}" name="${escAttr(nd.name)}">${extBlock(nd)}${inout(nd)}<bpmn2:ioSpecification id="${uid()}">${dins}<bpmn2:inputSet id="${uid()}">${refs}</bpmn2:inputSet><bpmn2:outputSet id="${uid()}"/></bpmn2:ioSpecification>${asgs}</bpmn2:userTask>`;
   }
   const gatewayEl = {
@@ -713,10 +772,10 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
   function gateway(nd) {
     const el = gatewayEl[nd.type];
     const extra = (nd.default ? ` default="${nd.default}"` : "") + (nd.type === "eventBasedGateway" && nd.eventGatewayType ? ` eventGatewayType="${nd.eventGatewayType}"` : "") + (nd.type === "eventBasedGateway" && nd.instantiate != null ? ` instantiate="${nd.instantiate}"` : "");
-    return `<bpmn2:${el} id="${nd.id}"${nd.name ? ` name="${escAttr(nd.name)}"` : ""} gatewayDirection="${nd.gatewayDirection || "Diverging"}"${extra}>${nd.name ? meta(nd.name) : ""}${inout(nd)}</bpmn2:${el}>`;
+    return `<bpmn2:${el} id="${nd.id}"${nd.name ? ` name="${escAttr(nd.name)}"` : ""} gatewayDirection="${nd.gatewayDirection || "Diverging"}"${extra}>${extBlock(nd)}${inout(nd)}</bpmn2:${el}>`;
   }
   function eventNode(el, nd, extraAttrs = "") {
-    return `<bpmn2:${el} id="${nd.id}" name="${escAttr(nd.name || "")}"${extraAttrs}>${meta(nd.name)}${inout(nd)}${buildEventDef(nd)}</bpmn2:${el}>`;
+    return `<bpmn2:${el} id="${nd.id}" name="${escAttr(nd.name || "")}"${extraAttrs}>${extBlock(nd)}${inout(nd)}${buildEventDef(nd)}</bpmn2:${el}>`;
   }
   function bizTask(nd) {
     const a = (nd.ruleFlowGroup ? ` drools:ruleFlowGroup="${escAttr(nd.ruleFlowGroup)}"` : "") + ` implementation="${nd.implementation || "##unspecified"}"`;
@@ -765,7 +824,7 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
       case "boundaryEvent":
         return `<bpmn2:boundaryEvent id="${nd.id}" drools:boundaryca="true" name="${escAttr(nd.name || "")}" attachedToRef="${nd.attachedTo}"${nd.cancelActivity === false ? ' cancelActivity="false"' : ""}>${meta(nd.name)}${(nd.outgoing || []).map((f) => `<bpmn2:outgoing>${f}</bpmn2:outgoing>`).join("")}${buildEventDef(nd)}</bpmn2:boundaryEvent>`;
       case "scriptTask":
-        return `<bpmn2:scriptTask id="${nd.id}" name="${escAttr(nd.name)}" scriptFormat="${nd.scriptFormat || JAVA}">${meta(nd.name)}${inout(nd)}<bpmn2:script>${cdata(nd.script || "")}</bpmn2:script></bpmn2:scriptTask>`;
+        return `<bpmn2:scriptTask id="${nd.id}" name="${escAttr(nd.name)}" scriptFormat="${nd.scriptFormat || JAVA}">${extBlock(nd)}${inout(nd)}<bpmn2:script>${cdata(nd.script || "")}</bpmn2:script></bpmn2:scriptTask>`;
       case "userTask":
         return userTask(nd);
       case "businessRuleTask":
@@ -789,7 +848,7 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
       case "callActivity":
         if (nd.subtype === "multiInstance") return miCall(nd);
         if (nd.subtype === "rest" || nd.rest) return restCall(nd);
-        return `<bpmn2:callActivity id="${nd.id}" drools:independent="${nd.independent !== false}" drools:waitForCompletion="${nd.waitForCompletion !== false}" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}${simpleIo(nd)}</bpmn2:callActivity>`;
+        return `<bpmn2:callActivity id="${nd.id}"${nd.abortParent ? ' drools:abortParent="true"' : ""} drools:independent="${nd.independent !== false}" drools:waitForCompletion="${nd.waitForCompletion !== false}" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}${simpleIo(nd)}</bpmn2:callActivity>`;
       case "raw":
         return nd.raw || "";
       default:
@@ -811,7 +870,8 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
 <bpmn2:definitions ${DEFINITIONS_ATTRS} id="${uid("_def")}">
 ${itemdefs.join("\n")}
 ${decls.join("\n")}
-  <bpmn2:process id="${proc.id}" drools:packageName="${proc.packageName || "org.jbpm"}" drools:version="1.0" name="${escAttr(proc.name)}" isExecutable="true" processType="${proc.processType || "Public"}">
+  <bpmn2:process id="${proc.id}" drools:packageName="${proc.packageName || "org.jbpm"}" drools:version="${escAttr(proc.version || "1.0")}"${proc.adHoc ? ' drools:adHoc="true"' : ""} name="${escAttr(proc.name)}" isExecutable="true" processType="${proc.processType || "Public"}">
+${procExt(proc)}
 ${props.join("\n")}
 ${laneSet}
 ${dataObjs}

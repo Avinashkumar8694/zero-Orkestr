@@ -266,7 +266,7 @@ exactly-once test (if it uses jobs), the subscription invariant (if it listens),
 | 1 | G01 G02 G03 G05 G05b G06 G07 G08 G09 G10 G11 G12 G13 G14 G15 G16 | **done** (see §10) |
 | 2 | G17 G18 G19 G20 G21 G22 G24 G25 (G23 decision) | **done** (see §11) |
 | 3 | G27 G28 G29 G30 G31 G32 G33 G34 G35 | **done** (see §12) |
-| 4 | S01–S08 | not started |
+| 4 | S01–S08 | **done** (see §13) |
 | 5 | U01–U06, docs, release checks | not started |
 
 ---
@@ -421,3 +421,22 @@ All in `test/phase3.test.ts` (12 tests), golden fixtures unchanged. Suite: 606 /
 | G33 | done: `result: "cancel"` end inside a transaction sub-process compensates what completed, aborts the scope, and the parent sees `TRANSACTION_CANCELLED`, catchable by an error boundary on the sub-process |
 | G34 | done: `multiInstance: { over, as, parallel, collectInto, itemResult, completionCondition }` on user task, script, HTTP, work item, rule, send, manual and sub-process nodes; each item runs the single activity as a nested instance (it sees every process variable plus the item); early completion works as for for-each |
 | G35 | done: complex gateway `activationCondition` (sees `arrived`, `total`, variables); fires once per round, later arrivals of the round are absorbed |
+
+## 13. Phase 4 — jBPM import / export (bpmn-sdk)
+SDK tests: 201 (195 + 6 in `test/phase4-fidelity.test.mjs`); server: `test/import-report.test.ts`. Suite: 608 / 608.
+
+Principle: where jBPM has a field, that field is used (so Business Central shows and edits it); engine-only features travel in **one**
+metadata entry (`engine.extras`, ignored by jBPM), so exporting a process and importing it back loses nothing.
+
+| Id | Result |
+|---|---|
+| S01 | process-level `customSLADueDate`, `customDescription`, and any other process metadata, read and written |
+| S02 | variable tags (`customTags`): `required`, `readonly`, `restricted` |
+| S03 | `drools:version`, `drools:adHoc` |
+| S04 | user-task data inputs: `ActorId`, `GroupId` (several groups, comma separated), `BusinessAdministratorId`, `BusinessAdministratorGroupId`, `TaskStakeholderId`, `ExcludedOwnerId`, `Comment`, `Content`, `Locale`, `CreatedBy`, `suspendUntil`, `Priority`, `Description`, `NotStartedReassign`, `NotCompletedReassign`, `NotStartedNotify`, `NotCompletedNotify` |
+| S05 | `timeCycle language="cron"` |
+| S06 | multi-instance `completionCondition` (call-based for-each) |
+| S07 | `drools:abortParent` ⇄ `onChildFailure: "abort"`. Called element by name needs no field: the engine resolves a process id or name. (The attribute name `abortParent` was unverified against a live Business Central; it is read and written consistently by this SDK.) |
+| S08 | **import report** (`report` in the import responses and a summary in the audit entry): per process, constructs kept only as raw XML (`unsupported`), work-item handlers that do not exist here, conditional starts, web-service tasks, Java imports / globals (`warning` / `info`), and a note that Java scripts need the JVM sidecar. The real policy kjar reports **0 unsupported constructs** |
+
+Carried in `engine.extras` (engine-only): event sub-process triggers and `interrupting`, ad-hoc settings, multi-instance on tasks, instantiate / complex-gateway conditions, assignment strategy, swimlane, auto-claim, compensation-handler flag, call failure policy other than abort, the cancel end, and the node's free metadata. Script tasks now keep their metadata (async, SLA, extras) through a round trip as well.

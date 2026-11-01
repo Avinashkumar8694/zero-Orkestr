@@ -3,6 +3,8 @@ type EventType = 'none' | 'message' | 'timer' | 'signal' | 'error' | 'escalation
 type DataFromKind = 'variable' | 'constant' | 'expression' | 'loopItem' | 'loopOutputItem';
 interface Variable {
     name: string;
+    /** jBPM variable tags (customTags): required, readonly, restricted … */
+    tags?: string[];
     /** structureRef, e.g. "String", "java.util.List", "java.lang.Boolean", or a FQCN */
     type: string;
 }
@@ -80,6 +82,8 @@ interface DataOutput {
 }
 interface MultiInstance {
     isSequential?: boolean;
+    /** jBPM multi-instance completion condition: when true the remaining instances are cancelled */
+    completionCondition?: string;
     collectionIn: string;
     collectionOut: string;
     itemVar: string;
@@ -112,6 +116,12 @@ interface Node {
     slaDueDate?: string;
     /** jBPM "AdHoc Autostart" — <drools:metaData name="customAutoStart">true */
     autoStart?: boolean;
+    /** user task: the data inputs beyond TaskName / Skippable / GroupId (ActorId, Comment, Content, Locale, CreatedBy, BusinessAdministratorGroupId, TaskStakeholderId, suspendUntil, NotStartedReassign …), name -> value */
+    taskInputs?: Record<string, string>;
+    /** timer: language of timeCycle (e.g. cron) */
+    timeCycleLanguage?: string;
+    /** call activity: abort the parent when the called process fails */
+    abortParent?: boolean;
     /** every OTHER <drools:metaData> on the element (name -> value), kept so a round trip loses nothing */
     metaData?: Record<string, string>;
     reqExtra?: string;
@@ -174,6 +184,12 @@ interface ProcessModel {
     packageName?: string;
     processType?: 'None' | 'Public' | 'Private';
     isExecutable?: boolean;
+    /** drools:version / drools:adHoc, and the process-level metaData jBPM's designer writes (customSLADueDate, customDescription, others kept) */
+    version?: string;
+    adHoc?: boolean;
+    slaDueDate?: string;
+    description?: string;
+    metaData?: Record<string, string>;
     /** relative path of the source .bpmn within the project (set by parseProject) */
     sourcePath?: string;
     declarations?: Declarations;
@@ -494,7 +510,8 @@ interface EngineType {
 }
 interface EngineVar {
     name: string;
-    type: string;
+    type: string; /** jBPM variable tags: required, readonly, restricted */
+    tags?: string[];
 }
 interface EngineFlow {
     id?: string;
@@ -660,6 +677,11 @@ interface EngineProcess {
     id: string;
     name?: string;
     package?: string;
+    /** process-level properties (jBPM version / ad-hoc / SLA due date / instance description template) */
+    version?: string;
+    adHoc?: boolean;
+    slaDueDate?: string;
+    description?: string;
     types?: EngineType[];
     vars?: EngineVar[];
     lanes?: {

@@ -70,3 +70,8 @@ Each is ~20–40 lines mirroring an existing case. Ask and these can be added.
 | Preserve node types the SDK doesn't model? | **Yes**, verbatim via `raw` |
 | Author the common BPMN node set from scratch via clean JSON? | **Yes** — all gateways, tasks, message/escalation/conditional events, sub-processes, data objects, lanes are first-class |
 | Author *every* exotic construct (compensation, ad-hoc, pools/collaboration) from scratch? | **Not yet** — round-trips via `raw`; promote via the roadmap |
+
+## Release 2.0.0 additions (engine ⇄ BPMN)
+Process: `drools:version`, `drools:adHoc`, `customSLADueDate`, `customDescription`, variable `customTags`.
+Activities: `customAsync`, `customSLADueDate`, `customAutoStart`, free `drools:metaData`; user-task data inputs (ActorId, GroupId, BusinessAdministrator*, TaskStakeholderId, ExcludedOwnerId, Comment, Content, Locale, CreatedBy, suspendUntil, Priority, Description, NotStarted/NotCompleted Reassign/Notify); `timeCycle language="cron"`; multi-instance `completionCondition`; `drools:abortParent`.
+Engine-only features ride in one `engine.extras` metadata entry (see jbpm-engine/docs/20 §13), so a round trip is lossless.

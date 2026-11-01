@@ -66,6 +66,18 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
   /** onEntry-script/onExit-script extensionElements — real jBPM's generic action-hook mechanism,
    *  attachable to any activity (not just the REST call-activity wrapper this engine used to special-
    *  case). Shared so every activity case below parses it identically. */
+  /** a user task's other data inputs (ActorId, Comment, Locale, NotStartedReassign …) with their constant values */
+  function userTaskInputs(el: ElementNode): Record<string, string> {
+    const spec = kid(el, 'ioSpecification'); const out: Record<string, string> = {};
+    if (!spec) return out;
+    const nameOf = new Map(kids(spec, 'dataInput').map((d) => [d.attrs.id, d.attrs.name] as const));
+    for (const a of kids(el, 'dataInputAssociation')) {
+      const name = nameOf.get(targetText(a)); if (!name || name === 'TaskName' || name === 'Skippable' || name === 'GroupId') continue;
+      const asg = kid(a, 'assignment'); const v = asg ? cdataText(kid(asg, 'from')) : undefined;
+      if (v !== undefined) out[name] = v;
+    }
+    return out;
+  }
   function applyOnEntryExit(el: ElementNode, nd: Node): void {
     const ext = kid(el, 'extensionElements');
     if (!ext) return;
@@ -88,7 +100,7 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
     const ms = kid(el, 'messageEventDefinition'); if (ms) { nd.eventType = 'message'; nd.messageRef = ms.attrs.messageRef; return; }
     const es = kid(el, 'escalationEventDefinition'); if (es) { nd.eventType = 'escalation'; nd.escalationRef = es.attrs.escalationRef; return; }
     const cd = kid(el, 'conditionalEventDefinition'); if (cd) { nd.eventType = 'conditional'; const c = kid(cd, 'condition'); nd.conditionExpr = cdataText(c); if (c && c.attrs.language) nd.conditionExprLanguage = c.attrs.language; return; }
-    const tm = kid(el, 'timerEventDefinition'); if (tm) { nd.eventType = 'timer'; const dur = kid(tm, 'timeDuration'), cyc = kid(tm, 'timeCycle'), dat = kid(tm, 'timeDate'); if (cyc) nd.timeCycle = cdataText(cyc); else if (dat) nd.timeDate = cdataText(dat); else nd.timeDuration = cdataText(dur); return; }
+    const tm = kid(el, 'timerEventDefinition'); if (tm) { nd.eventType = 'timer'; const dur = kid(tm, 'timeDuration'), cyc = kid(tm, 'timeCycle'), dat = kid(tm, 'timeDate'); if (cyc) { nd.timeCycle = cdataText(cyc); if (cyc.attrs.language) nd.timeCycleLanguage = cyc.attrs.language; } else if (dat) nd.timeDate = cdataText(dat); else nd.timeDuration = cdataText(dur); return; }
     const tr = kid(el, 'terminateEventDefinition'); if (tr) { nd.eventType = 'terminate'; return; }
     nd.eventType = 'none';
   }
@@ -111,16 +123,17 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
         const nd: Node = { ...base, type: GATEWAYS[tag], gatewayDirection: (el.attrs.gatewayDirection as Node['gatewayDirection']) || 'Unspecified' };
         if (el.attrs.default) nd.default = el.attrs.default;
         if (tag === 'eventBasedGateway') { if (el.attrs.eventGatewayType) nd.eventGatewayType = el.attrs.eventGatewayType; if (el.attrs.instantiate) nd.instantiate = el.attrs.instantiate === 'true'; }
+        applyOnEntryExit(el, nd);
         nodes.push(nd); continue;
       }
       switch (tag) {
         case 'startEvent': { const nd: Node = { ...base, type: 'startEvent' }; if (el.attrs.isInterrupting) nd.isInterrupting = el.attrs.isInterrupting === 'true'; applyEventDef(nd, el); nd.subtype = nd.eventType; nodes.push(nd); break; }
-        case 'endEvent': { const nd: Node = { ...base, type: 'endEvent' }; applyEventDef(nd, el); nd.subtype = nd.eventType === 'terminate' ? 'terminate' : nd.eventType; nodes.push(nd); break; }
+        case 'endEvent': { const nd: Node = { ...base, type: 'endEvent' }; applyEventDef(nd, el); nd.subtype = nd.eventType === 'terminate' ? 'terminate' : nd.eventType; applyOnEntryExit(el, nd); nodes.push(nd); break; }
         case 'intermediateCatchEvent': { const nd: Node = { ...base, type: 'intermediateCatchEvent' }; applyEventDef(nd, el); nodes.push(nd); break; }
         case 'intermediateThrowEvent': { const nd: Node = { ...base, type: 'intermediateThrowEvent' }; applyEventDef(nd, el); nodes.push(nd); break; }
         case 'boundaryEvent': { const nd: Node = { ...base, type: 'boundaryEvent', attachedTo: el.attrs.attachedToRef, cancelActivity: el.attrs.cancelActivity !== 'false' }; applyEventDef(nd, el); nodes.push(nd); break; }
-        case 'scriptTask': nodes.push({ ...base, type: 'scriptTask', script: cdataText(kid(el, 'script')), scriptFormat: el.attrs.scriptFormat }); break;
-        case 'userTask': { const nd: Node = { ...base, type: 'userTask', taskName: assignTo(el, '_TaskNameInputX'), skippable: assignTo(el, '_SkippableInputX') !== 'false', group: assignTo(el, '_GroupIdInputX') }; applyOnEntryExit(el, nd); nodes.push(nd); break; }
+        case 'scriptTask': { const nd: Node = { ...base, type: 'scriptTask', script: cdataText(kid(el, 'script')), scriptFormat: el.attrs.scriptFormat }; applyOnEntryExit(el, nd); nodes.push(nd); break; }
+        case 'userTask': { const nd: Node = { ...base, type: 'userTask', taskName: assignTo(el, '_TaskNameInputX'), skippable: assignTo(el, '_SkippableInputX') !== 'false', group: assignTo(el, '_GroupIdInputX') }; const ti = userTaskInputs(el); if (Object.keys(ti).length) nd.taskInputs = ti; applyOnEntryExit(el, nd); nodes.push(nd); break; }
         case 'businessRuleTask': {
           const nd: Node = { ...base, type: 'businessRuleTask', ruleFlowGroup: attr(el, 'drools:ruleFlowGroup'), implementation: el.attrs.implementation };
           if (el.attrs.implementation === 'http://www.jboss.org/drools/dmn') {
@@ -139,7 +152,7 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
           nodes.push(nd); break;
         }
         case 'callActivity': {
-          const nd: Node = { ...base, type: 'callActivity', calledElement: el.attrs.calledElement };
+          const nd: Node = { ...base, type: 'callActivity', calledElement: el.attrs.calledElement, ...(attr(el, 'drools:abortParent') === 'true' ? { abortParent: true } : {}) };
           const mi = kid(el, 'multiInstanceLoopCharacteristics');
           if (mi) {
             nd.subtype = 'multiInstance';
@@ -149,6 +162,7 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
               isSequential: mi.attrs.isSequential === 'true',
               itemVar: (idi && idi.attrs.name) || 'item', itemOutVar: (odi && odi.attrs.name) || 'result',
               collectionIn: firstIn ? sourceText(firstIn) : '', collectionOut: firstOut ? targetText(firstOut) : '',
+              ...(kid(mi, 'completionCondition') ? { completionCondition: cdataText(kid(mi, 'completionCondition')) } : {}),
             };
           } else if ((el.attrs.calledElement || '').endsWith('pru-rest-executor')) {
             nd.subtype = 'rest';
@@ -206,6 +220,19 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
     return { nodes, flows };
   }
 
+  /** every <drools:metaData name=X><drools:metaValue>v of an element, as name -> value */
+  function metaValues(el: ElementNode): Record<string, string> {
+    const ext = kid(el, 'extensionElements'); const out: Record<string, string> = {};
+    if (ext) for (const md of kids(ext, 'metaData')) { const name = md.attrs.name; if (name) out[name] = cdataText(kid(md, 'metaValue')) ?? ''; }
+    return out;
+  }
+  /** process-level jBPM designer extras: SLA due date, instance description, anything else kept verbatim */
+  function procMeta(proc: ElementNode): Partial<ProcessModel> {
+    const m = metaValues(proc); const out: Partial<ProcessModel> = {}; const rest: Record<string, string> = {};
+    for (const [k, v] of Object.entries(m)) { if (k === 'customSLADueDate') out.slaDueDate = v; else if (k === 'customDescription') out.description = v; else rest[k] = v; }
+    if (Object.keys(rest).length) out.metaData = rest;
+    return out;
+  }
   function buildModel(proc: ElementNode): ProcessModel {
     const model: ProcessModel = {
       id: proc.attrs.id || genId('process'),
@@ -213,10 +240,16 @@ export function parseBpmnAll(xml: string): ProcessModel[] {
       packageName: attr(proc, 'drools:packageName') || 'org.jbpm',
       processType: (proc.attrs.processType as ProcessModel['processType']) || 'Public',
       isExecutable: proc.attrs.isExecutable !== 'false',
+      version: attr(proc, 'drools:version') || undefined,
+      ...(attr(proc, 'drools:adHoc') === 'true' ? { adHoc: true } : {}),
+      ...procMeta(proc),
       declarations: { signals, errors, messages, escalations },
       variables: [], dataObjects: [], dataStores: [], lanes: [], nodes: [], flows: [],
     };
-    kids(proc, 'property').forEach((p) => { (model.variables as Variable[]).push({ name: p.attrs.name || p.attrs.id, type: itemTypes[p.attrs.itemSubjectRef] || 'String' }); });
+    kids(proc, 'property').forEach((p) => {
+      const tags = (metaValues(p).customTags || '').split(',').map((t) => t.trim()).filter(Boolean);
+      (model.variables as Variable[]).push({ name: p.attrs.name || p.attrs.id, type: itemTypes[p.attrs.itemSubjectRef] || 'String', ...(tags.length ? { tags } : {}) });
+    });
     kids(proc, 'dataObject').forEach((o) => { (model.dataObjects as DataObject[]).push({ id: o.attrs.id, name: o.attrs.name, type: itemTypes[o.attrs.itemSubjectRef], isCollection: o.attrs.isCollection === 'true' }); });
     kids(proc, 'dataStoreReference').forEach((o) => { (model.dataStores as DataStoreRef[]).push({ id: o.attrs.id, name: o.attrs.name, dataStoreRef: o.attrs.dataStoreRef }); });
     const ls = kid(proc, 'laneSet');

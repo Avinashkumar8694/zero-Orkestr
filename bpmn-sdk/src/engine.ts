@@ -15,7 +15,7 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 
 export type GatewayMode = 'exclusive' | 'parallel' | 'inclusive' | 'event' | 'complex';
 export interface EngineTypeField { name: string; type: string; list?: boolean; }
 export interface EngineType { name: string; package?: string; fields?: EngineTypeField[]; }
-export interface EngineVar { name: string; type: string; }
+export interface EngineVar { name: string; type: string; /** jBPM variable tags: required, readonly, restricted */ tags?: string[]; }
 export interface EngineFlow { id?: string; from: string; to: string; when?: string; lang?: Lang; }
 
 export interface TimerSpec { duration?: string; cycle?: string; date?: string; }
@@ -81,6 +81,8 @@ export type EngineNode =
   | EngineBoundary | EngineSubprocess | EngineWorkItem | EngineRaw;
 export interface EngineProcess {
   id: string; name?: string; package?: string;
+  /** process-level properties (jBPM version / ad-hoc / SLA due date / instance description template) */
+  version?: string; adHoc?: boolean; slaDueDate?: string; description?: string;
   types?: EngineType[]; vars?: EngineVar[];
   lanes?: { id?: string; name?: string; nodes: string[] }[];
   data?: { id?: string; name?: string; type?: string; collection?: boolean }[];
@@ -417,7 +419,7 @@ function setEvent(nd: Node, ev: any): void {
   else if (ev.error) { nd.eventType = 'error'; nd.errorRef = ev.error; }
   else if (ev.escalation) { nd.eventType = 'escalation'; nd.escalationRef = ev.escalation; }
   else if (ev.condition) { nd.eventType = 'conditional'; nd.conditionExpr = ev.condition; nd.conditionExprLanguage = langUri(ev.lang); }
-  else if (ev.timer) { nd.eventType = 'timer'; if (ev.timer.cycle) nd.timeCycle = ev.timer.cycle; else if (ev.timer.date) nd.timeDate = ev.timer.date; else nd.timeDuration = ev.timer.duration || ev.timer; }
+  else if (ev.timer) { nd.eventType = 'timer'; if (ev.timer.cron) { nd.timeCycle = ev.timer.cron; nd.timeCycleLanguage = 'cron'; } else if (ev.timer.cycle) nd.timeCycle = ev.timer.cycle; else if (ev.timer.date) nd.timeDate = ev.timer.date; else nd.timeDuration = ev.timer.duration || ev.timer; }
   else nd.eventType = 'none';
 }
 
@@ -440,7 +442,7 @@ function accessor(structureRef: string): (e: string) => string {
 export function fromEngine(ep: EngineProcess, sharedTypes: EngineType[] = []): ProcessModel {
   const resolve = makeTypeResolver([...(sharedTypes || []), ...(ep.types || [])]);
   const varType: Record<string, string> = {};
-  const variables = (ep.vars || []).map((v) => { const sr = resolve(v.type); varType[v.name] = sr; return { name: v.name, type: sr }; });
+  const variables = (ep.vars || []).map((v) => { const sr = resolve(v.type); varType[v.name] = sr; return { name: v.name, type: sr, ...((v as any).tags?.length ? { tags: (v as any).tags as string[] } : {}) }; });
   const ensure = (name: string, sr: string) => { if (!variables.some((x) => x.name === name)) { variables.push({ name, type: sr }); varType[name] = sr; } };
 
   const sig = new Set(ep.signals || []);
@@ -468,6 +470,8 @@ export function fromEngine(ep: EngineProcess, sharedTypes: EngineType[] = []): P
       out.onExitFormat = langUri(n.onExitLang);
     }
     if (n.async) out.async = true;
+    const ex = extrasOf(n as any); if (Object.keys(ex).length) out.metaData = { ...(out.metaData || {}), ...ex };
+    if ((n as any).autoStart) out.autoStart = true;
     if (n.slaDueDate) out.slaDueDate = n.slaDueDate;
     if (n.asyncRetries !== undefined) (out.metaData ||= {}).asyncRetries = String(n.asyncRetries);
     if (n.asyncRetryDelay) (out.metaData ||= {}).asyncRetryDelay = n.asyncRetryDelay;
@@ -480,6 +484,7 @@ export function fromEngine(ep: EngineProcess, sharedTypes: EngineType[] = []): P
       case 'end': {
         const nd: Node = { ...base, type: 'endEvent' };
         if (n.result === 'terminate') { nd.subtype = 'terminate'; nd.eventType = 'terminate'; }
+        else if ((n as any).result === 'cancel') nd.metaData = extrasOf(n as any);
         else if (n.throw) { setEvent(nd, n.throw); nd.subtype = nd.eventType === 'signal' ? 'signalThrow' : nd.eventType === 'error' ? 'errorThrow' : nd.eventType; if (nd.signalName) sig.add(nd.signalName); if (nd.errorRef) err.add(nd.errorRef); if (nd.escalationRef) esc.add(nd.escalationRef); }
         else { nd.subtype = 'none'; nd.eventType = 'none'; }
         return nd;
@@ -488,7 +493,8 @@ export function fromEngine(ep: EngineProcess, sharedTypes: EngineType[] = []): P
         const code = n.code || '';
         const preamble = n.lang === 'js' ? jsVarsPreamble(code, Object.keys(varType)) + jsInstanceNodePreamble(code)
           : n.lang === 'java' ? javaBareNamePreamble(code, varType) + javaMetaLocalsPreamble(code, varType) : '';
-        return { ...base, type: 'scriptTask', script: preamble + code, scriptFormat: langUri(n.lang) };
+        const { onEntry: _a, onExit: _b, onEntryFormat: _c, onExitFormat: _d, ...meta } = lifecycle(n as any);   // a script task has no onEntry / onExit hooks, but keeps its async / SLA / metadata
+        return { ...base, type: 'scriptTask', script: preamble + code, scriptFormat: langUri(n.lang), ...meta };
       }
       case 'http': {
         ensure('reqPayload', 'String'); ensure('resPayload', 'String'); ensure('baseUrl', 'String');
@@ -527,12 +533,25 @@ export function fromEngine(ep: EngineProcess, sharedTypes: EngineType[] = []): P
           + (n.exitScript ? '\n' + javaBareNamePreamble(n.exitScript, varType) + javaMetaLocalsPreamble(n.exitScript, varType) + n.exitScript : '');
         return { ...base, type: 'callActivity', subtype: 'rest', url: n.url, method: n.method || 'POST', onEntry: entry, onExit: exit };
       }
-      case 'call': return { ...base, type: 'callActivity', subtype: 'reusable', calledElement: n.process,
+      case 'call': return { ...base, type: 'callActivity', subtype: 'reusable', calledElement: n.process, ...((n as any).onChildFailure === 'abort' ? { abortParent: true } : {}),
         dataInputs: Object.entries(n.inputs || {}).map(([k, v]) => ({ name: k, value: String(v).replace(/^\$/, '') })),
         dataOutputs: Object.entries(n.outputs || {}).map(([k, v]) => ({ name: k, to: String(v) })), ...lifecycle(n) };
       case 'forEach': return { ...base, type: 'callActivity', subtype: 'multiInstance', calledElement: n.process,
-        multiInstance: { isSequential: n.parallel === false, collectionIn: n.over, collectionOut: n.collectInto || `${n.over}Results`, itemVar: n.as || 'item', itemOutVar: n.itemResult || 'itemResult', passthru: n.pass || [] }, ...lifecycle(n) };
-      case 'userTask': return { ...base, type: 'userTask', taskName: n.form || n.name, group: n.group || n.assignee, skippable: n.skippable !== false, ...lifecycle(n) };
+        multiInstance: { isSequential: n.parallel === false, collectionIn: n.over, collectionOut: n.collectInto || `${n.over}Results`, itemVar: n.as || 'item', itemOutVar: n.itemResult || 'itemResult', passthru: n.pass || [], ...((n as any).completionCondition ? { completionCondition: (n as any).completionCondition } : {}) }, ...lifecycle(n) };
+      case 'userTask': {
+        const u = n as any; const list = (v: unknown) => (Array.isArray(v) ? v.join(',') : String(v ?? ''));
+        const ti: Record<string, string> = {};
+        if (u.actors?.length) ti.ActorId = list(u.actors);
+        if (u.businessAdmin) ti.BusinessAdministratorId = String(u.businessAdmin);
+        if (u.businessAdminGroups?.length) ti.BusinessAdministratorGroupId = list(u.businessAdminGroups);
+        if (u.stakeholders?.length) ti.TaskStakeholderId = list(u.stakeholders);
+        if (u.excludedOwners?.length) ti.ExcludedOwnerId = list(u.excludedOwners);
+        for (const [k, name] of [['comment', 'Comment'], ['content', 'Content'], ['locale', 'Locale'], ['createdBy', 'CreatedBy'], ['suspendUntil', 'suspendUntil'], ['description', 'Description'],
+          ['notStartedReassign', 'NotStartedReassign'], ['notCompletedReassign', 'NotCompletedReassign'], ['notStartedNotify', 'NotStartedNotify'], ['notCompletedNotify', 'NotCompletedNotify']] as const) if (u[k]) ti[name] = String(u[k]);
+        if (u.priority !== undefined) ti.Priority = String(u.priority);
+        const groups = [u.group || u.assignee, ...(Array.isArray(u.groups) ? u.groups : [])].filter(Boolean).join(',');
+        return { ...base, type: 'userTask', taskName: n.form || n.name, group: groups || undefined, skippable: n.skippable !== false, ...(Object.keys(ti).length ? { taskInputs: ti } : {}), ...lifecycle(n) };
+      }
       case 'rule': return { ...base, type: 'businessRuleTask', ruleFlowGroup: n.ruleflowGroup, implementation: n.dmn ? 'http://www.jboss.org/drools/dmn' : '##unspecified', ...lifecycle(n) };
       case 'send': { if (n.message) msg.add(n.message); return { ...base, type: 'sendTask', messageRef: n.message, implementation: n.implementation || '##WebService', ...lifecycle(n) }; }
       case 'receive': { if (n.message) msg.add(n.message); return { ...base, type: 'receiveTask', messageRef: n.message, implementation: n.implementation || 'Other', ...lifecycle(n) }; }
@@ -542,7 +561,7 @@ export function fromEngine(ep: EngineProcess, sharedTypes: EngineType[] = []): P
         for (const [k, v] of Object.entries(n.params || {})) workParams[k] = typeof v === 'string' && v.startsWith('$') ? v : String(v);
         return { ...base, type: 'genericTask', handlerName: n.handler, workParams, workResultTo: n.resultTo || {}, ...lifecycle(n) };
       }
-      case 'gateway': { const map: Record<string, Node['type']> = { exclusive: 'exclusiveGateway', parallel: 'parallelGateway', inclusive: 'inclusiveGateway', event: 'eventBasedGateway', complex: 'complexGateway' }; return { ...base, type: map[n.mode] || 'exclusiveGateway', gatewayDirection: n.direction || 'Diverging', default: n.default }; }
+      case 'gateway': { const map: Record<string, Node['type']> = { exclusive: 'exclusiveGateway', parallel: 'parallelGateway', inclusive: 'inclusiveGateway', event: 'eventBasedGateway', complex: 'complexGateway' }; return { ...base, type: map[n.mode] || 'exclusiveGateway', gatewayDirection: n.direction || 'Diverging', default: n.default, ...((n as any).instantiate ? { instantiate: true } : {}), ...(Object.keys(extrasOf(n as any)).length ? { metaData: extrasOf(n as any) } : {}) }; }
       case 'catch': { const nd: Node = { ...base, type: 'intermediateCatchEvent' }; setEvent(nd, n.event); if (nd.signalName) sig.add(nd.signalName); if (nd.messageRef) msg.add(nd.messageRef); return nd; }
       case 'throw': { const nd: Node = { ...base, type: 'intermediateThrowEvent' }; setEvent(nd, n.event); if (nd.signalName) sig.add(nd.signalName); if (nd.messageRef) msg.add(nd.messageRef); if (nd.escalationRef) esc.add(nd.escalationRef); return nd; }
       case 'boundary': { const host = Array.isArray(n.on) ? (n.on.find((h) => h !== '*') ?? n.on[0]) : n.on; const nd: Node = { ...base, type: 'boundaryEvent', attachedTo: host, cancelActivity: n.interrupting !== false }; setEvent(nd, n.event); if (nd.errorRef) err.add(nd.errorRef); if (nd.signalName) sig.add(nd.signalName); if (nd.messageRef) msg.add(nd.messageRef); if (nd.escalationRef) esc.add(nd.escalationRef); return nd; }
@@ -598,6 +617,7 @@ export function fromEngine(ep: EngineProcess, sharedTypes: EngineType[] = []): P
 
   const model: ProcessModel = {
     id: ep.id, name: ep.name || ep.id, packageName: ep.package || 'org.jbpm', processType: 'Public', isExecutable: true,
+    ...(ep.version ? { version: ep.version } : {}), ...(ep.adHoc ? { adHoc: true } : {}), ...(ep.slaDueDate ? { slaDueDate: ep.slaDueDate } : {}), ...(ep.description ? { description: ep.description } : {}),
     declarations: {
       signals: [...sig].map((n) => ({ id: `_sig_${n}`, name: n })),
       errors: [...err].map((n) => ({ id: n, errorCode: errCode[n] ?? n })),
@@ -1229,10 +1249,21 @@ export function toEngineProject(project: Project): EngineProject {
 const SR_TO_ENGINE: Record<string, string> = { String: 'string', Integer: 'int', 'java.lang.Long': 'long', 'java.lang.Double': 'double', 'java.lang.Boolean': 'bool', 'java.lang.Object': 'object', 'java.util.List': 'list', 'java.util.Map': 'map', 'java.util.Date': 'date' };
 const dialectToLang = (u?: string): Lang => u && u.includes('javascript') ? 'js' : u && u.includes('mvel') ? 'mvel' : 'java';
 
+/** Engine features jBPM has no field for travel in one metaData entry, so exporting to BPMN and importing back loses nothing
+ *  (jBPM / Business Central ignore metadata keys they do not know). */
+const EXTRA_KEYS = ['on', 'interrupting', 'adHoc', 'completionCondition', 'multiInstance', 'instantiate', 'activationCondition', 'assignmentStrategy', 'swimlane', 'autoClaim', 'isForCompensation', 'onChildFailure', 'errorVar', 'result', 'metaData'] as const;
+export const EXTRAS_META = 'engine.extras';
+const extrasOf = (n: Record<string, any>): Record<string, string> => {
+  const e: Record<string, unknown> = {};
+  for (const k of EXTRA_KEYS) if (n[k] !== undefined && !(k === 'onChildFailure' && n[k] === 'abort') && !(k === 'result' && n[k] !== 'cancel')) e[k] = n[k];
+  return Object.keys(e).length ? { [EXTRAS_META]: JSON.stringify(e) } : {};
+};
+const restoreExtras = (md?: Record<string, string>): Record<string, unknown> => { try { return md?.[EXTRAS_META] ? JSON.parse(md[EXTRAS_META]) : {}; } catch { return {}; } };
+
 export function toEngine(m: ProcessModel): EngineProcess {
   const ev = (n: Node) => n.eventType === 'signal' ? { signal: n.signalName } : n.eventType === 'message' ? { message: n.messageRef }
     : n.eventType === 'error' ? { error: n.errorRef } : n.eventType === 'escalation' ? { escalation: n.escalationRef }
-      : n.eventType === 'timer' ? { timer: { duration: n.timeDuration, cycle: n.timeCycle, date: n.timeDate } }
+      : n.eventType === 'timer' ? { timer: n.timeCycleLanguage === 'cron' ? { cron: n.timeCycle } : { duration: n.timeDuration, cycle: n.timeCycle, date: n.timeDate } }
         : n.eventType === 'conditional' ? { condition: n.conditionExpr, lang: dialectToLang(n.conditionExprLanguage) } : undefined;
   const gwMode: Record<string, string> = { exclusiveGateway: 'exclusive', parallelGateway: 'parallel', inclusiveGateway: 'inclusive', eventBasedGateway: 'event', complexGateway: 'complex' };
   // Reverse of fromEngine's lifecycle() — onEntry/onExit round-trip byte-for-byte here (no preamble
@@ -1242,6 +1273,8 @@ export function toEngine(m: ProcessModel): EngineProcess {
     ...(n.onEntry ? { onEntry: n.onEntry, onEntryLang: dialectToLang(n.onEntryFormat) } : {}),
     ...(n.onExit ? { onExit: n.onExit, onExitLang: dialectToLang(n.onExitFormat) } : {}),
     ...(n.async ? { async: true } : {}),
+    ...restoreExtras(n.metaData),
+    ...(n.autoStart ? { autoStart: true } : {}),
     ...(n.slaDueDate ? { slaDueDate: n.slaDueDate } : {}),
     ...(n.metaData?.asyncRetries !== undefined && Number.isInteger(Number(n.metaData.asyncRetries)) ? { asyncRetries: Number(n.metaData.asyncRetries) } : {}),
     ...(n.metaData?.asyncRetryDelay ? { asyncRetryDelay: n.metaData.asyncRetryDelay } : {}),
@@ -1257,9 +1290,21 @@ export function toEngine(m: ProcessModel): EngineProcess {
     };
     switch (n.type) {
       case 'startEvent': return { ...b, type: 'start', ...(ev(n) ? { on: ev(n) } : {}) };
-      case 'endEvent': return n.eventType === 'terminate' || n.subtype === 'terminate' ? { ...b, type: 'end', result: 'terminate' } : { ...b, type: 'end', ...(ev(n) ? { throw: ev(n) } : {}) };
-      case 'scriptTask': return { ...b, type: 'script', lang: dialectToLang(n.scriptFormat), code: n.script };
-      case 'userTask': return { ...b, type: 'userTask', name: n.name, group: n.group, form: n.taskName, ...revLifecycle(n) };
+      case 'endEvent': return n.eventType === 'terminate' || n.subtype === 'terminate' ? { ...b, type: 'end', result: 'terminate' } : { ...b, type: 'end', ...(ev(n) ? { throw: ev(n) } : {}), ...restoreExtras(n.metaData) };
+      case 'scriptTask': { const { onEntry: _a, onExit: _b, onEntryLang: _c, onExitLang: _d, ...meta } = revLifecycle(n) as any; return { ...b, type: 'script', lang: dialectToLang(n.scriptFormat), code: n.script, ...meta }; }
+      case 'userTask': {
+        const ti = n.taskInputs || {}; const split = (v?: string) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : []);
+        const groups = split(n.group); const extra: Record<string, unknown> = {};
+        if (ti.ActorId) extra.actors = split(ti.ActorId);
+        if (ti.BusinessAdministratorId) extra.businessAdmin = ti.BusinessAdministratorId;
+        if (ti.BusinessAdministratorGroupId) extra.businessAdminGroups = split(ti.BusinessAdministratorGroupId);
+        if (ti.TaskStakeholderId) extra.stakeholders = split(ti.TaskStakeholderId);
+        if (ti.ExcludedOwnerId) extra.excludedOwners = split(ti.ExcludedOwnerId);
+        for (const [name, k] of [['Comment', 'comment'], ['Content', 'content'], ['Locale', 'locale'], ['CreatedBy', 'createdBy'], ['suspendUntil', 'suspendUntil'], ['Description', 'description'],
+          ['NotStartedReassign', 'notStartedReassign'], ['NotCompletedReassign', 'notCompletedReassign'], ['NotStartedNotify', 'notStartedNotify'], ['NotCompletedNotify', 'notCompletedNotify']] as const) if (ti[name] !== undefined) extra[k] = ti[name];
+        if (ti.Priority !== undefined && !Number.isNaN(Number(ti.Priority))) extra.priority = Number(ti.Priority);
+        return { ...b, type: 'userTask', name: n.name, group: groups[0], ...(groups.length > 1 ? { groups: groups.slice(1) } : {}), form: n.taskName, ...extra, ...revLifecycle(n) };
+      }
       // dmnModel present (implementation="...drools/dmn") -> real DMN wiring; decision name is left
       // unset (real jBPM's own dataInputAssociation convention never names one explicitly either — see
       // parse.ts) and defaults to the model's first decision at evaluation time (decisioning.ts).
@@ -1274,7 +1319,7 @@ export function toEngine(m: ProcessModel): EngineProcess {
         return { ...b, type: 'workItem', handler: n.handlerName, params, resultTo: n.workResultTo || {}, ...revLifecycle(n) };
       }
       case 'exclusiveGateway': case 'parallelGateway': case 'inclusiveGateway': case 'eventBasedGateway': case 'complexGateway':
-        return { ...b, type: 'gateway', mode: gwMode[n.type], default: n.default, direction: n.gatewayDirection };
+        return { ...b, type: 'gateway', mode: gwMode[n.type], default: n.default, direction: n.gatewayDirection, ...(n.instantiate ? { instantiate: true } : {}), ...restoreExtras(n.metaData) };
       case 'intermediateCatchEvent': return { ...b, type: 'catch', event: ev(n) };
       case 'intermediateThrowEvent': return { ...b, type: 'throw', event: ev(n) };
       case 'boundaryEvent': return { ...b, type: 'boundary', on: n.attachedTo, event: ev(n), interrupting: n.cancelActivity };
@@ -1284,18 +1329,19 @@ export function toEngine(m: ProcessModel): EngineProcess {
         // the parser); the trigger itself is whatever start event lives inside (usually an error start).
         const errStart = n.subtype === 'event' ? (n.nodes || []).find((x) => x.type === 'startEvent' && x.eventType === 'error') : undefined;
         const on = n.subtype === 'event' ? (errStart?.errorRef ? { error: errStart.errorRef } : {}) : undefined;
-        return { ...b, type: 'subprocess', transaction: n.subtype === 'transaction' || undefined, on, nodes: innerNodes, flows: (n.flows || []).map((f) => ({ id: f.id, from: f.sourceRef, to: f.targetRef, ...(f.condition ? { when: f.condition, lang: dialectToLang(f.conditionLanguage) } : {}) })), ...revLifecycle(n) };
+        return { ...b, type: 'subprocess', transaction: n.subtype === 'transaction' || undefined, on, nodes: innerNodes, ...restoreExtras(n.metaData), flows: (n.flows || []).map((f) => ({ id: f.id, from: f.sourceRef, to: f.targetRef, ...(f.condition ? { when: f.condition, lang: dialectToLang(f.conditionLanguage) } : {}) })), ...revLifecycle(n) };
       }
       case 'callActivity':
-        if (n.subtype === 'multiInstance' && n.multiInstance) return { ...b, type: 'forEach', process: n.calledElement, over: n.multiInstance.collectionIn, as: n.multiInstance.itemVar, collectInto: n.multiInstance.collectionOut, itemResult: n.multiInstance.itemOutVar, parallel: !n.multiInstance.isSequential, pass: n.multiInstance.passthru, ...revLifecycle(n) };
+        if (n.subtype === 'multiInstance' && n.multiInstance) return { ...b, type: 'forEach', process: n.calledElement, over: n.multiInstance.collectionIn, as: n.multiInstance.itemVar, collectInto: n.multiInstance.collectionOut, itemResult: n.multiInstance.itemOutVar, parallel: !n.multiInstance.isSequential, pass: n.multiInstance.passthru, ...(n.multiInstance.completionCondition ? { completionCondition: n.multiInstance.completionCondition } : {}), ...revLifecycle(n) };
         if (n.subtype === 'rest') return { ...b, type: 'http', method: n.method, url: n.url, ...(String(n.onExitFormat || '').includes('javascript') ? { lang: 'js' as Lang } : {}) }; // body/resultTo not reversed
-        return { ...b, type: 'call', process: n.calledElement, ...((n as any).inputs ? { inputs: (n as any).inputs } : {}), ...((n as any).outputs ? { outputs: (n as any).outputs } : {}), ...revLifecycle(n) };
+        return { ...b, type: 'call', process: n.calledElement, ...(n.abortParent ? { onChildFailure: 'abort' } : {}), ...((n as any).inputs ? { inputs: (n as any).inputs } : {}), ...((n as any).outputs ? { outputs: (n as any).outputs } : {}), ...revLifecycle(n) };
       default: return { ...b, type: 'raw', raw: n.raw };
     }
   };
   return {
     id: m.id, name: m.name, package: m.packageName,
-    vars: (m.variables || []).map((v) => ({ name: v.name, type: SR_TO_ENGINE[v.type] || v.type })),
+    ...(m.version && m.version !== '1.0' ? { version: m.version } : {}), ...(m.adHoc ? { adHoc: true } : {}), ...(m.slaDueDate ? { slaDueDate: m.slaDueDate } : {}), ...(m.description ? { description: m.description } : {}),
+    vars: (m.variables || []).map((v) => ({ name: v.name, type: SR_TO_ENGINE[v.type] || v.type, ...(v.tags?.length ? { tags: v.tags } : {}) })),
     signals: (m.declarations?.signals || []).map((s) => s.name),
     errors: (m.declarations?.errors || []).map((e) => (e.id === e.errorCode ? e.id : { name: e.id, code: e.errorCode })),
     messages: (m.declarations?.messages || []).map((x) => x.id),

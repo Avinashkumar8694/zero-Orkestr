@@ -204,6 +204,20 @@ function parseBpmnAll(xml) {
     if (!asg) return void 0;
     return cdataText(kid(asg, "from"));
   };
+  function userTaskInputs(el2) {
+    const spec = kid(el2, "ioSpecification");
+    const out = {};
+    if (!spec) return out;
+    const nameOf = new Map(kids(spec, "dataInput").map((d) => [d.attrs.id, d.attrs.name]));
+    for (const a of kids(el2, "dataInputAssociation")) {
+      const name = nameOf.get(targetText(a));
+      if (!name || name === "TaskName" || name === "Skippable" || name === "GroupId") continue;
+      const asg = kid(a, "assignment");
+      const v = asg ? cdataText(kid(asg, "from")) : void 0;
+      if (v !== void 0) out[name] = v;
+    }
+    return out;
+  }
   function applyOnEntryExit(el2, nd) {
     const ext = kid(el2, "extensionElements");
     if (!ext) return;
@@ -266,8 +280,10 @@ function parseBpmnAll(xml) {
     if (tm) {
       nd.eventType = "timer";
       const dur = kid(tm, "timeDuration"), cyc = kid(tm, "timeCycle"), dat = kid(tm, "timeDate");
-      if (cyc) nd.timeCycle = cdataText(cyc);
-      else if (dat) nd.timeDate = cdataText(dat);
+      if (cyc) {
+        nd.timeCycle = cdataText(cyc);
+        if (cyc.attrs.language) nd.timeCycleLanguage = cyc.attrs.language;
+      } else if (dat) nd.timeDate = cdataText(dat);
       else nd.timeDuration = cdataText(dur);
       return;
     }
@@ -303,6 +319,7 @@ function parseBpmnAll(xml) {
           if (el2.attrs.eventGatewayType) nd.eventGatewayType = el2.attrs.eventGatewayType;
           if (el2.attrs.instantiate) nd.instantiate = el2.attrs.instantiate === "true";
         }
+        applyOnEntryExit(el2, nd);
         nodes.push(nd);
         continue;
       }
@@ -319,6 +336,7 @@ function parseBpmnAll(xml) {
           const nd = { ...base, type: "endEvent" };
           applyEventDef(nd, el2);
           nd.subtype = nd.eventType === "terminate" ? "terminate" : nd.eventType;
+          applyOnEntryExit(el2, nd);
           nodes.push(nd);
           break;
         }
@@ -340,11 +358,16 @@ function parseBpmnAll(xml) {
           nodes.push(nd);
           break;
         }
-        case "scriptTask":
-          nodes.push({ ...base, type: "scriptTask", script: cdataText(kid(el2, "script")), scriptFormat: el2.attrs.scriptFormat });
+        case "scriptTask": {
+          const nd = { ...base, type: "scriptTask", script: cdataText(kid(el2, "script")), scriptFormat: el2.attrs.scriptFormat };
+          applyOnEntryExit(el2, nd);
+          nodes.push(nd);
           break;
+        }
         case "userTask": {
           const nd = { ...base, type: "userTask", taskName: assignTo(el2, "_TaskNameInputX"), skippable: assignTo(el2, "_SkippableInputX") !== "false", group: assignTo(el2, "_GroupIdInputX") };
+          const ti = userTaskInputs(el2);
+          if (Object.keys(ti).length) nd.taskInputs = ti;
           applyOnEntryExit(el2, nd);
           nodes.push(nd);
           break;
@@ -388,7 +411,7 @@ function parseBpmnAll(xml) {
           break;
         }
         case "callActivity": {
-          const nd = { ...base, type: "callActivity", calledElement: el2.attrs.calledElement };
+          const nd = { ...base, type: "callActivity", calledElement: el2.attrs.calledElement, ...attr(el2, "drools:abortParent") === "true" ? { abortParent: true } : {} };
           const mi = kid(el2, "multiInstanceLoopCharacteristics");
           if (mi) {
             nd.subtype = "multiInstance";
@@ -401,7 +424,8 @@ function parseBpmnAll(xml) {
               itemVar: idi && idi.attrs.name || "item",
               itemOutVar: odi && odi.attrs.name || "result",
               collectionIn: firstIn ? sourceText(firstIn) : "",
-              collectionOut: firstOut ? targetText(firstOut) : ""
+              collectionOut: firstOut ? targetText(firstOut) : "",
+              ...kid(mi, "completionCondition") ? { completionCondition: cdataText(kid(mi, "completionCondition")) } : {}
             };
           } else if ((el2.attrs.calledElement || "").endsWith("pru-rest-executor")) {
             nd.subtype = "rest";
@@ -463,6 +487,27 @@ function parseBpmnAll(xml) {
     }
     return { nodes, flows };
   }
+  function metaValues(el2) {
+    const ext = kid(el2, "extensionElements");
+    const out = {};
+    if (ext) for (const md of kids(ext, "metaData")) {
+      const name = md.attrs.name;
+      if (name) out[name] = cdataText(kid(md, "metaValue")) ?? "";
+    }
+    return out;
+  }
+  function procMeta(proc) {
+    const m = metaValues(proc);
+    const out = {};
+    const rest = {};
+    for (const [k, v] of Object.entries(m)) {
+      if (k === "customSLADueDate") out.slaDueDate = v;
+      else if (k === "customDescription") out.description = v;
+      else rest[k] = v;
+    }
+    if (Object.keys(rest).length) out.metaData = rest;
+    return out;
+  }
   function buildModel(proc) {
     const model = {
       id: proc.attrs.id || genId("process"),
@@ -470,6 +515,9 @@ function parseBpmnAll(xml) {
       packageName: attr(proc, "drools:packageName") || "org.jbpm",
       processType: proc.attrs.processType || "Public",
       isExecutable: proc.attrs.isExecutable !== "false",
+      version: attr(proc, "drools:version") || void 0,
+      ...attr(proc, "drools:adHoc") === "true" ? { adHoc: true } : {},
+      ...procMeta(proc),
       declarations: { signals, errors, messages, escalations },
       variables: [],
       dataObjects: [],
@@ -479,7 +527,8 @@ function parseBpmnAll(xml) {
       flows: []
     };
     kids(proc, "property").forEach((p) => {
-      model.variables.push({ name: p.attrs.name || p.attrs.id, type: itemTypes[p.attrs.itemSubjectRef] || "String" });
+      const tags = (metaValues(p).customTags || "").split(",").map((t) => t.trim()).filter(Boolean);
+      model.variables.push({ name: p.attrs.name || p.attrs.id, type: itemTypes[p.attrs.itemSubjectRef] || "String", ...tags.length ? { tags } : {} });
     });
     kids(proc, "dataObject").forEach((o) => {
       model.dataObjects.push({ id: o.attrs.id, name: o.attrs.name, type: itemTypes[o.attrs.itemSubjectRef], isCollection: o.attrs.isCollection === "true" });
@@ -608,15 +657,24 @@ function serializeProcess(proc) {
     if (nd.onExit) parts.push(`<drools:onExit-script scriptFormat="${nd.onExitFormat || JAVA}"><drools:script>${cdata(nd.onExit)}</drools:script></drools:onExit-script>`);
     return parts.length ? `<bpmn2:extensionElements>${parts.join("")}</bpmn2:extensionElements>` : "";
   }
+  function procExt(p) {
+    const md = (name, v) => `<drools:metaData name="${escAttr(name)}"><drools:metaValue>${cdata(v)}</drools:metaValue></drools:metaData>`;
+    const parts = [];
+    if (p.slaDueDate) parts.push(md("customSLADueDate", p.slaDueDate));
+    if (p.description) parts.push(md("customDescription", p.description));
+    for (const [k, v] of Object.entries(p.metaData || {})) parts.push(md(k, v));
+    return parts.length ? `<bpmn2:extensionElements>${parts.join("")}</bpmn2:extensionElements>` : "";
+  }
   function itemDef(id, structureRef) {
     if (seenItem.has(id)) return;
     seenItem.add(id);
     itemdefs.push(`<bpmn2:itemDefinition id="${id}" structureRef="${structureRef}"/>`);
   }
   (proc.variables || []).forEach((v) => {
+    var _a;
     const iid = `_${v.name}Item`;
     itemDef(iid, v.type || "String");
-    props.push(`<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"/>`);
+    props.push(((_a = v.tags) == null ? void 0 : _a.length) ? `<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"><bpmn2:extensionElements><drools:metaData name="customTags"><drools:metaValue>${cdata(v.tags.join(","))}</drools:metaValue></drools:metaData></bpmn2:extensionElements></bpmn2:property>` : `<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"/>`);
   });
   const d = proc.declarations || { signals: [], errors: [] };
   const signals = d.signals || [];
@@ -674,7 +732,7 @@ function serializeProcess(proc) {
         return `<bpmn2:conditionalEventDefinition id="${uid()}"><bpmn2:condition xsi:type="bpmn2:tFormalExpression" language="${nd.conditionExprLanguage || JAVA}">${cdata(nd.conditionExpr || "")}</bpmn2:condition></bpmn2:conditionalEventDefinition>`;
       case "timer": {
         let t = "";
-        if (nd.timeCycle) t = `<bpmn2:timeCycle xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeCycle}</bpmn2:timeCycle>`;
+        if (nd.timeCycle) t = `<bpmn2:timeCycle xsi:type="bpmn2:tFormalExpression"${nd.timeCycleLanguage ? ` language="${escAttr(nd.timeCycleLanguage)}"` : ""} id="${uid()}">${nd.timeCycle}</bpmn2:timeCycle>`;
         else if (nd.timeDate) t = `<bpmn2:timeDate xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeDate}</bpmn2:timeDate>`;
         else t = `<bpmn2:timeDuration xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeDuration || "PT1M"}</bpmn2:timeDuration>`;
         return `<bpmn2:timerEventDefinition id="${uid()}">${t}</bpmn2:timerEventDefinition>`;
@@ -726,7 +784,7 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
       assoc += `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:sourceRef>${v}</bpmn2:sourceRef><bpmn2:targetRef>${nd.id}_${v}</bpmn2:targetRef></bpmn2:dataInputAssociation>`;
     });
     assoc += `<bpmn2:dataOutputAssociation id="${uid()}"><bpmn2:sourceRef>${nd.id}_outcoll</bpmn2:sourceRef><bpmn2:targetRef>${mi.collectionOut}</bpmn2:targetRef></bpmn2:dataOutputAssociation>`;
-    const loop = `<bpmn2:multiInstanceLoopCharacteristics${mi.isSequential ? ' isSequential="true"' : ""}><bpmn2:loopDataInputRef>${nd.id}_incoll</bpmn2:loopDataInputRef><bpmn2:loopDataOutputRef>${nd.id}_outcoll</bpmn2:loopDataOutputRef><bpmn2:inputDataItem id="${nd.id}_item" name="${mi.itemVar}"/><bpmn2:outputDataItem id="${nd.id}_itemout" name="${mi.itemOutVar}"/></bpmn2:multiInstanceLoopCharacteristics>`;
+    const loop = `<bpmn2:multiInstanceLoopCharacteristics${mi.isSequential ? ' isSequential="true"' : ""}><bpmn2:loopDataInputRef>${nd.id}_incoll</bpmn2:loopDataInputRef><bpmn2:loopDataOutputRef>${nd.id}_outcoll</bpmn2:loopDataOutputRef><bpmn2:inputDataItem id="${nd.id}_item" name="${mi.itemVar}"/><bpmn2:outputDataItem id="${nd.id}_itemout" name="${mi.itemOutVar}"/>${mi.completionCondition ? `<bpmn2:completionCondition xsi:type="bpmn2:tFormalExpression" id="${uid()}">${cdata(mi.completionCondition)}</bpmn2:completionCondition>` : ""}</bpmn2:multiInstanceLoopCharacteristics>`;
     return `<bpmn2:callActivity id="${nd.id}" drools:independent="false" drools:waitForCompletion="true" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}<bpmn2:ioSpecification id="${uid()}">${dins.join("")}${douts.join("")}<bpmn2:inputSet id="${uid()}">${inrefs}</bpmn2:inputSet><bpmn2:outputSet id="${uid()}">${outrefs}</bpmn2:outputSet></bpmn2:ioSpecification>${assoc}${loop}</bpmn2:callActivity>`;
   }
   function genericTask(nd) {
@@ -749,13 +807,14 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
     return `<bpmn2:task id="${nd.id}" drools:taskName="${escAttr(nd.handlerName || "")}" name="${escAttr(nd.name || nd.handlerName || "")}">${extBlock(nd)}${inout(nd)}${iospec}${assocs}</bpmn2:task>`;
   }
   function userTask(nd) {
-    const ports = ["TaskName", "Skippable", ...nd.group ? ["GroupId"] : []];
+    const extra = Object.keys(nd.taskInputs || {});
+    const ports = ["TaskName", "Skippable", ...nd.group ? ["GroupId"] : [], ...extra];
     ports.forEach((p) => itemDef(`__${nd.id}_${p}InputXItem`, ""));
     const din = (p) => `<bpmn2:dataInput id="${nd.id}_${p}InputX" drools:dtype="Object" itemSubjectRef="__${nd.id}_${p}InputXItem" name="${p}"/>`;
     const asg = (p, v) => `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:targetRef>${nd.id}_${p}InputX</bpmn2:targetRef><bpmn2:assignment id="${uid()}"><bpmn2:from xsi:type="bpmn2:tFormalExpression" id="${uid()}">${cdata(v)}</bpmn2:from><bpmn2:to xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.id}_${p}InputX</bpmn2:to></bpmn2:assignment></bpmn2:dataInputAssociation>`;
     const dins = ports.map(din).join("");
     const refs = ports.map((p) => `<bpmn2:dataInputRefs>${nd.id}_${p}InputX</bpmn2:dataInputRefs>`).join("");
-    const asgs = asg("TaskName", nd.taskName || nd.name || "Task") + asg("Skippable", String(nd.skippable !== false)) + (nd.group ? asg("GroupId", nd.group) : "");
+    const asgs = asg("TaskName", nd.taskName || nd.name || "Task") + asg("Skippable", String(nd.skippable !== false)) + (nd.group ? asg("GroupId", nd.group) : "") + extra.map((p) => asg(p, nd.taskInputs[p])).join("");
     return `<bpmn2:userTask id="${nd.id}" name="${escAttr(nd.name)}">${extBlock(nd)}${inout(nd)}<bpmn2:ioSpecification id="${uid()}">${dins}<bpmn2:inputSet id="${uid()}">${refs}</bpmn2:inputSet><bpmn2:outputSet id="${uid()}"/></bpmn2:ioSpecification>${asgs}</bpmn2:userTask>`;
   }
   const gatewayEl = {
@@ -768,10 +827,10 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
   function gateway(nd) {
     const el2 = gatewayEl[nd.type];
     const extra = (nd.default ? ` default="${nd.default}"` : "") + (nd.type === "eventBasedGateway" && nd.eventGatewayType ? ` eventGatewayType="${nd.eventGatewayType}"` : "") + (nd.type === "eventBasedGateway" && nd.instantiate != null ? ` instantiate="${nd.instantiate}"` : "");
-    return `<bpmn2:${el2} id="${nd.id}"${nd.name ? ` name="${escAttr(nd.name)}"` : ""} gatewayDirection="${nd.gatewayDirection || "Diverging"}"${extra}>${nd.name ? meta(nd.name) : ""}${inout(nd)}</bpmn2:${el2}>`;
+    return `<bpmn2:${el2} id="${nd.id}"${nd.name ? ` name="${escAttr(nd.name)}"` : ""} gatewayDirection="${nd.gatewayDirection || "Diverging"}"${extra}>${extBlock(nd)}${inout(nd)}</bpmn2:${el2}>`;
   }
   function eventNode(el2, nd, extraAttrs = "") {
-    return `<bpmn2:${el2} id="${nd.id}" name="${escAttr(nd.name || "")}"${extraAttrs}>${meta(nd.name)}${inout(nd)}${buildEventDef(nd)}</bpmn2:${el2}>`;
+    return `<bpmn2:${el2} id="${nd.id}" name="${escAttr(nd.name || "")}"${extraAttrs}>${extBlock(nd)}${inout(nd)}${buildEventDef(nd)}</bpmn2:${el2}>`;
   }
   function bizTask(nd) {
     const a = (nd.ruleFlowGroup ? ` drools:ruleFlowGroup="${escAttr(nd.ruleFlowGroup)}"` : "") + ` implementation="${nd.implementation || "##unspecified"}"`;
@@ -820,7 +879,7 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
       case "boundaryEvent":
         return `<bpmn2:boundaryEvent id="${nd.id}" drools:boundaryca="true" name="${escAttr(nd.name || "")}" attachedToRef="${nd.attachedTo}"${nd.cancelActivity === false ? ' cancelActivity="false"' : ""}>${meta(nd.name)}${(nd.outgoing || []).map((f) => `<bpmn2:outgoing>${f}</bpmn2:outgoing>`).join("")}${buildEventDef(nd)}</bpmn2:boundaryEvent>`;
       case "scriptTask":
-        return `<bpmn2:scriptTask id="${nd.id}" name="${escAttr(nd.name)}" scriptFormat="${nd.scriptFormat || JAVA}">${meta(nd.name)}${inout(nd)}<bpmn2:script>${cdata(nd.script || "")}</bpmn2:script></bpmn2:scriptTask>`;
+        return `<bpmn2:scriptTask id="${nd.id}" name="${escAttr(nd.name)}" scriptFormat="${nd.scriptFormat || JAVA}">${extBlock(nd)}${inout(nd)}<bpmn2:script>${cdata(nd.script || "")}</bpmn2:script></bpmn2:scriptTask>`;
       case "userTask":
         return userTask(nd);
       case "businessRuleTask":
@@ -844,7 +903,7 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
       case "callActivity":
         if (nd.subtype === "multiInstance") return miCall(nd);
         if (nd.subtype === "rest" || nd.rest) return restCall(nd);
-        return `<bpmn2:callActivity id="${nd.id}" drools:independent="${nd.independent !== false}" drools:waitForCompletion="${nd.waitForCompletion !== false}" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}${simpleIo(nd)}</bpmn2:callActivity>`;
+        return `<bpmn2:callActivity id="${nd.id}"${nd.abortParent ? ' drools:abortParent="true"' : ""} drools:independent="${nd.independent !== false}" drools:waitForCompletion="${nd.waitForCompletion !== false}" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}${simpleIo(nd)}</bpmn2:callActivity>`;
       case "raw":
         return nd.raw || "";
       default:
@@ -866,7 +925,8 @@ ${(nd.setVars || []).join("")}} catch(Exception e) {} }`;
 <bpmn2:definitions ${DEFINITIONS_ATTRS} id="${uid("_def")}">
 ${itemdefs.join("\n")}
 ${decls.join("\n")}
-  <bpmn2:process id="${proc.id}" drools:packageName="${proc.packageName || "org.jbpm"}" drools:version="1.0" name="${escAttr(proc.name)}" isExecutable="true" processType="${proc.processType || "Public"}">
+  <bpmn2:process id="${proc.id}" drools:packageName="${proc.packageName || "org.jbpm"}" drools:version="${escAttr(proc.version || "1.0")}"${proc.adHoc ? ' drools:adHoc="true"' : ""} name="${escAttr(proc.name)}" isExecutable="true" processType="${proc.processType || "Public"}">
+${procExt(proc)}
 ${props.join("\n")}
 ${laneSet}
 ${dataObjs}
@@ -1757,7 +1817,10 @@ function setEvent(nd, ev) {
     nd.conditionExprLanguage = langUri(ev.lang);
   } else if (ev.timer) {
     nd.eventType = "timer";
-    if (ev.timer.cycle) nd.timeCycle = ev.timer.cycle;
+    if (ev.timer.cron) {
+      nd.timeCycle = ev.timer.cron;
+      nd.timeCycleLanguage = "cron";
+    } else if (ev.timer.cycle) nd.timeCycle = ev.timer.cycle;
     else if (ev.timer.date) nd.timeDate = ev.timer.date;
     else nd.timeDuration = ev.timer.duration || ev.timer;
   } else nd.eventType = "none";
@@ -1786,9 +1849,10 @@ function fromEngine(ep, sharedTypes = []) {
   const resolve = makeTypeResolver([...sharedTypes || [], ...ep.types || []]);
   const varType = {};
   const variables = (ep.vars || []).map((v) => {
+    var _a;
     const sr = resolve(v.type);
     varType[v.name] = sr;
-    return { name: v.name, type: sr };
+    return { name: v.name, type: sr, ...((_a = v.tags) == null ? void 0 : _a.length) ? { tags: v.tags } : {} };
   });
   const ensure = (name, sr) => {
     if (!variables.some((x) => x.name === name)) {
@@ -1813,12 +1877,16 @@ function fromEngine(ep, sharedTypes = []) {
       out.onExitFormat = langUri(n.onExitLang);
     }
     if (n.async) out.async = true;
+    const ex = extrasOf(n);
+    if (Object.keys(ex).length) out.metaData = { ...out.metaData || {}, ...ex };
+    if (n.autoStart) out.autoStart = true;
     if (n.slaDueDate) out.slaDueDate = n.slaDueDate;
     if (n.asyncRetries !== void 0) (out.metaData ||= {}).asyncRetries = String(n.asyncRetries);
     if (n.asyncRetryDelay) (out.metaData ||= {}).asyncRetryDelay = n.asyncRetryDelay;
     return out;
   };
   const conv = (n) => {
+    var _a, _b, _c, _d;
     const base = { id: n.id, type: "raw", name: n.name };
     switch (n.type) {
       case "start": {
@@ -1834,7 +1902,8 @@ function fromEngine(ep, sharedTypes = []) {
         if (n.result === "terminate") {
           nd.subtype = "terminate";
           nd.eventType = "terminate";
-        } else if (n.throw) {
+        } else if (n.result === "cancel") nd.metaData = extrasOf(n);
+        else if (n.throw) {
           setEvent(nd, n.throw);
           nd.subtype = nd.eventType === "signal" ? "signalThrow" : nd.eventType === "error" ? "errorThrow" : nd.eventType;
           if (nd.signalName) sig.add(nd.signalName);
@@ -1849,7 +1918,8 @@ function fromEngine(ep, sharedTypes = []) {
       case "script": {
         const code = n.code || "";
         const preamble = n.lang === "js" ? jsVarsPreamble(code, Object.keys(varType)) + jsInstanceNodePreamble(code) : n.lang === "java" ? javaBareNamePreamble(code, varType) + javaMetaLocalsPreamble(code, varType) : "";
-        return { ...base, type: "scriptTask", script: preamble + code, scriptFormat: langUri(n.lang) };
+        const { onEntry: _a2, onExit: _b2, onEntryFormat: _c2, onExitFormat: _d2, ...meta } = lifecycle(n);
+        return { ...base, type: "scriptTask", script: preamble + code, scriptFormat: langUri(n.lang), ...meta };
       }
       case "http": {
         ensure("reqPayload", "String");
@@ -1892,6 +1962,7 @@ function fromEngine(ep, sharedTypes = []) {
           type: "callActivity",
           subtype: "reusable",
           calledElement: n.process,
+          ...n.onChildFailure === "abort" ? { abortParent: true } : {},
           dataInputs: Object.entries(n.inputs || {}).map(([k, v]) => ({ name: k, value: String(v).replace(/^\$/, "") })),
           dataOutputs: Object.entries(n.outputs || {}).map(([k, v]) => ({ name: k, to: String(v) })),
           ...lifecycle(n)
@@ -1902,11 +1973,34 @@ function fromEngine(ep, sharedTypes = []) {
           type: "callActivity",
           subtype: "multiInstance",
           calledElement: n.process,
-          multiInstance: { isSequential: n.parallel === false, collectionIn: n.over, collectionOut: n.collectInto || `${n.over}Results`, itemVar: n.as || "item", itemOutVar: n.itemResult || "itemResult", passthru: n.pass || [] },
+          multiInstance: { isSequential: n.parallel === false, collectionIn: n.over, collectionOut: n.collectInto || `${n.over}Results`, itemVar: n.as || "item", itemOutVar: n.itemResult || "itemResult", passthru: n.pass || [], ...n.completionCondition ? { completionCondition: n.completionCondition } : {} },
           ...lifecycle(n)
         };
-      case "userTask":
-        return { ...base, type: "userTask", taskName: n.form || n.name, group: n.group || n.assignee, skippable: n.skippable !== false, ...lifecycle(n) };
+      case "userTask": {
+        const u = n;
+        const list = (v) => Array.isArray(v) ? v.join(",") : String(v ?? "");
+        const ti = {};
+        if ((_a = u.actors) == null ? void 0 : _a.length) ti.ActorId = list(u.actors);
+        if (u.businessAdmin) ti.BusinessAdministratorId = String(u.businessAdmin);
+        if ((_b = u.businessAdminGroups) == null ? void 0 : _b.length) ti.BusinessAdministratorGroupId = list(u.businessAdminGroups);
+        if ((_c = u.stakeholders) == null ? void 0 : _c.length) ti.TaskStakeholderId = list(u.stakeholders);
+        if ((_d = u.excludedOwners) == null ? void 0 : _d.length) ti.ExcludedOwnerId = list(u.excludedOwners);
+        for (const [k, name] of [
+          ["comment", "Comment"],
+          ["content", "Content"],
+          ["locale", "Locale"],
+          ["createdBy", "CreatedBy"],
+          ["suspendUntil", "suspendUntil"],
+          ["description", "Description"],
+          ["notStartedReassign", "NotStartedReassign"],
+          ["notCompletedReassign", "NotCompletedReassign"],
+          ["notStartedNotify", "NotStartedNotify"],
+          ["notCompletedNotify", "NotCompletedNotify"]
+        ]) if (u[k]) ti[name] = String(u[k]);
+        if (u.priority !== void 0) ti.Priority = String(u.priority);
+        const groups = [u.group || u.assignee, ...Array.isArray(u.groups) ? u.groups : []].filter(Boolean).join(",");
+        return { ...base, type: "userTask", taskName: n.form || n.name, group: groups || void 0, skippable: n.skippable !== false, ...Object.keys(ti).length ? { taskInputs: ti } : {}, ...lifecycle(n) };
+      }
       case "rule":
         return { ...base, type: "businessRuleTask", ruleFlowGroup: n.ruleflowGroup, implementation: n.dmn ? "http://www.jboss.org/drools/dmn" : "##unspecified", ...lifecycle(n) };
       case "send": {
@@ -1926,7 +2020,7 @@ function fromEngine(ep, sharedTypes = []) {
       }
       case "gateway": {
         const map = { exclusive: "exclusiveGateway", parallel: "parallelGateway", inclusive: "inclusiveGateway", event: "eventBasedGateway", complex: "complexGateway" };
-        return { ...base, type: map[n.mode] || "exclusiveGateway", gatewayDirection: n.direction || "Diverging", default: n.default };
+        return { ...base, type: map[n.mode] || "exclusiveGateway", gatewayDirection: n.direction || "Diverging", default: n.default, ...n.instantiate ? { instantiate: true } : {}, ...Object.keys(extrasOf(n)).length ? { metaData: extrasOf(n) } : {} };
       }
       case "catch": {
         const nd = { ...base, type: "intermediateCatchEvent" };
@@ -1999,6 +2093,10 @@ function fromEngine(ep, sharedTypes = []) {
     packageName: ep.package || "org.jbpm",
     processType: "Public",
     isExecutable: true,
+    ...ep.version ? { version: ep.version } : {},
+    ...ep.adHoc ? { adHoc: true } : {},
+    ...ep.slaDueDate ? { slaDueDate: ep.slaDueDate } : {},
+    ...ep.description ? { description: ep.description } : {},
     declarations: {
       signals: [...sig].map((n) => ({ id: `_sig_${n}`, name: n })),
       errors: [...err].map((n) => ({ id: n, errorCode: errCode[n] ?? n })),
@@ -2593,9 +2691,23 @@ function toEngineProject(project) {
 }
 var SR_TO_ENGINE = { String: "string", Integer: "int", "java.lang.Long": "long", "java.lang.Double": "double", "java.lang.Boolean": "bool", "java.lang.Object": "object", "java.util.List": "list", "java.util.Map": "map", "java.util.Date": "date" };
 var dialectToLang = (u) => u && u.includes("javascript") ? "js" : u && u.includes("mvel") ? "mvel" : "java";
+var EXTRA_KEYS = ["on", "interrupting", "adHoc", "completionCondition", "multiInstance", "instantiate", "activationCondition", "assignmentStrategy", "swimlane", "autoClaim", "isForCompensation", "onChildFailure", "errorVar", "result", "metaData"];
+var EXTRAS_META = "engine.extras";
+var extrasOf = (n) => {
+  const e = {};
+  for (const k of EXTRA_KEYS) if (n[k] !== void 0 && !(k === "onChildFailure" && n[k] === "abort") && !(k === "result" && n[k] !== "cancel")) e[k] = n[k];
+  return Object.keys(e).length ? { [EXTRAS_META]: JSON.stringify(e) } : {};
+};
+var restoreExtras = (md) => {
+  try {
+    return (md == null ? void 0 : md[EXTRAS_META]) ? JSON.parse(md[EXTRAS_META]) : {};
+  } catch {
+    return {};
+  }
+};
 function toEngine(m) {
   var _a, _b, _c, _d;
-  const ev = (n) => n.eventType === "signal" ? { signal: n.signalName } : n.eventType === "message" ? { message: n.messageRef } : n.eventType === "error" ? { error: n.errorRef } : n.eventType === "escalation" ? { escalation: n.escalationRef } : n.eventType === "timer" ? { timer: { duration: n.timeDuration, cycle: n.timeCycle, date: n.timeDate } } : n.eventType === "conditional" ? { condition: n.conditionExpr, lang: dialectToLang(n.conditionExprLanguage) } : void 0;
+  const ev = (n) => n.eventType === "signal" ? { signal: n.signalName } : n.eventType === "message" ? { message: n.messageRef } : n.eventType === "error" ? { error: n.errorRef } : n.eventType === "escalation" ? { escalation: n.escalationRef } : n.eventType === "timer" ? { timer: n.timeCycleLanguage === "cron" ? { cron: n.timeCycle } : { duration: n.timeDuration, cycle: n.timeCycle, date: n.timeDate } } : n.eventType === "conditional" ? { condition: n.conditionExpr, lang: dialectToLang(n.conditionExprLanguage) } : void 0;
   const gwMode = { exclusiveGateway: "exclusive", parallelGateway: "parallel", inclusiveGateway: "inclusive", eventBasedGateway: "event", complexGateway: "complex" };
   const revLifecycle = (n) => {
     var _a2, _b2;
@@ -2603,6 +2715,8 @@ function toEngine(m) {
       ...n.onEntry ? { onEntry: n.onEntry, onEntryLang: dialectToLang(n.onEntryFormat) } : {},
       ...n.onExit ? { onExit: n.onExit, onExitLang: dialectToLang(n.onExitFormat) } : {},
       ...n.async ? { async: true } : {},
+      ...restoreExtras(n.metaData),
+      ...n.autoStart ? { autoStart: true } : {},
       ...n.slaDueDate ? { slaDueDate: n.slaDueDate } : {},
       ...((_a2 = n.metaData) == null ? void 0 : _a2.asyncRetries) !== void 0 && Number.isInteger(Number(n.metaData.asyncRetries)) ? { asyncRetries: Number(n.metaData.asyncRetries) } : {},
       ...((_b2 = n.metaData) == null ? void 0 : _b2.asyncRetryDelay) ? { asyncRetryDelay: n.metaData.asyncRetryDelay } : {}
@@ -2619,11 +2733,36 @@ function toEngine(m) {
       case "startEvent":
         return { ...b, type: "start", ...ev(n) ? { on: ev(n) } : {} };
       case "endEvent":
-        return n.eventType === "terminate" || n.subtype === "terminate" ? { ...b, type: "end", result: "terminate" } : { ...b, type: "end", ...ev(n) ? { throw: ev(n) } : {} };
-      case "scriptTask":
-        return { ...b, type: "script", lang: dialectToLang(n.scriptFormat), code: n.script };
-      case "userTask":
-        return { ...b, type: "userTask", name: n.name, group: n.group, form: n.taskName, ...revLifecycle(n) };
+        return n.eventType === "terminate" || n.subtype === "terminate" ? { ...b, type: "end", result: "terminate" } : { ...b, type: "end", ...ev(n) ? { throw: ev(n) } : {}, ...restoreExtras(n.metaData) };
+      case "scriptTask": {
+        const { onEntry: _a2, onExit: _b2, onEntryLang: _c2, onExitLang: _d2, ...meta } = revLifecycle(n);
+        return { ...b, type: "script", lang: dialectToLang(n.scriptFormat), code: n.script, ...meta };
+      }
+      case "userTask": {
+        const ti = n.taskInputs || {};
+        const split = (v) => v ? v.split(",").map((x) => x.trim()).filter(Boolean) : [];
+        const groups = split(n.group);
+        const extra = {};
+        if (ti.ActorId) extra.actors = split(ti.ActorId);
+        if (ti.BusinessAdministratorId) extra.businessAdmin = ti.BusinessAdministratorId;
+        if (ti.BusinessAdministratorGroupId) extra.businessAdminGroups = split(ti.BusinessAdministratorGroupId);
+        if (ti.TaskStakeholderId) extra.stakeholders = split(ti.TaskStakeholderId);
+        if (ti.ExcludedOwnerId) extra.excludedOwners = split(ti.ExcludedOwnerId);
+        for (const [name, k] of [
+          ["Comment", "comment"],
+          ["Content", "content"],
+          ["Locale", "locale"],
+          ["CreatedBy", "createdBy"],
+          ["suspendUntil", "suspendUntil"],
+          ["Description", "description"],
+          ["NotStartedReassign", "notStartedReassign"],
+          ["NotCompletedReassign", "notCompletedReassign"],
+          ["NotStartedNotify", "notStartedNotify"],
+          ["NotCompletedNotify", "notCompletedNotify"]
+        ]) if (ti[name] !== void 0) extra[k] = ti[name];
+        if (ti.Priority !== void 0 && !Number.isNaN(Number(ti.Priority))) extra.priority = Number(ti.Priority);
+        return { ...b, type: "userTask", name: n.name, group: groups[0], ...groups.length > 1 ? { groups: groups.slice(1) } : {}, form: n.taskName, ...extra, ...revLifecycle(n) };
+      }
       // dmnModel present (implementation="...drools/dmn") -> real DMN wiring; decision name is left
       // unset (real jBPM's own dataInputAssociation convention never names one explicitly either — see
       // parse.ts) and defaults to the model's first decision at evaluation time (decisioning.ts).
@@ -2651,7 +2790,7 @@ function toEngine(m) {
       case "inclusiveGateway":
       case "eventBasedGateway":
       case "complexGateway":
-        return { ...b, type: "gateway", mode: gwMode[n.type], default: n.default, direction: n.gatewayDirection };
+        return { ...b, type: "gateway", mode: gwMode[n.type], default: n.default, direction: n.gatewayDirection, ...n.instantiate ? { instantiate: true } : {}, ...restoreExtras(n.metaData) };
       case "intermediateCatchEvent":
         return { ...b, type: "catch", event: ev(n) };
       case "intermediateThrowEvent":
@@ -2662,12 +2801,12 @@ function toEngine(m) {
         const innerNodes = (n.nodes || []).map(conv);
         const errStart = n.subtype === "event" ? (n.nodes || []).find((x) => x.type === "startEvent" && x.eventType === "error") : void 0;
         const on = n.subtype === "event" ? (errStart == null ? void 0 : errStart.errorRef) ? { error: errStart.errorRef } : {} : void 0;
-        return { ...b, type: "subprocess", transaction: n.subtype === "transaction" || void 0, on, nodes: innerNodes, flows: (n.flows || []).map((f) => ({ id: f.id, from: f.sourceRef, to: f.targetRef, ...f.condition ? { when: f.condition, lang: dialectToLang(f.conditionLanguage) } : {} })), ...revLifecycle(n) };
+        return { ...b, type: "subprocess", transaction: n.subtype === "transaction" || void 0, on, nodes: innerNodes, ...restoreExtras(n.metaData), flows: (n.flows || []).map((f) => ({ id: f.id, from: f.sourceRef, to: f.targetRef, ...f.condition ? { when: f.condition, lang: dialectToLang(f.conditionLanguage) } : {} })), ...revLifecycle(n) };
       }
       case "callActivity":
-        if (n.subtype === "multiInstance" && n.multiInstance) return { ...b, type: "forEach", process: n.calledElement, over: n.multiInstance.collectionIn, as: n.multiInstance.itemVar, collectInto: n.multiInstance.collectionOut, itemResult: n.multiInstance.itemOutVar, parallel: !n.multiInstance.isSequential, pass: n.multiInstance.passthru, ...revLifecycle(n) };
+        if (n.subtype === "multiInstance" && n.multiInstance) return { ...b, type: "forEach", process: n.calledElement, over: n.multiInstance.collectionIn, as: n.multiInstance.itemVar, collectInto: n.multiInstance.collectionOut, itemResult: n.multiInstance.itemOutVar, parallel: !n.multiInstance.isSequential, pass: n.multiInstance.passthru, ...n.multiInstance.completionCondition ? { completionCondition: n.multiInstance.completionCondition } : {}, ...revLifecycle(n) };
         if (n.subtype === "rest") return { ...b, type: "http", method: n.method, url: n.url, ...String(n.onExitFormat || "").includes("javascript") ? { lang: "js" } : {} };
-        return { ...b, type: "call", process: n.calledElement, ...n.inputs ? { inputs: n.inputs } : {}, ...n.outputs ? { outputs: n.outputs } : {}, ...revLifecycle(n) };
+        return { ...b, type: "call", process: n.calledElement, ...n.abortParent ? { onChildFailure: "abort" } : {}, ...n.inputs ? { inputs: n.inputs } : {}, ...n.outputs ? { outputs: n.outputs } : {}, ...revLifecycle(n) };
       default:
         return { ...b, type: "raw", raw: n.raw };
     }
@@ -2676,7 +2815,14 @@ function toEngine(m) {
     id: m.id,
     name: m.name,
     package: m.packageName,
-    vars: (m.variables || []).map((v) => ({ name: v.name, type: SR_TO_ENGINE[v.type] || v.type })),
+    ...m.version && m.version !== "1.0" ? { version: m.version } : {},
+    ...m.adHoc ? { adHoc: true } : {},
+    ...m.slaDueDate ? { slaDueDate: m.slaDueDate } : {},
+    ...m.description ? { description: m.description } : {},
+    vars: (m.variables || []).map((v) => {
+      var _a2;
+      return { name: v.name, type: SR_TO_ENGINE[v.type] || v.type, ...((_a2 = v.tags) == null ? void 0 : _a2.length) ? { tags: v.tags } : {} };
+    }),
     signals: (((_a = m.declarations) == null ? void 0 : _a.signals) || []).map((s) => s.name),
     errors: (((_b = m.declarations) == null ? void 0 : _b.errors) || []).map((e) => e.id === e.errorCode ? e.id : { name: e.id, code: e.errorCode }),
     messages: (((_c = m.declarations) == null ? void 0 : _c.messages) || []).map((x) => x.id),

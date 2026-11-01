@@ -45,6 +45,16 @@ export function serializeProcess(proc: ProcessModel): string {
     return parts.length ? `<bpmn2:extensionElements>${parts.join('')}</bpmn2:extensionElements>` : '';
   }
 
+  /** process-level metaData: SLA, description and whatever else was kept */
+  function procExt(p: ProcessModel): string {
+    const md = (name: string, v: string) => `<drools:metaData name="${escAttr(name)}"><drools:metaValue>${cdata(v)}</drools:metaValue></drools:metaData>`;
+    const parts: string[] = [];
+    if (p.slaDueDate) parts.push(md('customSLADueDate', p.slaDueDate));
+    if (p.description) parts.push(md('customDescription', p.description));
+    for (const [k, v] of Object.entries(p.metaData || {})) parts.push(md(k, v));
+    return parts.length ? `<bpmn2:extensionElements>${parts.join('')}</bpmn2:extensionElements>` : '';
+  }
+
   function itemDef(id: string, structureRef: string) {
     if (seenItem.has(id)) return;
     seenItem.add(id);
@@ -54,7 +64,9 @@ export function serializeProcess(proc: ProcessModel): string {
   (proc.variables || []).forEach((v) => {
     const iid = `_${v.name}Item`;
     itemDef(iid, v.type || 'String');
-    props.push(`<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"/>`);
+    props.push(v.tags?.length
+      ? `<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"><bpmn2:extensionElements><drools:metaData name="customTags"><drools:metaValue>${cdata(v.tags.join(','))}</drools:metaValue></drools:metaData></bpmn2:extensionElements></bpmn2:property>`
+      : `<bpmn2:property id="${v.name}" itemSubjectRef="${iid}" name="${v.name}"/>`);
   });
 
   const d = proc.declarations || { signals: [], errors: [] };
@@ -108,7 +120,7 @@ export function serializeProcess(proc: ProcessModel): string {
         return `<bpmn2:conditionalEventDefinition id="${uid()}"><bpmn2:condition xsi:type="bpmn2:tFormalExpression" language="${nd.conditionExprLanguage || JAVA}">${cdata(nd.conditionExpr || '')}</bpmn2:condition></bpmn2:conditionalEventDefinition>`;
       case 'timer': {
         let t = '';
-        if (nd.timeCycle) t = `<bpmn2:timeCycle xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeCycle}</bpmn2:timeCycle>`;
+        if (nd.timeCycle) t = `<bpmn2:timeCycle xsi:type="bpmn2:tFormalExpression"${nd.timeCycleLanguage ? ` language="${escAttr(nd.timeCycleLanguage)}"` : ''} id="${uid()}">${nd.timeCycle}</bpmn2:timeCycle>`;
         else if (nd.timeDate) t = `<bpmn2:timeDate xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeDate}</bpmn2:timeDate>`;
         else t = `<bpmn2:timeDuration xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.timeDuration || 'PT1M'}</bpmn2:timeDuration>`;
         return `<bpmn2:timerEventDefinition id="${uid()}">${t}</bpmn2:timerEventDefinition>`;
@@ -170,7 +182,7 @@ export function serializeProcess(proc: ProcessModel): string {
     let assoc = `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:sourceRef>${mi.collectionIn}</bpmn2:sourceRef><bpmn2:targetRef>${nd.id}_incoll</bpmn2:targetRef></bpmn2:dataInputAssociation>`;
     pass.forEach((v) => { assoc += `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:sourceRef>${v}</bpmn2:sourceRef><bpmn2:targetRef>${nd.id}_${v}</bpmn2:targetRef></bpmn2:dataInputAssociation>`; });
     assoc += `<bpmn2:dataOutputAssociation id="${uid()}"><bpmn2:sourceRef>${nd.id}_outcoll</bpmn2:sourceRef><bpmn2:targetRef>${mi.collectionOut}</bpmn2:targetRef></bpmn2:dataOutputAssociation>`;
-    const loop = `<bpmn2:multiInstanceLoopCharacteristics${mi.isSequential ? ' isSequential="true"' : ''}><bpmn2:loopDataInputRef>${nd.id}_incoll</bpmn2:loopDataInputRef><bpmn2:loopDataOutputRef>${nd.id}_outcoll</bpmn2:loopDataOutputRef><bpmn2:inputDataItem id="${nd.id}_item" name="${mi.itemVar}"/><bpmn2:outputDataItem id="${nd.id}_itemout" name="${mi.itemOutVar}"/></bpmn2:multiInstanceLoopCharacteristics>`;
+    const loop = `<bpmn2:multiInstanceLoopCharacteristics${mi.isSequential ? ' isSequential="true"' : ''}><bpmn2:loopDataInputRef>${nd.id}_incoll</bpmn2:loopDataInputRef><bpmn2:loopDataOutputRef>${nd.id}_outcoll</bpmn2:loopDataOutputRef><bpmn2:inputDataItem id="${nd.id}_item" name="${mi.itemVar}"/><bpmn2:outputDataItem id="${nd.id}_itemout" name="${mi.itemOutVar}"/>${mi.completionCondition ? `<bpmn2:completionCondition xsi:type="bpmn2:tFormalExpression" id="${uid()}">${cdata(mi.completionCondition)}</bpmn2:completionCondition>` : ''}</bpmn2:multiInstanceLoopCharacteristics>`;
     return `<bpmn2:callActivity id="${nd.id}" drools:independent="false" drools:waitForCompletion="true" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}<bpmn2:ioSpecification id="${uid()}">${dins.join('')}${douts.join('')}<bpmn2:inputSet id="${uid()}">${inrefs}</bpmn2:inputSet><bpmn2:outputSet id="${uid()}">${outrefs}</bpmn2:outputSet></bpmn2:ioSpecification>${assoc}${loop}</bpmn2:callActivity>`;
   }
 
@@ -201,13 +213,14 @@ export function serializeProcess(proc: ProcessModel): string {
   }
 
   function userTask(nd: Node): string {
-    const ports = ['TaskName', 'Skippable', ...(nd.group ? ['GroupId'] : [])];
+    const extra = Object.keys(nd.taskInputs || {});
+    const ports = ['TaskName', 'Skippable', ...(nd.group ? ['GroupId'] : []), ...extra];
     ports.forEach((p) => itemDef(`__${nd.id}_${p}InputXItem`, ''));
     const din = (p: string) => `<bpmn2:dataInput id="${nd.id}_${p}InputX" drools:dtype="Object" itemSubjectRef="__${nd.id}_${p}InputXItem" name="${p}"/>`;
     const asg = (p: string, v: string) => `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:targetRef>${nd.id}_${p}InputX</bpmn2:targetRef><bpmn2:assignment id="${uid()}"><bpmn2:from xsi:type="bpmn2:tFormalExpression" id="${uid()}">${cdata(v)}</bpmn2:from><bpmn2:to xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.id}_${p}InputX</bpmn2:to></bpmn2:assignment></bpmn2:dataInputAssociation>`;
     const dins = ports.map(din).join('');
     const refs = ports.map((p) => `<bpmn2:dataInputRefs>${nd.id}_${p}InputX</bpmn2:dataInputRefs>`).join('');
-    const asgs = asg('TaskName', nd.taskName || nd.name || 'Task') + asg('Skippable', String(nd.skippable !== false)) + (nd.group ? asg('GroupId', nd.group) : '');
+    const asgs = asg('TaskName', nd.taskName || nd.name || 'Task') + asg('Skippable', String(nd.skippable !== false)) + (nd.group ? asg('GroupId', nd.group) : '') + extra.map((p) => asg(p, nd.taskInputs![p]!)).join('');
     return `<bpmn2:userTask id="${nd.id}" name="${escAttr(nd.name)}">${extBlock(nd)}${inout(nd)}<bpmn2:ioSpecification id="${uid()}">${dins}<bpmn2:inputSet id="${uid()}">${refs}</bpmn2:inputSet><bpmn2:outputSet id="${uid()}"/></bpmn2:ioSpecification>${asgs}</bpmn2:userTask>`;
   }
 
@@ -220,11 +233,11 @@ export function serializeProcess(proc: ProcessModel): string {
     const extra = (nd.default ? ` default="${nd.default}"` : '') +
       (nd.type === 'eventBasedGateway' && nd.eventGatewayType ? ` eventGatewayType="${nd.eventGatewayType}"` : '') +
       (nd.type === 'eventBasedGateway' && nd.instantiate != null ? ` instantiate="${nd.instantiate}"` : '');
-    return `<bpmn2:${el} id="${nd.id}"${nd.name ? ` name="${escAttr(nd.name)}"` : ''} gatewayDirection="${nd.gatewayDirection || 'Diverging'}"${extra}>${nd.name ? meta(nd.name) : ''}${inout(nd)}</bpmn2:${el}>`;
+    return `<bpmn2:${el} id="${nd.id}"${nd.name ? ` name="${escAttr(nd.name)}"` : ''} gatewayDirection="${nd.gatewayDirection || 'Diverging'}"${extra}>${extBlock(nd)}${inout(nd)}</bpmn2:${el}>`;
   }
 
   function eventNode(el: string, nd: Node, extraAttrs = ''): string {
-    return `<bpmn2:${el} id="${nd.id}" name="${escAttr(nd.name || '')}"${extraAttrs}>${meta(nd.name)}${inout(nd)}${buildEventDef(nd)}</bpmn2:${el}>`;
+    return `<bpmn2:${el} id="${nd.id}" name="${escAttr(nd.name || '')}"${extraAttrs}>${extBlock(nd)}${inout(nd)}${buildEventDef(nd)}</bpmn2:${el}>`;
   }
 
   function bizTask(nd: Node): string {
@@ -273,7 +286,7 @@ export function serializeProcess(proc: ProcessModel): string {
       case 'boundaryEvent':
         return `<bpmn2:boundaryEvent id="${nd.id}" drools:boundaryca="true" name="${escAttr(nd.name || '')}" attachedToRef="${nd.attachedTo}"${nd.cancelActivity === false ? ' cancelActivity="false"' : ''}>${meta(nd.name)}${(nd.outgoing || []).map((f) => `<bpmn2:outgoing>${f}</bpmn2:outgoing>`).join('')}${buildEventDef(nd)}</bpmn2:boundaryEvent>`;
       case 'scriptTask':
-        return `<bpmn2:scriptTask id="${nd.id}" name="${escAttr(nd.name)}" scriptFormat="${nd.scriptFormat || JAVA}">${meta(nd.name)}${inout(nd)}<bpmn2:script>${cdata(nd.script || '')}</bpmn2:script></bpmn2:scriptTask>`;
+        return `<bpmn2:scriptTask id="${nd.id}" name="${escAttr(nd.name)}" scriptFormat="${nd.scriptFormat || JAVA}">${extBlock(nd)}${inout(nd)}<bpmn2:script>${cdata(nd.script || '')}</bpmn2:script></bpmn2:scriptTask>`;
       case 'userTask': return userTask(nd);
       case 'businessRuleTask': return bizTask(nd);
       case 'sendTask': return msgTask('sendTask', nd);
@@ -286,7 +299,7 @@ export function serializeProcess(proc: ProcessModel): string {
       case 'callActivity':
         if (nd.subtype === 'multiInstance') return miCall(nd);
         if (nd.subtype === 'rest' || nd.rest) return restCall(nd);
-        return `<bpmn2:callActivity id="${nd.id}" drools:independent="${nd.independent !== false}" drools:waitForCompletion="${nd.waitForCompletion !== false}" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}${simpleIo(nd)}</bpmn2:callActivity>`;
+        return `<bpmn2:callActivity id="${nd.id}"${nd.abortParent ? ' drools:abortParent="true"' : ''} drools:independent="${nd.independent !== false}" drools:waitForCompletion="${nd.waitForCompletion !== false}" name="${escAttr(nd.name)}" calledElement="${nd.calledElement}">${extBlock(nd)}${inout(nd)}${simpleIo(nd)}</bpmn2:callActivity>`;
       case 'raw': return nd.raw || '';
       default: throw new Error(`Unknown node type: ${(nd as Node).type} (${(nd as Node).id})`);
     }
@@ -313,7 +326,8 @@ export function serializeProcess(proc: ProcessModel): string {
 <bpmn2:definitions ${DEFINITIONS_ATTRS} id="${uid('_def')}">
 ${itemdefs.join('\n')}
 ${decls.join('\n')}
-  <bpmn2:process id="${proc.id}" drools:packageName="${proc.packageName || 'org.jbpm'}" drools:version="1.0" name="${escAttr(proc.name)}" isExecutable="true" processType="${proc.processType || 'Public'}">
+  <bpmn2:process id="${proc.id}" drools:packageName="${proc.packageName || 'org.jbpm'}" drools:version="${escAttr(proc.version || '1.0')}"${proc.adHoc ? ' drools:adHoc="true"' : ''} name="${escAttr(proc.name)}" isExecutable="true" processType="${proc.processType || 'Public'}">
+${procExt(proc)}
 ${props.join('\n')}
 ${laneSet}
 ${dataObjs}

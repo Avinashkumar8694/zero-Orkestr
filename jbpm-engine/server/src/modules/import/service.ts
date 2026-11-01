@@ -12,6 +12,7 @@ import { WorkflowService } from '../workflows/service.ts';
 import { VersionService } from '../versions/service.ts';
 import { DeploymentService } from '../deployments/service.ts';
 import { validation } from '../../infra/errors.ts';
+import { WORKITEM_HANDLERS } from '../../engine/workitems/registry.ts';
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
@@ -235,16 +236,57 @@ export function kjarToEngine(files: Record<string, string> | any): EngineProject
   }
 }
 
+// ---------------------------------------------------------------------------------------------------------------- import report
+export interface ImportReportItem { process: string; nodeId?: string; nodeName?: string; severity: 'unsupported' | 'warning' | 'info'; code: string; message: string }
+export interface ImportReport { summary: { unsupported: number; warnings: number; info: number }; items: ImportReportItem[] }
+
+/** Everything in an imported project that did not map cleanly, per process — so nothing is dropped silently:
+ *  constructs kept only as raw XML, jBPM features this engine deliberately does not have (Java imports / globals, rule-driven conditional
+ *  starts, web-service tasks), work-item handlers that are not available here, and a note where Java scripts will use the JVM sidecar. */
+export function buildImportReport(engine: EngineProject, files?: Record<string, unknown>): ImportReport {
+  const items: ImportReportItem[] = [];
+  const add = (i: ImportReportItem) => items.push(i);
+  const known = new Set(Object.keys(WORKITEM_HANDLERS));
+  const walk = (processId: string, nodes: any[]) => {
+    for (const n of nodes || []) {
+      const name = n.name || n.id;
+      if (n.type === 'raw') {
+        const tag = /<\s*(?:\w+:)?(\w+)/.exec(String(n.raw || ''))?.[1] ?? n.bpmnLocal ?? 'element';
+        add({ process: processId, nodeId: n.id, nodeName: name, severity: 'unsupported', code: 'unsupported-construct', message: `"${name}" (${tag}) is not converted: it is kept only in the source XML and does nothing at run time. Replace it with a supported node.` });
+      }
+      if (n.type === 'workItem' && n.handler && !known.has(String(n.handler))) {
+        add({ process: processId, nodeId: n.id, nodeName: name, severity: 'warning', code: 'work-item-handler', message: `Work-item handler "${n.handler}" is not available here: the task will fail with SERVICE_ERROR. Use the HTTP node or one of: ${[...known].join(', ')}.` });
+      }
+      if ((n.type === 'script' || n.type === 'http') && n.lang === 'java') add({ process: processId, nodeId: n.id, nodeName: name, severity: 'info', code: 'java-script', message: `"${name}" is a Java script: it runs in the JVM sidecar (a JDK must be available on the server).` });
+      if (n.type === 'start' && (n.on?.condition || n.event?.condition)) add({ process: processId, nodeId: n.id, nodeName: name, severity: 'warning', code: 'conditional-start', message: `Conditional start "${name}" is not supported (it needs a rule engine watching data). Start by signal, message or timer, or start the process and use a conditional catch as its first step.` });
+      if (Array.isArray(n.nodes)) walk(processId, n.nodes);
+    }
+  };
+  for (const p of engine.processes || []) walk(p.id!, p.nodes as any[]);
+  // source-level findings (only when the source XML is at hand)
+  for (const [rel, content] of Object.entries(files || {})) {
+    if (!/\.bpmn2?$/i.test(rel) || typeof content !== 'string') continue;
+    const proc = /<bpmn2?:process[^>]*\bid="([^"]+)"/.exec(content)?.[1] ?? rel;
+    const imports = [...content.matchAll(/<drools:import\s+name="([^"]+)"/g)].map((m) => m[1]);
+    if (imports.length) add({ process: proc, severity: 'info', code: 'java-imports', message: `Java imports (${imports.slice(0, 5).join(', ')}${imports.length > 5 ? ', …' : ''}) are not used: this engine runs JavaScript or JVM-sidecar scripts, not a Drools session.` });
+    if (/<drools:global\b/.test(content)) add({ process: proc, severity: 'info', code: 'globals', message: 'Rule globals are not supported.' });
+    if (/implementation="##WebService"|<bpmn2?:serviceTask[^>]*implementation="(?:##WebService|Other)"/.test(content)) add({ process: proc, severity: 'warning', code: 'service-task', message: 'A web-service / Java service task is present: use the HTTP node or a work item instead.' });
+  }
+  const count = (s: ImportReportItem['severity']) => items.filter((i) => i.severity === s).length;
+  return { summary: { unsupported: count('unsupported'), warnings: count('warning'), info: count('info') }, items };
+}
+
 export class ImportService {
   constructor(private ctx: AppContext) {}
   /** Import a kjar file map as a new project (workflow) + initial draft. */
-  async importKjar(files: Record<string, string>, name: string | undefined, actor: string): Promise<{ workflowId: string; processes: number } & AssetImportReport> {
+  async importKjar(files: Record<string, string>, name: string | undefined, actor: string): Promise<{ workflowId: string; processes: number; report: ImportReport } & AssetImportReport> {
     const engine = kjarToEngine(files);
     const assetReport = convertAssets(engine);
+    const report = buildImportReport(engine, files);
     const wf = await new WorkflowService(this.ctx).create({ name: name || (engine as any).name || (engine as any).id || 'Imported project' }, actor);
     await new VersionService(this.ctx).saveDraft(wf.defaultBranchId, engine, actor);
-    await this.ctx.audit({ actor, kind: 'project.imported', workflowId: wf.id, data: { processes: engine.processes?.length || 0, ...assetReport } });
-    return { workflowId: wf.id, processes: engine.processes?.length || 0, ...assetReport };
+    await this.ctx.audit({ actor, kind: 'project.imported', workflowId: wf.id, data: { processes: engine.processes?.length || 0, ...assetReport, report: report.summary } });
+    return { workflowId: wf.id, processes: engine.processes?.length || 0, ...assetReport, report };
   }
 
   /** Import a kjar straight to a running deployment in one step — no manual Publish/Deploy detour
@@ -256,15 +298,16 @@ export class ImportService {
   async importAndDeploy(
     files: Record<string, string>, name: string | undefined, actor: string,
     opts: { environment: string; tags?: string[]; env?: Record<string, string> },
-  ): Promise<{ workflowId: string; processes: number; deploymentId: string } & AssetImportReport> {
+  ): Promise<{ workflowId: string; processes: number; deploymentId: string; report: ImportReport } & AssetImportReport> {
     const engine = kjarToEngine(files);
     const assetReport = convertAssets(engine);
+    const report = buildImportReport(engine, files);
     const wf = await new WorkflowService(this.ctx).create({ name: name || (engine as any).name || (engine as any).id || 'Imported project' }, actor);
     const ver = new VersionService(this.ctx);
     const draft = await ver.saveDraft(wf.defaultBranchId, engine, actor);
     const { published } = await ver.publish(draft.id, actor, 'v1');
     const dep = await new DeploymentService(this.ctx).deploy(published.id, { environment: opts.environment, tags: opts.tags, env: opts.env, activate: true }, actor);
-    await this.ctx.audit({ actor, kind: 'project.imported', workflowId: wf.id, data: { processes: engine.processes?.length || 0, deployed: true, deploymentId: dep.id, ...assetReport } });
-    return { workflowId: wf.id, processes: engine.processes?.length || 0, deploymentId: dep.id, ...assetReport };
+    await this.ctx.audit({ actor, kind: 'project.imported', workflowId: wf.id, data: { processes: engine.processes?.length || 0, deployed: true, deploymentId: dep.id, ...assetReport, report: report.summary } });
+    return { workflowId: wf.id, processes: engine.processes?.length || 0, deploymentId: dep.id, ...assetReport, report };
   }
 }
