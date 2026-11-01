@@ -44,6 +44,8 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
           }
           <div class="setting-row"><div class="lbl">Default overflow mode<span class="shint">Queue: wait for a slot. Reject: fail immediately.</span></div>
             <select [ngModel]="limits.scriptOverflowModeDefault" (ngModelChange)="setG('scriptOverflowModeDefault', $event)" style="width:120px;"><option value="queue">Queue</option><option value="reject">Reject</option></select></div>
+          <div class="setting-row"><div class="lbl">Workspace admins can manage script settings<span class="shint">Off: only system administrators see and change pool size, queue and overflow. On: workspace admins see and manage them within the caps above (a workspace can override this switch).</span></div>
+            <input type="checkbox" [ngModel]="limits.scriptControlsVisible" (ngModelChange)="setG('scriptControlsVisible', $event)" /></div>
           <div class="actions"><button class="btn primary" (click)="saveGlobal()">Save global limits</button></div>
         </section>
       }
@@ -84,6 +86,8 @@ const WS_FIELDS: Array<keyof WorkspaceLimitOverride> = ['scriptPoolDefaultSize',
           }
           <div class="setting-row"><div class="lbl">Lock overflow mode<span class="shint">When set, the workspace cannot choose its own mode.</span></div>
             <select [ngModel]="ov().lockedOverflowMode ?? null" (ngModelChange)="setOv('lockedOverflowMode', $event)" style="width:140px;"><option [ngValue]="null">Not locked</option><option value="queue">Queue</option><option value="reject">Reject</option></select></div>
+          <div class="setting-row"><div class="lbl">Script settings for this workspace's admins<span class="shint">Inherit follows the global switch.</span></div>
+            <select [ngModel]="ov().scriptControlsVisible ?? null" (ngModelChange)="setOv('scriptControlsVisible', $event)" style="width:140px;"><option [ngValue]="null">Inherit global</option><option [ngValue]="true">Show and allow</option><option [ngValue]="false">Hide</option></select></div>
           <div class="actions"><button class="btn primary" (click)="saveWs(w)">Save override</button> <button class="btn" (click)="editing.set(null)">Cancel</button></div>
         </section>
       }
@@ -161,7 +165,7 @@ export class PlatformLimitsComponent implements OnInit, OnDestroy {
   saveWs(w: PlatformUsageRow) {
     const cur = this.ov() as Record<string, unknown>;
     const patch: Record<string, unknown> = {};
-    for (const k of [...WS_FIELDS, 'lockedOverflowMode']) patch[k] = cur[k] ?? null;   // null clears an inherited field
+    for (const k of [...WS_FIELDS, 'lockedOverflowMode', 'scriptControlsVisible']) patch[k] = cur[k] ?? null;   // null clears an inherited field
     this.api.putWorkspace(w.workspaceId, patch).subscribe({ next: () => { this.toast.success('Workspace override saved and applied live'); this.editing.set(null); this.refresh(); }, error: (e) => this.toast.error(e?.error?.error?.message || 'Could not save') });
   }
 }

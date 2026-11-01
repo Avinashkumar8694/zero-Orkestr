@@ -36,6 +36,8 @@ export interface PlatformLimits {
   maxActiveInstancesCap: number;      // 0 = no cap
   maxActiveTimersCap: number;         // 0 = no cap
   maxReplicasCap: number;             // most replicas that may serve any one workspace; 0 = no cap
+  /** may workspace admins see and manage the script pool / queue / overflow settings (within the caps)? a workspace can override this */
+  scriptControlsVisible: boolean;
 }
 /** per-workspace platform override — every field optional; unset = inherit the global value. */
 export interface WorkspaceLimits {
@@ -46,6 +48,8 @@ export interface WorkspaceLimits {
   maxActiveInstancesCap?: number;
   maxActiveTimersCap?: number;
   maxReplicasCap?: number;
+  /** show / hide the script controls for this workspace's admins; unset = inherit the global switch */
+  scriptControlsVisible?: boolean;
   /** when set, the workspace cannot choose its own overflow mode */
   lockedOverflowMode?: OverflowMode;
 }
@@ -68,6 +72,7 @@ const ENV_DEFAULTS = (): PlatformLimits => ({
   maxActiveInstancesCap: envNum(process.env.MAX_ACTIVE_INSTANCES_CAP, 0),
   maxActiveTimersCap: envNum(process.env.MAX_ACTIVE_TIMERS_CAP, 0),
   maxReplicasCap: envNum(process.env.MAX_REPLICAS_CAP, 0),
+  scriptControlsVisible: process.env.SCRIPT_CONTROLS_VISIBLE === 'true',
 });
 const BOOT_DEFAULTS = ENV_DEFAULTS();
 
@@ -249,6 +254,7 @@ export class PlatformLimitsService {
     for (const [k, v] of Object.entries(patch || {})) {
       if (v === null) continue;                                 // null = revert this field to its env default
       if ((GLOBAL_INT_FIELDS as readonly string[]).includes(k)) { intField(k, v, ZERO_OK.has(k)); (clean as any)[k] = v; }
+      else if (k === 'scriptControlsVisible') { if (typeof v !== 'boolean') throw validation('scriptControlsVisible must be true or false'); clean[k] = v; }
       else if (k === 'scriptOverflowModeDefault') { if (!isOverflowMode(v)) throw validation("scriptOverflowModeDefault must be 'queue' or 'reject'"); clean[k] = v; }
       else throw validation(`unknown platform limit "${k}"`);
     }
@@ -284,7 +290,11 @@ export class PlatformLimitsService {
     const current = await readWs(this.store, workspaceId);
     const next: WorkspaceLimits = { ...current };
     for (const [k, v] of Object.entries(patch || {})) {
-      if (k === 'lockedOverflowMode') {
+      if (k === 'scriptControlsVisible') {
+        if (v === null) delete next.scriptControlsVisible;
+        else if (typeof v !== 'boolean') throw validation('scriptControlsVisible must be true, false or null');
+        else next.scriptControlsVisible = v;
+      } else if (k === 'lockedOverflowMode') {
         if (v === null) delete next.lockedOverflowMode;
         else if (!isOverflowMode(v)) throw validation("lockedOverflowMode must be 'queue', 'reject' or null");
         else next.lockedOverflowMode = v;
@@ -338,4 +348,10 @@ export class PlatformLimitsService {
     }
     return { global: g, server: { totalIsolates: stats.totalIsolates, maxIsolates: sandboxConfig().maxIsolates, queuedTotal: stats.queuedTotal, created: stats.created, recycled: stats.recycled, executions: stats.executions, queueRejected: stats.queueRejected, overflowRejected: stats.overflowRejected, queueTimeouts: stats.queueTimeouts }, workspaces: rows };
   }
+}
+
+/** Do this workspace's admins get to see and manage script parallelism? workspace override, else the global switch (default: no). */
+export async function scriptControlsVisibleFor(store: Store, workspaceId: string): Promise<boolean> {
+  const { global, override } = await platformLimitsOf(store, workspaceId);
+  return override.scriptControlsVisible ?? global.scriptControlsVisible ?? false;
 }

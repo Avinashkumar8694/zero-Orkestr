@@ -233,3 +233,20 @@ test('PLIM-9 a database flag makes another verified user a system administrator'
   resetSystemAdminCache(h.store);
   assert.strictEqual((await call()).status, 403, 'unticking removes it');
 });
+
+test('PLIM-10 the system administrator can allow workspace admins to manage script settings: globally, with a per-workspace override', async () => {
+  const ownerGet = (w: typeof ws) => h.call('GET', '/settings/system', { token: w.tokens.owner, tenant: w.id });
+  const ownerPut = (w: typeof ws, body: unknown) => h.call('PUT', '/settings/system', { token: w.tokens.owner, tenant: w.id, body });
+  assert.ok(!('scriptPoolSize' in (await ownerGet(ws)).body) && !('scriptPoolMaxSize' in (await ownerGet(ws)).body.limitCaps), 'hidden by default');
+  assert.strictEqual((await platformCall('PUT', '/limits', { scriptControlsVisible: true, scriptPoolMaxSize: 6 })).status, 200);
+  const shown = (await ownerGet(ws)).body;
+  assert.strictEqual(shown.limitCaps.scriptPoolMaxSize, 6, 'now visible with the cap');
+  assert.strictEqual((await ownerPut(ws, { scriptPoolSize: 3 })).status, 200, 'and manageable');
+  assert.strictEqual((await ownerPut(ws, { scriptPoolSize: 9 })).status, 422, 'still inside the cap');
+  assert.strictEqual((await platformCall('PUT', `/workspaces/${ws2.id}/limits`, { scriptControlsVisible: false })).status, 200);
+  assert.ok(!('scriptPoolMaxSize' in (await ownerGet(ws2)).body.limitCaps), 'per-workspace hide wins over the global switch');
+  assert.strictEqual((await ownerPut(ws2, { scriptPoolSize: 2 })).status, 403);
+  assert.strictEqual((await platformCall('PUT', '/limits', { scriptControlsVisible: 'yes' })).status, 422, 'validated');
+  await platformCall('PUT', '/limits', { scriptControlsVisible: null, scriptPoolMaxSize: null });
+  await platformCall('PUT', `/workspaces/${ws2.id}/limits`, { scriptControlsVisible: null });
+});

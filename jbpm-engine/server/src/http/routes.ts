@@ -22,7 +22,7 @@ import { IamService } from '../modules/iam/service.ts';
 import { ErrorService } from '../modules/errors/service.ts';
 import { AuditService } from '../modules/audit/service.ts';
 import { NotificationService } from '../modules/notifications/service.ts';
-import { effectiveLimitsFor } from '../modules/platform/limits.ts';
+import { effectiveLimitsFor, scriptControlsVisibleFor } from '../modules/platform/limits.ts';
 import { SettingsService } from '../modules/settings/service.ts';
 import { planUsageFor } from '../modules/plans/plans.ts';
 
@@ -631,7 +631,7 @@ export function buildRoutes(): Router {
   // the workspace's plan, its limits and what it has used (every member may look; the platform admin edits plans)
   r.get('/plan/usage', perm('team:read'), asyncHandler(async (req, res) => {
     const u: any = await planUsageFor(ctxOf(req));
-    if (!(req as any).access?.platformAdmin) delete u.limits?.concurrentScripts;      // script parallelism is the platform administrator's tuning knob, not a plan feature customers see
+    if (!(req as any).access?.platformAdmin && !(await scriptControlsVisibleFor(ctxOf(req).store, ctxOf(req).tenantId))) delete u.limits?.concurrentScripts;   // shown only when the system administrator allows it
     res.json(u);
   }));
   // the plans this workspace is offered (hidden ones are not listed) and switching itself to one it may select
@@ -659,7 +659,7 @@ export function buildRoutes(): Router {
       effectiveLimits: { ...effective },   // what is really applied (read-only)
       limitCaps: { ...caps },              // what this workspace may not exceed (set by the platform administrator)
     };
-    if (!(req as any).access?.platformAdmin) {   // script parallelism / queue / overflow are visible to the platform administrator only
+    if (!(req as any).access?.platformAdmin && !(await scriptControlsVisibleFor(ctxOf(req).store, ctxOf(req).tenantId))) {   // script parallelism / queue / overflow: system administrator, or workspace admins when allowed (global switch / per-workspace override)
       for (const k of SCRIPT_SETTING_KEYS) delete out[k];
       for (const k of ['scriptPoolSize', 'scriptQueueMax', 'scriptOverflowMode']) delete out.effectiveLimits[k];
       for (const k of ['scriptPoolMaxSize', 'scriptQueueMaxCap', 'lockedOverflowMode']) delete out.limitCaps[k];
@@ -668,7 +668,7 @@ export function buildRoutes(): Router {
   }));
   r.put('/settings/system', perm('admin:iam'), asyncHandler(async (req, res) => {
     const patch = { ...(req.body || {}) };
-    if (!(req as any).access?.platformAdmin) {     // only the system administrator tunes script parallelism, queue and overflow
+    if (!(req as any).access?.platformAdmin && !(await scriptControlsVisibleFor(ctxOf(req).store, ctxOf(req).tenantId))) {     // only the system administrator, or workspace admins it has allowed, tune script parallelism, queue and overflow
       const asked = SCRIPT_SETTING_KEYS.filter((k) => k in patch && !k.startsWith('effective'));
       if (asked.length) throw forbidden('Script parallelism is controlled by the system administrator');
       for (const k of SCRIPT_SETTING_KEYS) delete patch[k];

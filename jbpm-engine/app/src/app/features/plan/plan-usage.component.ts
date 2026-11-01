@@ -19,7 +19,7 @@ interface PlanUsage {
 }
 
 const LIMIT_LABELS: Array<[string, string]> = [
-  ['concurrentRequests', 'Concurrent API requests'], ['requestsPerMinute', 'API requests per minute'],
+  ['concurrentRequests', 'Concurrent API requests'], ['requestsPerMinute', 'API requests per minute'], ['concurrentScripts', 'Parallel script executions'],
   ['instancesPerDay', 'Process starts per day'], ['instancesPerWeek', 'Process starts per week'], ['instancesPerMonth', 'Process starts per month'],
   ['maxActiveInstances', 'Active instances'], ['maxActiveTimers', 'Active timers'], ['maxWorkflows', 'Workflows'], ['maxTeamMembers', 'Team members'], ['maxDeployments', 'Deployments'],
 ];
@@ -102,7 +102,7 @@ const LIMIT_LABELS: Array<[string, string]> = [
         <section class="card">
           <h3>Everything your plan limits</h3>
           <table><tbody>
-            @for (l of limitLabels; track l[0]) { <tr><td>{{ l[1] }}</td><td class="num">{{ d.limits[l[0]] ?? 'unlimited' }}</td></tr> }
+            @for (l of limitLabels; track l[0]) { @if (d.limits[l[0]] !== undefined) { <tr><td>{{ l[1] }}</td><td class="num">{{ d.limits[l[0]] ?? 'unlimited' }}</td></tr> } }
           </tbody></table>
         </section>
       }

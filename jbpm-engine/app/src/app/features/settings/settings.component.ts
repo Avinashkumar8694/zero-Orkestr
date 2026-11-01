@@ -111,7 +111,7 @@ type SettingsTab = 'account' | 'system';
                 <div class="lbl">Max active timers<span class="shint">Scheduled boundary/catch timers at once.@if (s.limitCaps?.maxActiveTimersCap) { Capped by the platform at {{ s.limitCaps?.maxActiveTimersCap }}. }</span></div>
                 <input type="number" [min]="s.limitCaps?.maxActiveTimersCap ? 1 : 0" [max]="s.limitCaps?.maxActiveTimersCap || null" [(ngModel)]="s.maxActiveTimers" style="width:90px;" />
               </div>
-              @if (tenant.isPlatformAdmin()) {
+              @if (s.limitCaps?.scriptPoolMaxSize != null) {
               <div class="setting-row">
                 <div class="lbl">Script pool size<span class="shint">How many scripts run in parallel (each uses its own isolate, ≈64 MB worst case). Platform cap: {{ s.limitCaps?.scriptPoolMaxSize }}. Effective now: {{ s.effectiveLimits?.scriptPoolSize }}. Empty = platform default.</span></div>
                 <input type="number" min="1" [max]="s.limitCaps?.scriptPoolMaxSize || null" [(ngModel)]="s.scriptPoolSize" style="width:90px;" />
