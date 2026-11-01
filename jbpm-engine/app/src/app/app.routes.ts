@@ -52,6 +52,9 @@ export const routes: Routes = [
       { path: 'errors/:id', loadComponent: () => import('./features/ops/execution-error-detail.component').then((m) => m.ExecutionErrorDetailComponent) },
       { path: 'jobs', loadComponent: () => import('./features/ops/jobs-timers.component').then((m) => m.JobsTimersComponent) },
       { path: 'reports', loadComponent: () => import('./features/reports/reports.component').then((m) => m.ReportsComponent) },
+      // Analytics builder: compose analytics, publish under a slug, call as an API (docs/19)
+      { path: 'analytics', canActivate: [permissionGuard('analytics:query')], loadComponent: () => import('./features/analytics/analytics-list.component').then((m) => m.AnalyticsListComponent) },
+      { path: 'analytics/:id', canActivate: [permissionGuard('analytics:query')], loadComponent: () => import('./features/analytics/analytics-editor.component').then((m) => m.AnalyticsEditorComponent) },
       {
         path: 'tasks',
         canActivate: [permissionGuard('task:manage')],

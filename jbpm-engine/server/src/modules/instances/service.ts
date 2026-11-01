@@ -69,14 +69,14 @@ export class InstanceService {
     return inst;
   }
 
-  async start(input: { workflowId: string; processId?: string; environment?: string; deploymentId?: string; variables?: Record<string, unknown>; correlationKey?: string }, actor: string): Promise<Instance> {
+  async start(input: { workflowId: string; processId?: string; environment?: string; deploymentId?: string; variables?: Record<string, unknown>; correlationKey?: string; async?: boolean }, actor: string): Promise<Instance> {
     let dep: Deployment;
     if (input.deploymentId) dep = await this.deployments.get(input.deploymentId);
     else dep = await this.deployments.resolveActive(input.workflowId, input.environment || 'prod');
     if (dep.status === 'archived') throw conflict('cannot start on an archived deployment');
     await this.assertInstanceQuota();
     await enforceInstanceStart(this.ctx);       // plan: trial/plan expiry + daily / weekly / monthly start budgets
-    return this.recordIfFailed(await this.engine.start(dep, input.variables || {}, actor, { processId: input.processId, correlationKey: input.correlationKey }));
+    return this.recordIfFailed(await this.engine.start(dep, input.variables || {}, actor, { processId: input.processId, correlationKey: input.correlationKey, async: input.async === true }));
   }
 
   async get(id: string): Promise<Instance> {
@@ -135,6 +135,25 @@ export class InstanceService {
     const inst = await this.get(job.instanceId);
     const dep = await this.deployments.get(inst.deploymentId);
     return this.recordIfFailed(await this.engine.fireTimerJob(inst, dep, job.nodeId, job.tokenId));
+  }
+
+  /** The worker runs an async job: release the parked token so its node executes (see ExecutionEngine.fireAsync). */
+  async fireAsync(job: TimerJob): Promise<Instance> {
+    const inst = await this.get(job.instanceId);
+    const dep = await this.deployments.get(inst.deploymentId);
+    return this.recordIfFailed(await this.engine.fireAsync(inst, dep, job.tokenId));
+  }
+
+  /** The worker fired a node's SLA job (see ExecutionEngine.fireSla). */
+  async fireSla(job: TimerJob): Promise<Instance> {
+    const inst = await this.get(job.instanceId);
+    const dep = await this.deployments.get(inst.deploymentId);
+    return this.engine.fireSla(inst, dep, job.tokenId);
+  }
+
+  async failAsync(inst: Instance, nodeId: string, message: string): Promise<Instance> {
+    const dep = await this.deployments.get(inst.deploymentId);
+    return this.recordIfFailed(await this.engine.failInstanceAt(inst, dep, nodeId, message));
   }
 
   /** Fire a due start-timer/cron job → begin a new instance on the scheduled deployment+process. */

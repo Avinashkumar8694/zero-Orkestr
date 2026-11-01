@@ -23,7 +23,7 @@ import { CodeEditorComponent } from '../../shared/code-editor.component';
         </div>
       </div>
     }
-    @for (sec of sections; track sec.title) {
+    @for (sec of visibleSections(); track sec.title) {
       <div class="sec">
         <div class="sec-h">{{ sec.title }}</div>
         @for (f of sec.fields; track f.key) {
@@ -254,6 +254,12 @@ import { CodeEditorComponent } from '../../shared/code-editor.component';
 export class PropertiesPanelComponent implements OnChanges {
   @Input() node: any;
   @Input() allNodes: { id: string; type: string; name?: string }[] = [];
+  /** the schema with conditional fields (`when`) resolved against the node's current values; empty sections disappear */
+  visibleSections(): Section[] {
+    return this.sections
+      .map((sec) => ({ ...sec, fields: sec.fields.filter((f) => !f.when || f.when.in.includes(String(this.val(f.when.key) ?? ''))) }))
+      .filter((sec) => sec.fields.length > 0);
+  }
   @Input() sections: Section[] = [];   // property form for this node type, served by the backend catalog
   /** The project's real assets by kind — backs every 'assetRef' field's autocomplete suggestions (and
    *  the 'event' widget's message sub-field), so linking a node to a Form/Ruleset/Decision/etc. is a

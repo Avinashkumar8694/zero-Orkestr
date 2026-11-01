@@ -1,4 +1,4 @@
-import { type NodeDef, GENERAL } from '../def-types.ts';
+import { type NodeDef, GENERAL, EXECUTION, SLA } from '../def-types.ts';
 // Operation tasks backed by work-item handlers. Each palette tile presets the handler; the property
 // panel lets you pick the handler, supply params ($var), and map results back to variables.
 export const def: NodeDef = {
@@ -15,7 +15,7 @@ export const def: NodeDef = {
     { key: 'handler', label: 'Handler', widget: 'select', options: ['Email', 'SMS', 'DBQuery', 'Compute', 'Log'], help: 'Email/SMS/DB call the configured service URL (deployment env), else simulate. Compute evaluates a JS expression.' },
     { key: 'params', label: 'Parameters (value or $var)', widget: 'keyval', valueSource: 'ownRef', help: 'Right side: "$name" to pass one of this process\'s own variables, or a literal value.' },
     { key: 'resultTo', label: 'Map result → variable', widget: 'keyval', keySource: 'own', help: 'Left = this process\'s variable to write (pick an existing one to overwrite it, or type a new name), e.g. result ← result, sent ← sent, rows ← rows.' },
-  ] }],
+  ] }, EXECUTION, SLA],
   diagram: { icon: 'admin', color: '#0891b2', shape: 'rectangle' },
   typeLabel: 'Work item',
 };

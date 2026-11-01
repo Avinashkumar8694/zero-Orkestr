@@ -59,7 +59,8 @@ GET    /api/deployments/:id/export              → kjar zip (application/zip)
 
 ## Instances (runtime)
 ```
-POST   /api/instances                          { workflowId, environment? | deploymentId?, variables?, correlationKey? } → Instance
+POST   /api/instances                          { workflowId, environment? | deploymentId?, variables?, correlationKey?, async? } → 201 Instance (runs inline to its first wait/end)
+                                               async:true or `Prefer: respond-async` → 202 + Location, runs in the background (see 18-async-and-node-properties.md)
 GET    /api/instances                          filter: workflowId, status, deploymentId, correlationKey, cursor
 GET    /api/instances/:id                       full detail (variables, tokens, history, error)
 GET    /api/instances/:id/history               NodeVisit[] (for canvas replay/highlight)

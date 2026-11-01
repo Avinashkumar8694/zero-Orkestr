@@ -9,7 +9,7 @@ import { IconComponent } from '../../shared/icon.component';
 import type { TimerJob } from '../../core/models';
 
 const KIND_LABEL: Record<TimerJob['kind'], string> = {
-  duration: 'Timer (duration)', cycle: 'Timer (cycle)', date: 'Timer (date)', start: 'Start-timer',
+  duration: 'Timer (duration)', cycle: 'Timer (cycle)', date: 'Timer (date)', start: 'Start-timer', async: 'Background run',
 };
 
 /** Jobs & Timers (ux_design/mockups/jobs-timers.html): every scheduled TimerJob with a live
@@ -51,7 +51,8 @@ const KIND_LABEL: Record<TimerJob['kind'], string> = {
                 <tr>
                   <td class="mono">{{ shortId(j.id) }}</td>
                   <td>@if (j.instanceId) { <a class="ident" [routerLink]="['/instances', j.instanceId]">{{ shortId(j.instanceId) }}</a> } @else { <span class="muted">—</span> }</td>
-                  <td>{{ j.processId || j.nodeId || '—' }} @if (j.kind === 'start') { <span class="muted small">(starts a new instance)</span> }</td>
+                  <td>{{ j.processId || j.nodeId || '—' }} @if (j.kind === 'start') { <span class="muted small">(starts a new instance)</span> }
+                    @if (j.kind === 'async' && j.attempts) { <span class="muted small" [title]="j.lastError || ''">attempt {{ j.attempts }}/{{ j.maxAttempts }}{{ j.lastError ? ' — ' + j.lastError : '' }}</span> }</td>
                   <td><span class="badge">{{ kindLabel(j.kind) }}</span></td>
                   <td>
                     @if (j.status === 'scheduled') { <b class="countdown">{{ countdown(j.dueAt) }}</b> }

@@ -25,9 +25,21 @@ export function serializeProcess(proc: ProcessModel): string {
    *  genericTask/subProcess/miCall/reusable callActivity below; restCall has its own variant since it
    *  auto-generates a default onEntry/onExit body rather than omitting it when unset). All pieces
    *  share the ONE <extensionElements> an element may have — never emit two. */
+  /** the jBPM designer extras (Is Async, SLA Due Date, AdHoc Autostart, any other metadata) as <drools:metaData> entries */
+  function extraMeta(nd: Node): string[] {
+    const md = (name: string, v: string) => `<drools:metaData name="${escAttr(name)}"><drools:metaValue>${cdata(v)}</drools:metaValue></drools:metaData>`;
+    const out: string[] = [];
+    if (nd.async) out.push(md('customAsync', 'true'));
+    if (nd.slaDueDate) out.push(md('customSLADueDate', nd.slaDueDate));
+    if (nd.autoStart) out.push(md('customAutoStart', 'true'));
+    for (const [k, v] of Object.entries(nd.metaData || {})) out.push(md(k, v));
+    return out;
+  }
+
   function extBlock(nd: Node): string {
     const parts: string[] = [];
     if (nd.name != null) parts.push(`<drools:metaData name="elementname"><drools:metaValue>${cdata(nd.name)}</drools:metaValue></drools:metaData>`);
+    parts.push(...extraMeta(nd));
     if (nd.onEntry) parts.push(`<drools:onEntry-script scriptFormat="${nd.onEntryFormat || JAVA}"><drools:script>${cdata(nd.onEntry)}</drools:script></drools:onEntry-script>`);
     if (nd.onExit) parts.push(`<drools:onExit-script scriptFormat="${nd.onExitFormat || JAVA}"><drools:script>${cdata(nd.onExit)}</drools:script></drools:onExit-script>`);
     return parts.length ? `<bpmn2:extensionElements>${parts.join('')}</bpmn2:extensionElements>` : '';
@@ -125,7 +137,7 @@ export function serializeProcess(proc: ProcessModel): string {
       `<bpmn2:dataInputAssociation id="${uid()}"><bpmn2:targetRef>${nd.id}_${p}InputX</bpmn2:targetRef>` +
       `<bpmn2:assignment id="${uid()}"><bpmn2:from xsi:type="bpmn2:tFormalExpression" id="${uid()}">${cdata(v)}</bpmn2:from>` +
       `<bpmn2:to xsi:type="bpmn2:tFormalExpression" id="${uid()}">${nd.id}_${p}InputX</bpmn2:to></bpmn2:assignment></bpmn2:dataInputAssociation>`;
-    const ext = `<bpmn2:extensionElements><drools:metaData name="elementname"><drools:metaValue>${cdata(nd.name)}</drools:metaValue></drools:metaData>` +
+    const ext = `<bpmn2:extensionElements><drools:metaData name="elementname"><drools:metaValue>${cdata(nd.name)}</drools:metaValue></drools:metaData>${extraMeta(nd).join('')}` +
       `<drools:onEntry-script scriptFormat="${nd.onEntryFormat || JAVA}"><drools:script>${cdata(entry)}</drools:script></drools:onEntry-script>` +
       `<drools:onExit-script scriptFormat="${nd.onExitFormat || JAVA}"><drools:script>${cdata(exit)}</drools:script></drools:onExit-script></bpmn2:extensionElements>`;
     const iospec = `<bpmn2:ioSpecification id="${uid()}">${di}<bpmn2:dataOutput id="${nd.id}_ResultOutputX" drools:dtype="" itemSubjectRef="__${nd.id}_ResultOutputXItem" name="Result"/>` +
