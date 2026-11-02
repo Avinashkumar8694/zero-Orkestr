@@ -5,13 +5,14 @@
 import type { Request, Response, NextFunction } from 'express';
 import { verifyBearer, permissionGrants, type JwtClaims } from '../infra/auth.ts';
 import { authRequired, forbidden } from '../infra/errors.ts';
-import { Collections, type Role, type Tenant, type TenantMember, type User } from '../domain.ts';
+import { Collections, type ApiKey, type Role, type Tenant, type TenantMember, type User } from '../domain.ts';
+import { apiKeyFromRequest, authenticateApiKey } from '../modules/apikeys/service.ts';
 import { makeContext, type AppContext } from '../context.ts';
 import { DEFAULT_ROLES } from '../modules/iam/service.ts';
 import { claimMemberships, isPlatformAdmin, memberMatches, membershipsOf } from '../modules/tenants/identity.ts';
 
 /** Resolved by requireWorkspaceAccess for the request's workspace; requirePermission reads it. */
-interface Access { platformAdmin: boolean; member?: TenantMember }
+interface Access { platformAdmin: boolean; member?: TenantMember; apiKey?: ApiKey }
 
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   const header = req.header('authorization') || '';
@@ -19,6 +20,18 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   // (/api/docs, /api/openapi*.json): a browser cannot send headers when navigating, so `?token=` is honoured THERE ONLY —
   // elsewhere a token in a URL would end up in logs, history and referrers.
   const docsPath = /^\/api\/(docs|openapi[\w.-]*)\/?$/.test((req.originalUrl || '').split('?')[0]);
+  // an API key is accepted next to an access token (X-API-Key, Authorization: ApiKey …, or a Bearer value that starts with ork_)
+  const rawKey = apiKeyFromRequest(req);
+  if (rawKey) {
+    try {
+      const ctx = (req as any).ctx as AppContext;
+      const key = await authenticateApiKey(ctx.store, rawKey, new Date().toISOString());
+      (req as any).apiKey = key;
+      (req as any).user = { sub: `apikey:${key.id}`, username: `apikey:${key.name}`, roles: [], groups: [], source: 'apikey' } satisfies JwtClaims;
+      (req as any).actor = `apikey:${key.name}`;
+      return next();
+    } catch (e) { return next(e); }
+  }
   const token = header.startsWith('Bearer ')
     ? header.slice(7)
     : (docsPath && typeof req.query?.token === 'string' ? req.query.token : undefined);
@@ -67,6 +80,10 @@ export function requirePermission(...actions: string[]) {
         access = { platformAdmin: await isPlatformAdmin(ctx.store, user), member: members[0] };
       }
       if (access.platformAdmin) return next();
+      if (access.apiKey) {                          // exactly the permissions listed on the key
+        if (actions.some((a) => permissionGrants(access!.apiKey!.permissions, a))) return next();
+        throw forbidden(`this API key does not allow: ${actions.join(' or ')}`);
+      }
 
       const member = access.member;
       if (member) {
@@ -98,6 +115,17 @@ export function requireWorkspaceAccess(req: Request, _res: Response, next: NextF
       if (!user) throw authRequired();
 
       const ctx = (req as any).ctx as AppContext;
+      const key = (req as any).apiKey as ApiKey | undefined;
+      if (key) {                                    // a key works in ONE workspace; naming another is refused, never swapped
+        const asked = (req.headers['x-tenant-id'] as string | undefined)?.trim();
+        if (asked && asked !== key.tenantId) throw forbidden('This API key belongs to another workspace.');
+        const tenant = (await ctx.store.repo<Tenant>(Collections.tenants).query((t) => t.id === key.tenantId))[0];
+        if (!tenant || tenant.status !== 'active') throw forbidden('The workspace of this API key is not active.');
+        (req as any).ctx = makeContext({ store: ctx.store, tenantId: key.tenantId });
+        (req as any).ctx.planExempt = false;
+        (req as any).access = { platformAdmin: false, apiKey: key } satisfies Access;
+        return next();
+      }
       const requestedTenantId = ((req.headers['x-tenant-id'] as string | undefined)?.trim()) || ctx?.tenantId || 'default';
 
       const memberships = (await membershipsOf(ctx.store, user)).filter((m) => m.status === 'active');
@@ -141,6 +169,7 @@ export function requireWorkspaceAccess(req: Request, _res: Response, next: NextF
 export async function callerPermissions(req: Request): Promise<string[]> {
   const access = (req as any).access as Access | undefined;
   if (access?.platformAdmin) return ['*'];
+  if (access?.apiKey) return access.apiKey.permissions;
   const ctx = (req as any).ctx as AppContext;
   const user = (req as any).user as JwtClaims;
   if (access?.member) return access.member.permissions ?? await permissionsForMemberRole(ctx, ctx.tenantId, access.member.role);

@@ -16,6 +16,7 @@ import { DeploymentService } from '../modules/deployments/service.ts';
 import { InstanceService } from '../modules/instances/service.ts';
 import { TaskService } from '../modules/tasks/service.ts';
 import { AllocationService } from '../modules/allocation/service.ts';
+import { ApiKeyService } from '../modules/apikeys/service.ts';
 import { ProcessService } from '../modules/processes/service.ts';
 import { QueryService } from '../modules/queries/service.ts';
 import { AssetsService } from '../modules/assets/service.ts';
@@ -739,6 +740,11 @@ export function buildRoutes(): Router {
     await iam(req).setPassword(req.params.id, plain, actorOf(req));
     res.status(204).end();
   }));
+  // --- API keys: credentials for server-to-server calls, accepted next to access tokens. Managed by workspace admins; a key can never manage keys, users or roles ---
+  r.get('/api-keys', perm('admin:iam'), asyncHandler(async (req, res) => res.json({ items: await new ApiKeyService(ctxOf(req)).list() })));
+  r.post('/api-keys', perm('admin:iam'), asyncHandler(async (req, res) => { const out = await new ApiKeyService(ctxOf(req)).create(req.body || {}, await callerPermissions(req), actorOf(req)); res.status(201).json({ ...out.record, key: out.key }); }));
+  r.delete('/api-keys/:id', perm('admin:iam'), asyncHandler(async (req, res) => { await new ApiKeyService(ctxOf(req)).revoke(req.params.id, actorOf(req)); res.status(204).end(); }));
+
   // --- automatic task assignment: rules, per-person workload, run-now (the allocator runner does the same on its own loop) ---
   r.get('/allocation/rules', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => res.json({ items: await new AllocationService(ctxOf(req)).listRules() })));
   r.post('/allocation/rules', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await new AllocationService(ctxOf(req)).createRule(req.body || {}, actorOf(req)))));

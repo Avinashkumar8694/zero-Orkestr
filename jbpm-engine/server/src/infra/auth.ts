@@ -27,7 +27,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 export interface JwtClaims {
   sub: string; username: string; roles: string[]; groups: string[];
   /** 'local' = signed by this server (POST /auth/login); 'oidc' = issued by the Identity Server. Absent on legacy local tokens. */
-  source?: 'local' | 'oidc';
+  source?: 'local' | 'oidc' | 'apikey';
   email?: string;
   /** only a verified email may be used to claim a pre-created membership. */
   emailVerified?: boolean;

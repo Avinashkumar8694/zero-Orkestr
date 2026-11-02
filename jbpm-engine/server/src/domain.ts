@@ -315,6 +315,20 @@ export interface Role extends Entity {
   permissions: string[];
 }
 
+/** A workspace API key: a credential for server-to-server calls, used alongside access tokens. Only a hash of the secret is stored. */
+export interface ApiKey extends Entity {
+  id: string; tenantId: string; name: string;
+  /** the first characters of the secret, shown in lists so a key can be recognised without revealing it */
+  prefix: string;
+  /** SHA-256 (hex) of the secret part */
+  hash: string;
+  /** what the key may do: a subset of what its creator may do, never admin or "everything" */
+  permissions: string[];
+  createdBy: string; createdAt: string;
+  expiresAt?: string; revokedAt?: string; revokedBy?: string;
+  lastUsedAt?: string;
+}
+
 /** An automatic-assignment rule: which tasks it covers, how to pick a person, and who may be picked. Run by the allocator, never inline. */
 export interface AssignmentRule extends Entity {
   id: string; tenantId: string; name: string; enabled: boolean;
@@ -482,7 +496,7 @@ export interface Plan extends Entity {
 export const Collections = {
   workflows: 'workflows', folders: 'folders', branches: 'branches', versions: 'versions', deployments: 'deployments',
   instances: 'instances', tasks: 'tasks', timers: 'timers', audit: 'audit',
-  users: 'users', groups: 'groups', roles: 'roles', assignmentRules: 'assignmentRules',
+  users: 'users', groups: 'groups', roles: 'roles', assignmentRules: 'assignmentRules', apiKeys: 'apiKeys',
   tenants: 'tenants', tenantMembers: 'tenantMembers', plans: 'plans',
   errors: 'errors', comments: 'comments', notifications: 'notifications', settings: 'settings',
   pendingRegistrations: 'pendingRegistrations', usage: 'usage',

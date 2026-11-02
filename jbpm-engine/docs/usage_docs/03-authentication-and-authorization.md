@@ -15,6 +15,20 @@ Self-service password change: `POST /api/auth/me/password` (current + new passwo
 user, their own account only). Admin-set password: `POST /api/users/:id/password` (requires
 `admin:iam`).
 
+## API keys (programs, not people)
+An API key is a credential for server-to-server calls, accepted next to access tokens. A workspace admin creates it in **Admin → API keys** (or `POST /api/api-keys`), ticks the permissions it needs, optionally sets an expiry, and copies the key (`ork_<id>.<secret>`) **once**; only a hash is stored.
+
+| | |
+|---|---|
+| Send it as | `X-API-Key: ork_…`, or `Authorization: ApiKey ork_…`, or `Authorization: Bearer ork_…` |
+| Acts as | the key itself (`apikey:<name>` in audit logs), never as a person |
+| Scope | exactly one workspace (naming another with `x-tenant-id` is 403) and exactly the permissions on the key |
+| Limits on what it can hold | a subset of what its creator holds; never `*`, `admin:*` or `team:manage`, so a key cannot manage users, roles, keys or the workspace |
+| Lifetime | optional expiry; revoking stops it at once (401); `lastUsedAt` is kept |
+| Not available to keys | endpoints about a signed-in person (profile, own availability) and the WebSocket event stream |
+
+Rotate by creating a second key, switching the integration over, then revoking the first. Plan limits and rate limits of the workspace apply to key traffic as to any other.
+
 ## Roles & permissions
 
 Roles are real, editable rows (`Admin → Roles`), not a hardcoded enum — but five are seeded on first

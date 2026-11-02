@@ -703,6 +703,11 @@ const paths: Record<string, any> = {
     patch: { tags: ['IAM'], summary: 'Update a user’s roles/groups/active flag (admin)', parameters: [idParam()], requestBody: jsonBody({ type: 'object', properties: { roles: { type: 'array', items: { type: 'string' } }, groups: { type: 'array', items: { type: 'string' } }, active: { type: 'boolean' } } }), responses: ok(ref('User')) },
   },
   '/users/{id}/password': { post: { tags: ['IAM'], summary: 'Set a user’s password (admin)', parameters: [idParam()], requestBody: jsonBody({ type: 'object', properties: { password: { type: 'string' } } }), responses: { '204': { description: 'Changed' } } } },
+  '/api-keys': {
+    get: { tags: ['API keys'], summary: 'List the workspace’s API keys (never the secret): name, prefix, permissions, expiry, last use, revoked (admin)', responses: { '200': { description: '{ items: ApiKey[] }' } } },
+    post: { tags: ['API keys'], summary: 'Create an API key. The response carries the key ONCE (key); keep it. Permissions must be ones you hold yourself and can never include admin rights (admin)', requestBody: jsonBody({ type: 'object', required: ['name', 'permissions'], properties: { name: { type: 'string', description: 'what uses the key' }, permissions: { type: 'array', items: { type: 'string' }, example: ['workflow:run', 'workflow:view', 'task:manage'] }, expiresInDays: { type: 'integer', description: '1–3650; omit for a key that does not expire' }, expiresAt: { type: 'string', description: 'ISO date-time, instead of expiresInDays' } } }), responses: { '201': { description: '{ id, name, prefix, permissions, createdAt, expiresAt?, key: "ork_<id>.<secret>" }' } } },
+  },
+  '/api-keys/{id}': { delete: { tags: ['API keys'], summary: 'Revoke a key: it stops working at once (the record stays for audit) (admin)', parameters: [idParam()], responses: { '204': { description: 'Revoked' } } } },
   '/me/availability': {
     get: { tags: ['Task assignment'], summary: 'Whether I am available for automatic task assignment (and until when I am away)', responses: { '200': { description: '{ available, awayUntil?, managed }' } } },
     put: { tags: ['Task assignment'], summary: 'Mark myself away (optionally until a time) or back. Away: no new automatic assignments, and tasks I have not started return to the pool (keepTasks keeps them)', requestBody: jsonBody({ type: 'object', properties: { available: { type: 'boolean' }, awayUntil: { type: 'string' }, keepTasks: { type: 'boolean' } } }), responses: { '200': { description: '{ available, awayUntil?, released }' } } },
@@ -1106,6 +1111,15 @@ All endpoints (except \`POST /api/auth/login\` and \`GET /api/crypto/public-key\
 3. **Pick the workspace**: send \`x-tenant-id: <workspace id>\` on every request (membership is enforced; a missing header means the default workspace).
 4. **Browser Direct Access**: When viewing API documentation in a browser, pass \`?token=<token>\` in the URL.
 
+#### Authenticating with an API key instead
+For integrations that should not sign in as a person, create an **API key** (Admin → API keys, or \`POST /api/api-keys\`) and send it on every request:
+
+\`X-API-Key: ork_<id>.<secret>\` (or \`Authorization: ApiKey <key>\`, or \`Authorization: Bearer <key>\`)
+
+- A key belongs to **one workspace** (no \`x-tenant-id\` needed; naming another workspace is refused) and carries an explicit list of **permissions**, a subset of what its creator may do. It can never manage users, roles, keys or the workspace.
+- The secret is shown **once**, when the key is created; only a hash is stored. Keys can expire and can be revoked at once.
+- API keys are accepted wherever an access token is, except the endpoints that are about a signed-in person (profile, own availability).
+
 ### 2. Ephemeral In-Transit Cryptography
 For high-security environments, credentials and sensitive claims variables can be encrypted before transmission using the ephemeral RSA-OAEP public key retrieved from \`GET /api/crypto/public-key\`.
 
@@ -1147,14 +1161,19 @@ Connect via WebSocket to \`ws://<host>/api/ws?token=<token>\`. Once connected, s
     { name: 'Jobs & Timers', description: 'Durable Asynchronous Timers & Scheduling' },
     { name: 'Catalog', description: 'Node Specifications, Property Schemas & Ports' },
     { name: 'Governance', description: 'Audit Forensics & Enterprise System Settings' },
+    { name: 'API keys', description: 'Workspace API keys: credentials for server-to-server calls, used next to access tokens' },
     { name: 'Notifications', description: 'In-App Operational Alerts & Reminders' },
     { name: 'Import/Export', description: 'jBPM KJAR Archives & Portable Engine JSON Packages' },
   ],
   components: {
     schemas,
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'An access token from sign-in (single sign-on or POST /api/auth/login). It acts as the signed-in person.' },
+      apiKeyAuth: { type: 'apiKey', in: 'header', name: 'X-API-Key', description: 'A workspace API key (ork_…) for server-to-server calls. It acts with exactly the permissions chosen when the key was created, inside that one workspace. The same key also works as `Authorization: ApiKey <key>` or `Authorization: Bearer <key>`.' },
+    },
   },
-  security: [{ bearerAuth: [] }],
+  // either credential is accepted on every endpoint that asks for authentication
+  security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
   paths,
 };
 

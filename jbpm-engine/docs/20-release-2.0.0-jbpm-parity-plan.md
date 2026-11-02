@@ -552,3 +552,17 @@ The allocator skips: a **disabled** account (also when it is named directly on t
 
 A person marks themselves away from the Tasks page (`PUT /me/availability`: until I am back, 4 hours, until tomorrow 08:00, or any time): they get nothing new, and the tasks the allocator gave them that they have **not started** go back to the pool and are assigned to someone else. Work they started, or claimed by hand, stays with them (`keepTasks` leaves everything). A timed absence ends by itself. **Disabling an account** returns its unstarted allocated tasks the same way. "Per day" is a UTC day; business hours are not modelled.
 
+## 19. API keys
+A second credential next to access tokens, for programs rather than people.
+
+| Aspect | Behaviour |
+|---|---|
+| Create / list / revoke | Admin → API keys, or `POST/GET/DELETE /api/api-keys` (needs `admin:iam`). The secret (`ork_<id>.<secret>`) is in the create response only; only SHA-256 of it is stored, compared in constant time |
+| Send as | `X-API-Key`, `Authorization: ApiKey …`, or `Authorization: Bearer ork_…` (documented in Swagger as `apiKeyAuth`, accepted wherever `bearerAuth` is) |
+| Scope | one workspace (another `x-tenant-id` is 403) and exactly the permissions on the key; a subset of what its creator holds; never `*`, `admin:*` or `team:manage`, so a key cannot manage users, roles, keys or the workspace |
+| Lifetime | optional expiry (`expiresInDays` / `expiresAt`); revoke is immediate (401); `lastUsedAt` is updated at most once a minute; creation and revocation are audited |
+| Not for keys | person-only endpoints (profile, own availability) and the WebSocket event stream |
+| Replicas | a key is a row in the shared store, so every replica accepts it and revocation reaches all of them at once |
+
+Verified: `test/api-keys.test.ts` (7), and live against the running app: created through the screen, used with `curl` in all three header forms (200), refused outside its permissions (403), outside its workspace (403) and for key management (403), then revoked through the screen (401). The Swagger document and the Integration Guide (Quickstart tab) describe it, as does `docs/usage_docs/03-authentication-and-authorization.md`.
+

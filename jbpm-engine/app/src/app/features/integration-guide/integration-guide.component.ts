@@ -119,6 +119,30 @@ import { IconComponent } from '../../shared/icon.component';
               <p>To view Swagger UI directly in your browser, visit <code>/api/docs?token=&lt;YOUR_TOKEN&gt;</code>. The token in the query string validates the session and automatically configures Swagger UI to authenticate all "Try it out" requests.</p>
             </div>
 
+            <h3>Authenticating with an API key (for programs, not people)</h3>
+            <p>
+              An integration that should not sign in as a person can use an <b>API key</b> instead of an access token. A workspace admin creates it under <b>Admin → API keys</b> (or <code>POST /api/api-keys</code>), chooses what it may do, and copies the key once. Then send it on every request:
+            </p>
+            <div class="code-wrapper">
+              <div class="code-header">
+                <span>cURL — call the API with a key</span>
+                <button class="btn-copy" (click)="copySnippet(apiKeyCurl)">Copy</button>
+              </div>
+              <pre><code>{{ apiKeyCurl }}</code></pre>
+            </div>
+            <ul>
+              <li>Three equivalent ways to send it: <code>X-API-Key: ork_…</code>, <code>Authorization: ApiKey ork_…</code>, or <code>Authorization: Bearer ork_…</code> (for tools that only know bearer tokens).</li>
+              <li>A key belongs to <b>one workspace</b>: no <code>x-tenant-id</code> is needed, and naming another workspace is refused with 403.</li>
+              <li>A key has only the <b>permissions</b> ticked when it was created (a subset of what its creator holds). Anything else is 403 <i>"this API key does not allow …"</i>. A key can never manage users, roles, keys or the workspace.</li>
+              <li>The secret is shown <b>once</b>; only a hash is stored. Keys can <b>expire</b> and can be <b>revoked</b> at once (then 401). Rotate by creating a second key, switching the integration over, then revoking the old one.</li>
+              <li>Not for keys: endpoints about a signed-in person (profile, your own availability) and the WebSocket event stream, which still use an access token.</li>
+              <li>In Swagger UI, click <b>Authorize</b> and paste the key under <i>apiKeyAuth</i>.</li>
+            </ul>
+            <div class="callout tip">
+              <strong>Keep keys out of code and logs</strong>
+              <p>Store the key in your secret manager, never in a repository or a URL (a key in a query string would end up in logs). Give each integration its own key so one can be revoked without breaking the others.</p>
+            </div>
+
             <h3>Security & Ephemeral In-Transit Cryptography</h3>
             <p>
               For high-security operations (such as initial login and transmission of sensitive policy PII), fetch the temporary RSA-OAEP public key from <code>GET /api/crypto/public-key</code> and encrypt values client-side. The server decrypts them using its in-memory private key.
@@ -486,6 +510,17 @@ export class IntegrationGuideComponent {
   }
 
   // Snippets
+  get apiKeyCurl(): string {
+    const base = window.location.origin;
+    return `curl -s ${base}/api/instances \\
+  -H 'X-API-Key: ork_01HXYZ....<secret>'
+
+# start a process with the same key (the key needs workflow:run)
+curl -s -X POST ${base}/api/instances \\
+  -H 'X-API-Key: ork_01HXYZ....<secret>' -H 'content-type: application/json' \\
+  -d '{"workflowId":"<project id>","environment":"prod","variables":{}}'`;
+  }
+
   get authCurl(): string {
     return `curl -X POST "http://localhost:3000/api/auth/login" \\
   -H "Content-Type: application/json" \\

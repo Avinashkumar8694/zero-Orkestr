@@ -30,3 +30,7 @@ Postgres push-down and the Redis lease are now verified live with separate repli
 - `scriptDialect: 'java'` keeps Java scripts as Java on the JVM instead of converting them; Java behaves as in jBPM (long instance ids, deployment environment through `System.getenv`).
 - A failed deploy no longer leaves an empty project; purge removes a project's deployments and runs.
 
+## API keys and automatic task assignment
+- **API keys:** workspace credentials for server-to-server calls, next to access tokens (`X-API-Key`, `Authorization: ApiKey`, or Bearer). Scoped to one workspace and to chosen permissions, never admin rights; shown once, stored hashed, expiring, instantly revocable. Admin → API keys; documented in Swagger and the Integration Guide.
+- **Automatic task assignment:** a separate allocator runner (`ROLE=allocator`, or part of `all` / `worker`) assigns tasks by rules per project, task or group (round robin, least loaded, by skills), respecting each person's skills, open-task and daily limits, and availability. People can mark themselves away from the Tasks page. Admin → Task assignment shows each person's workload.
+
