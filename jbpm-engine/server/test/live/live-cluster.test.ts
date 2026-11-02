@@ -87,11 +87,17 @@ test('LIVE-5 a replica killed while holding a lease: others are refused, then ta
   assert.strictEqual(late.ok, true, 'lease expired, another replica takes over');
 });
 
-test('LIVE-6 four replicas each create tasks at the same moment under leastLoaded: they spread evenly, nobody is picked twice by mistake', async () => {
-  const l = line({ id: 'u', type: 'userTask', name: 'Review', actors: ['ann', 'bob', 'cy'], assignmentStrategy: 'leastLoaded' });
+test('LIVE-6 four replicas create tasks at the same moment and the allocator runners race for the lease: one pass at a time, an even spread, nobody given two jobs at once', async () => {
+  const { AllocationService } = await import('../../src/modules/allocation/service.ts');
+  for (const n of ['ann', 'bob', 'cy']) await store.repo<any>('users').put({ id: `${TENANT}-${n}`, tenantId: TENANT, username: n, passwordHash: 'x', roles: [], groups: ['live-team'], active: true, createdAt: new Date().toISOString() });
+  await new AllocationService(ctx).createRule({ name: 'live', scope: { group: 'live-team' }, strategy: 'leastLoaded' }, 'test');
+  const l = line({ id: 'u', type: 'userTask', name: 'Review', group: 'live-team' });
   const wf = await deploy('live6', l.nodes, l.flows);
-  const res = await Promise.all(Array.from({ length: 4 }, (_, i) => worker(`as${i}`, { op: 'start', workflowId: wf.id, count: 3 })));
-  assert.ok(res.every((r) => r.ok && r.coordinator === 'redis'), JSON.stringify(res));
+  const started = await Promise.all(Array.from({ length: 4 }, (_, i) => worker(`as${i}`, { op: 'start', workflowId: wf.id, count: 3 })));
+  assert.ok(started.every((r) => r.ok && r.coordinator === 'redis'), JSON.stringify(started));
+  const passes = await Promise.all(Array.from({ length: 3 }, (_, i) => worker(`al${i}`, { op: 'allocate' })));
+  assert.ok(passes.filter((p: any) => p.leased).length >= 1, 'one runner got the lease');
+  await worker('al-last', { op: 'allocate' });                                    // a later pass picks up anything the first lease-holder did not
   const tasks = await store.repo<any>('tasks').query((t: any) => t.tenantId === TENANT && t.name === 'Review');
   const per = new Map<string, number>(); for (const t of tasks) per.set(String(t.assignee), (per.get(String(t.assignee)) || 0) + 1);
   assert.strictEqual(tasks.length, 12);

@@ -1,4 +1,5 @@
 // User-task inbox: list/claim/complete. Completing a task resumes the waiting instance token.
+import { kickAllocator } from '../../engine/allocator-kick.ts';
 import type { AppContext } from '../../context.ts';
 import { inList } from '../../infra/filters.ts';
 import { Collections, type AuditEvent, type Deployment, type Group, type Task, type TaskAttachment, type TaskComment, type TimerJob, type User } from '../../domain.ts';
@@ -102,6 +103,7 @@ export class TaskService {
     // a task someone else already holds cannot be taken from them (only released by them, or reassigned by an admin)
     if (t.status === 'reserved' && t.assignee && t.assignee !== user && !this.adminOverride && t.businessAdmin !== user) throw conflict(`task already claimed by ${t.assignee}`);
     t.assignee = user; t.status = 'reserved'; t.claimedAt = this.ctx.clock();
+    if (t.allocation === 'pending' || t.allocation === 'queued') t.allocation = undefined;   // taken by hand before the allocator got to it
     await this.repo().put(t);
     await this.ctx.audit({ actor: user, kind: 'task.claimed', instanceId: t.instanceId, taskId: t.id });
     return t;
@@ -114,6 +116,7 @@ export class TaskService {
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
     if (t.status !== 'reserved' && t.status !== 'inprogress') throw conflict(`task is ${t.status}, not releasable`);
     t.assignee = undefined; t.status = 'created'; t.claimedAt = undefined;
+    t.allocation = undefined;                      // released to the pool by a person: the allocator must not hand it straight back
     await this.repo().put(t);
     await this.ctx.audit({ actor: user, kind: 'task.released', instanceId: t.instanceId, taskId: t.id });
     return t;
@@ -134,6 +137,7 @@ export class TaskService {
     let releasedCount = 0;
     for (const t of claimedTasks) {
       const prevAssignee = t.assignee;
+      t.allocation = undefined;
       t.assignee = undefined;
       t.status = 'created';
       t.claimedAt = undefined;
@@ -244,6 +248,7 @@ export class TaskService {
       if (t.status === 'suspended') {
         t.status = t.assignee ? 'reserved' : 'created';
         await this.repo().put(t);
+        if (t.allocation === 'pending') kickAllocator();   // it can be given to someone now
         await this.ctx.audit({ actor: 'system', kind: 'task.resumed.scheduled', instanceId: t.instanceId, taskId: t.id });
       }
       return;
@@ -257,6 +262,7 @@ export class TaskService {
       const from = t.assignee ?? t.group;
       if (groups[0]) { t.group = groups[0]; t.assignee = undefined; t.status = 'created'; }
       if (users[0]) { t.assignee = users[0]; t.status = 'reserved'; }
+      t.allocation = undefined;                      // an explicit decision by the process: automatic assignment does not undo it
       await this.repo().put(t);
       await this.ctx.audit({ actor: 'system', kind: 'task.reassigned.deadline', instanceId: t.instanceId, taskId: t.id, data: { deadline: d.type, from, users, groups } });
       if (users[0]) await new NotificationService(this.ctx).notify({ userId: users[0], kind: 'task-assigned', title: `Task "${t.name}" was reassigned to you`, body: `deadline ${d.type}`, link: `/tasks/${t.id}`, taskId: t.id, instanceId: t.instanceId }).catch(() => {});

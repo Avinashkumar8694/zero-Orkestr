@@ -118,13 +118,3 @@ test('IMPORT-1 an import that fails to deploy leaves no project behind, so it ca
   assert.strictEqual(byParent.length, 0, 'a parent filter returns only that parent\'s children');
   await h.close();
 });
-
-test('ASSIGN-6 leastLoaded: tasks created at the same moment spread over the people instead of piling onto one', async () => {
-  const k = kit('t1', { copies: true });
-  const w = await k.deploy('spread', [{ id: 's', type: 'start' }, { id: 'u', type: 'userTask', name: 'Review', actors: ['ann', 'bob', 'cy'], assignmentStrategy: 'leastLoaded' }, { id: 'e', type: 'end' }], [{ id: 'f0', from: 's', to: 'u' }, { id: 'f1', from: 'u', to: 'e' }]);
-  await Promise.all(Array.from({ length: 9 }, () => k.start(w.wf.id)));
-  const tasks = await k.tasks();
-  const per = new Map<string, number>(); for (const t of tasks) per.set(String(t.assignee), (per.get(String(t.assignee)) || 0) + 1);
-  assert.strictEqual(tasks.length, 9);
-  assert.deepStrictEqual([...per.values()].sort(), [3, 3, 3], `spread was ${JSON.stringify([...per])}`);
-});

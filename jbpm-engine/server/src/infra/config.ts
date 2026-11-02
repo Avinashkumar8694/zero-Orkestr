@@ -21,7 +21,9 @@ export interface Config {
   /** Connection timeout (ms) when acquiring a new connection from PostgreSQL (default: 5000) */
   pgPoolConnectionTimeoutMs: number;
   /** Process role: 'all' (API + Timer Worker), 'api' (stateless HTTP/WS only), 'worker' (background scheduler only) */
-  role: 'all' | 'api' | 'worker';
+  role: 'all' | 'api' | 'worker' | 'allocator';
+  /** how often the allocator runner looks for tasks waiting to be assigned (it also runs at once when a task is created in the same process) */
+  allocatorIntervalMs: number;
   /** Interval in ms between timer scheduler ticks (default: 5000) */
   timerTickIntervalMs: number;
   /** Max due timer jobs to fetch and process in a single tick batch (default: 50) */
@@ -126,7 +128,8 @@ export const config: Config = {
   pgPoolMax: Number(env.PG_POOL_MAX || 20),
   pgPoolIdleTimeoutMs: Number(env.PG_POOL_IDLE_TIMEOUT_MS || 30000),
   pgPoolConnectionTimeoutMs: Number(env.PG_POOL_CONNECTION_TIMEOUT_MS || 5000),
-  role: (env.ROLE as 'all' | 'api' | 'worker') || 'all',
+  role: (env.ROLE as 'all' | 'api' | 'worker' | 'allocator') || 'all',
+  allocatorIntervalMs: Math.max(250, Number(env.ALLOCATOR_INTERVAL_MS || 2000)),
   timerTickIntervalMs: Number(env.TIMER_TICK_INTERVAL_MS || 5000),
   timerBatchSize: Number(env.TIMER_BATCH_SIZE || 50),
   timerAdvisoryLockKey: Number(env.TIMER_ADVISORY_LOCK_KEY || 424242),

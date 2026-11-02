@@ -80,6 +80,9 @@ export const FIND_INDEXES = [
   `CREATE INDEX IF NOT EXISTS kv_inst_tokens ON kv_store USING gin ((data->'tokens') jsonb_path_ops) WHERE collection = 'instances'`,
   `CREATE INDEX IF NOT EXISTS kv_task_inst ON kv_store ("tenantId", (data->>'instanceId')) WHERE collection = 'tasks'`,
   `CREATE INDEX IF NOT EXISTS kv_task_status ON kv_store ("tenantId", (data->>'status'), (data->>'assignee')) WHERE collection = 'tasks'`,
+  `CREATE INDEX IF NOT EXISTS kv_task_alloc ON kv_store ("tenantId", (data->>'allocation'), (data->>'createdAt')) WHERE collection = 'tasks'`,
+  `CREATE INDEX IF NOT EXISTS kv_task_assignee ON kv_store ("tenantId", (data->>'assignee'), (data->>'claimedAt')) WHERE collection = 'tasks'`,
+  `CREATE INDEX IF NOT EXISTS kv_inst_numeric ON kv_store ("tenantId", (data->>'numericId')) WHERE collection = 'instances'`,
   `CREATE INDEX IF NOT EXISTS kv_timer_due ON kv_store ("tenantId", (data->>'status'), (data->>'dueAt')) WHERE collection = 'timers'`,
   `CREATE INDEX IF NOT EXISTS kv_err_inst ON kv_store ("tenantId", (data->>'instanceId')) WHERE collection = 'errors'`,
 ];

@@ -183,6 +183,14 @@ export interface Task extends Entity {
   excludedOwners?: string[];
   /** higher = more urgent; used for inbox sort order only, no behavioral effect. */
   priority?: number;
+  /** the project the task's instance belongs to (assignment rules are scoped by it) */
+  workflowId?: string;
+  /** automatic assignment, done by the allocator runner (modules/allocation): 'pending' = waiting for it, 'assigned' = it chose someone, 'queued' = nobody
+   *  qualified right now, the task stays in its group queue and is retried. Absent = not subject to automatic assignment. */
+  allocation?: 'pending' | 'assigned' | 'queued';
+  allocationNote?: string; allocatedAt?: string;
+  /** set on the node: leastLoaded / roundRobin over the offered people; skills the person must have */
+  allocationStrategy?: 'leastLoaded' | 'roundRobin'; requiredSkills?: string[];
   status: TaskStatus;
   inputs: Record<string, unknown>; outputs?: Record<string, unknown>;
   createdAt: string; claimedAt?: string; dueAt?: string; completedAt?: string; completedBy?: string;
@@ -307,6 +315,23 @@ export interface Role extends Entity {
   permissions: string[];
 }
 
+/** An automatic-assignment rule: which tasks it covers, how to pick a person, and who may be picked. Run by the allocator, never inline. */
+export interface AssignmentRule extends Entity {
+  id: string; tenantId: string; name: string; enabled: boolean;
+  /** lower runs first among rules of equal specificity */
+  priority: number;
+  /** empty = every task; a node id is the most specific, then project, then group */
+  scope: { workflowId?: string; nodeId?: string; group?: string };
+  strategy: 'roundRobin' | 'leastLoaded' | 'skills';
+  /** the person must have all of these skills */
+  requiredSkills?: string[];
+  /** pick among these instead of the people the task itself offers */
+  pool?: { groups?: string[]; users?: string[] };
+  /** skip people at their open-task or daily limit (default true) */
+  respectLimits: boolean;
+  createdAt: string; updatedAt: string; updatedBy?: string;
+}
+
 export interface Group extends Entity {
   id: string; tenantId: string;
   name: string;   // matches the plain-string names userTask.group / Task.group already use
@@ -325,6 +350,12 @@ export interface User extends Entity {
   email?: string;
   /** false until the mailbox is proven (verification link or password-reset link). Absent = legacy/admin-provisioned = trusted. */
   emailVerified?: boolean;
+  /** automatic task assignment: what the person can do and how much they may be given */
+  skills?: string[]; maxOpenTasks?: number; maxTasksPerDay?: number;
+  /** false = away: the allocator skips them (default true) */
+  available?: boolean;
+  /** when the allocator last gave this person a task (round-robin order) */
+  lastAssignedAt?: string;
   /** brute-force protection */
   failedLogins?: number;
   lockedUntil?: string | null;
@@ -449,7 +480,7 @@ export interface Plan extends Entity {
 export const Collections = {
   workflows: 'workflows', folders: 'folders', branches: 'branches', versions: 'versions', deployments: 'deployments',
   instances: 'instances', tasks: 'tasks', timers: 'timers', audit: 'audit',
-  users: 'users', groups: 'groups', roles: 'roles',
+  users: 'users', groups: 'groups', roles: 'roles', assignmentRules: 'assignmentRules',
   tenants: 'tenants', tenantMembers: 'tenantMembers', plans: 'plans',
   errors: 'errors', comments: 'comments', notifications: 'notifications', settings: 'settings',
   pendingRegistrations: 'pendingRegistrations', usage: 'usage',

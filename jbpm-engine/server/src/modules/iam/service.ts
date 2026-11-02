@@ -130,7 +130,7 @@ export class IamService {
     await this.ctx.audit({ actor, kind: 'user.created', data: { username, roles, groups } });
     return sanitize(u);
   }
-  async updateUser(id: string, patch: Partial<Pick<User, 'roles' | 'groups' | 'active'>>, actor: string, grantable?: string[]): Promise<PublicUser> {
+  async updateUser(id: string, patch: Partial<Pick<User, 'roles' | 'groups' | 'active' | 'skills' | 'maxOpenTasks' | 'maxTasksPerDay' | 'available'>>, actor: string, grantable?: string[]): Promise<PublicUser> {
     this.needWorkspace();
     const u = await this.users().get(id);
     if (!u || u.tenantId !== this.ctx.tenantId) throw notFound('User');
@@ -139,6 +139,19 @@ export class IamService {
     if (patch.roles !== undefined) u.roles = await this.checkRoleNames(patch.roles, grantable, u.roles);
     if (patch.groups !== undefined) u.groups = await this.checkGroupNames(patch.groups);
     if (patch.active !== undefined) u.active = patch.active;
+    // automatic task assignment: what this person can do and how much they may be given
+    if (patch.skills !== undefined) {
+      if (!Array.isArray(patch.skills) || patch.skills.some((x) => typeof x !== 'string')) throw validation('skills must be a list of names');
+      u.skills = [...new Set(patch.skills.map((x) => x.trim()).filter(Boolean))].slice(0, 50);
+    }
+    for (const k of ['maxOpenTasks', 'maxTasksPerDay'] as const) {
+      const v = (patch as any)[k];
+      if (v === undefined) continue;
+      if (v === null || v === 0 || v === '') delete u[k];
+      else if (!Number.isInteger(v) || v < 1 || v > 100000) throw validation(`${k} must be a whole number of at least 1 (empty = no limit)`);
+      else u[k] = v;
+    }
+    if (patch.available !== undefined) { if (typeof patch.available !== 'boolean') throw validation('available must be true or false'); u.available = patch.available; }
     await this.users().put(u);
     await this.ctx.audit({ actor, kind: 'user.updated', data: { userId: id, roles: u.roles, groups: u.groups, active: u.active } });
     return sanitize(u);

@@ -1,5 +1,6 @@
 // Release 2.0.0 phase 3: event sub-processes, ad-hoc scopes, transaction cancel, instantiating gateways, multi-instance on any task,
 // complex joins, assignment strategies and swimlanes.
+import { AllocationService } from '../src/modules/allocation/service.ts';
 import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { kit } from './flow-kit.ts';
@@ -188,7 +189,7 @@ test('G30 assignment strategies: leastLoaded and roundRobin pick an owner among 
   const team = async (group: string, names: string[]) => { await groups.put({ id: group, tenantId: 't1', name: group } as any); for (const n of names) await users.put({ id: n, tenantId: 't1', username: n, groups: [group], active: true } as any); };
   await team('claims', ['amy', 'bob', 'cat']); await team('claims2', ['dev', 'eli', 'fay']); await team('claims3', ['gus', 'hal', 'ivy']);
   const mk = (name: string, group: string, strategy: string, extra: Record<string, unknown> = {}) => k.deploy(name, ...L(k, { id: 'u', type: 'userTask', name: `T ${name}`, group, assignmentStrategy: strategy, ...extra }), V);
-  const owners = async (wfId: string, n: number) => { const out: string[] = []; for (let c = 0; c < n; c++) { const i = await k.start(wfId); out.push((await k.tasks(i.id))[0]!.assignee ?? '-'); } return out; };
+  const owners = async (wfId: string, n: number) => { const out: string[] = []; for (let c = 0; c < n; c++) { const i = await k.start(wfId); await new AllocationService(k.ctx).runOnce(); out.push((await k.tasks(i.id))[0]!.assignee ?? '-'); } return out; };   // the allocator runner assigns, not task creation
   const rr = await mk('rr', 'claims', 'roundRobin');
   assert.deepStrictEqual(await owners(rr.wf.id, 4), ['amy', 'bob', 'cat', 'amy'], 'each member in turn');
   const ll = await mk('ll', 'claims2', 'leastLoaded');
@@ -199,7 +200,7 @@ test('G30 assignment strategies: leastLoaded and roundRobin pick an owner among 
   const ex = await mk('ex', 'claims3', 'leastLoaded', { excludedOwners: ['gus', 'hal'] });
   assert.deepStrictEqual(await owners(ex.wf.id, 1), ['ivy'], 'excluded owners are never picked');
   const none = await k.deploy('none', ...L(k, { id: 'u', type: 'userTask', name: 'Nobody', group: 'empty-group', assignmentStrategy: 'leastLoaded' }), V);
-  const ni = await k.start(none.wf.id); assert.strictEqual((await k.tasks(ni.id))[0]!.assignee, undefined, 'no candidates: it stays in the queue');
+  const ni = await k.start(none.wf.id); await new AllocationService(k.ctx).runOnce(); assert.strictEqual((await k.tasks(ni.id))[0]!.assignee, undefined, 'no candidates: it stays in the queue');
   const plain = await k.deploy('plainq', ...L(k, { id: 'u', type: 'userTask', name: 'Queue', group: 'claims' }), V);
   const pi = await k.start(plain.wf.id); assert.strictEqual((await k.tasks(pi.id))[0]!.assignee, undefined, 'unset: unchanged');
 });

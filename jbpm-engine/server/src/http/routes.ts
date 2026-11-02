@@ -15,6 +15,7 @@ import { VersionService } from '../modules/versions/service.ts';
 import { DeploymentService } from '../modules/deployments/service.ts';
 import { InstanceService } from '../modules/instances/service.ts';
 import { TaskService } from '../modules/tasks/service.ts';
+import { AllocationService } from '../modules/allocation/service.ts';
 import { ProcessService } from '../modules/processes/service.ts';
 import { QueryService } from '../modules/queries/service.ts';
 import { AssetsService } from '../modules/assets/service.ts';
@@ -738,6 +739,13 @@ export function buildRoutes(): Router {
     await iam(req).setPassword(req.params.id, plain, actorOf(req));
     res.status(204).end();
   }));
+  // --- automatic task assignment: rules, per-person workload, run-now (the allocator runner does the same on its own loop) ---
+  r.get('/allocation/rules', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => res.json({ items: await new AllocationService(ctxOf(req)).listRules() })));
+  r.post('/allocation/rules', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await new AllocationService(ctxOf(req)).createRule(req.body || {}, actorOf(req)))));
+  r.put('/allocation/rules/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).updateRule(req.params.id, req.body || {}, actorOf(req)))));
+  r.delete('/allocation/rules/:id', perm('admin:iam'), asyncHandler(async (req, res) => { await new AllocationService(ctxOf(req)).deleteRule(req.params.id, actorOf(req)); res.status(204).end(); }));
+  r.get('/allocation/tracker', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).tracker())));
+  r.post('/allocation/run', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).runOnce())));
   r.get('/groups', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => {
     const items = await iam(req).listGroups();
     res.json({ items: (await isIamAdmin(req)) ? items : items.map((g) => ({ id: g.id, name: g.name, description: g.description })) });

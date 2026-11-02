@@ -531,3 +531,19 @@ Known difference that remains: a converted-JS script that unboxes a missing vari
 - Two real server processes on shared Postgres + Redis, booted together: a token from one is accepted by the other; one `admin` user; a project imported on one is visible on the other; 21 journeys started and driven through alternating replicas all completed with no duplicated node runs and no log errors.
 - Fixed: replicas booting together on a fresh database crashed creating the schema (now an advisory lock, `test/live/schema-sync.test.ts`); user tasks created at the same moment under `leastLoaded` / `roundRobin` all picked the same person (7 of 9 to one person) because the pick and the save were not atomic (now one lock per workspace, in-process then cluster-wide, `src/engine/assign-lock.ts`; `ASSIGN-6`, `LIVE-6`).
 
+## 18. Automatic task assignment (separate allocator runner)
+A user task is created **unassigned** and, if a rule or a node strategy covers it, flagged `allocation: 'pending'`; assignment is done by the **allocator runner**, a loop of its own (`ROLE=allocator`, or part of `all` / `worker`), not inside task creation. One runner works a workspace at a time (a Redis lease), so replicas never decide the same task twice, and it uses fresh per-person counts, so work spreads evenly.
+
+| Piece | Behaviour |
+|---|---|
+| Rules (`/allocation/rules`) | per project, per task node or per group; strategy `roundRobin`, `leastLoaded` or `skills`; required skills; an optional pool of people or groups; `respectLimits`. Most specific rule wins (node, then project, then group), then priority. A strategy or `requiredSkills` set on the task itself beats every rule |
+| Per person (Admin → Users, `PATCH /users/:id`) | `skills`, `maxOpenTasks`, `maxTasksPerDay`, `available` (away = skipped) |
+| Nobody qualifies | the task stays in its group queue (`allocation: 'queued'`, with the reason) and is retried every pass |
+| Left alone | a task assigned by name, by `#{variable}` or by swimlane auto-claim; a task claimed by hand first |
+| `suspendUntil` | a hidden task is not assigned until it resumes (the resume job wakes the allocator) |
+| Deadlines | a reassign deadline is explicit and clears the flag; notify deadlines are unaffected |
+| Release / auto-release | the task goes back to the pool and is not handed straight back |
+| Tracker (`/allocation/tracker`) | per person: open, in progress, assigned today, completed today, limits, away; plus tasks waiting (pending / queued) |
+
+Verified: `test/allocation.test.ts` (10), the strategy tests in `phase3.test.ts`, live 4-replica race (`LIVE-6`, 4/4/4), and the real app with replica A as `api` and replica B as `allocator` (6 tasks created on A, assigned by B: 3 / 3 / 0 for the person who is away). Not built yet: the builder and admin screens for rules, skills and limits (the API is complete).
+

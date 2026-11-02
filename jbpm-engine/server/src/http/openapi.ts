@@ -703,6 +703,16 @@ const paths: Record<string, any> = {
     patch: { tags: ['IAM'], summary: 'Update a user’s roles/groups/active flag (admin)', parameters: [idParam()], requestBody: jsonBody({ type: 'object', properties: { roles: { type: 'array', items: { type: 'string' } }, groups: { type: 'array', items: { type: 'string' } }, active: { type: 'boolean' } } }), responses: ok(ref('User')) },
   },
   '/users/{id}/password': { post: { tags: ['IAM'], summary: 'Set a user’s password (admin)', parameters: [idParam()], requestBody: jsonBody({ type: 'object', properties: { password: { type: 'string' } } }), responses: { '204': { description: 'Changed' } } } },
+  '/allocation/rules': {
+    get: { tags: ['Task assignment'], summary: 'List automatic-assignment rules (most specific first)', responses: { '200': { description: '{ items: AssignmentRule[] }' } } },
+    post: { tags: ['Task assignment'], summary: 'Create a rule: scope (project / task node / group), strategy roundRobin | leastLoaded | skills, required skills, optional pool, respectLimits (admin)', requestBody: jsonBody({ type: 'object', properties: { name: { type: 'string' }, enabled: { type: 'boolean' }, priority: { type: 'number' }, strategy: { type: 'string' }, requiredSkills: { type: 'array', items: { type: 'string' } }, respectLimits: { type: 'boolean' }, scope: { type: 'object', properties: { workflowId: { type: 'string' }, nodeId: { type: 'string' }, group: { type: 'string' } } }, pool: { type: 'object', properties: { groups: { type: 'array', items: { type: 'string' } }, users: { type: 'array', items: { type: 'string' } } } } } }), responses: { '201': { description: 'Created' } } },
+  },
+  '/allocation/rules/{id}': {
+    put: { tags: ['Task assignment'], summary: 'Change a rule (admin)', parameters: [idParam()], requestBody: jsonBody({ type: 'object' }), responses: { '200': { description: 'Updated' } } },
+    delete: { tags: ['Task assignment'], summary: 'Delete a rule (admin)', parameters: [idParam()], responses: { '204': { description: 'Deleted' } } },
+  },
+  '/allocation/tracker': { get: { tags: ['Task assignment'], summary: 'Per person: open, in progress, assigned today, completed today, limits, away; plus how many tasks wait for a person (pending / queued)', responses: { '200': { description: '{ people, waiting, rules }' } } } },
+  '/allocation/run': { post: { tags: ['Task assignment'], summary: 'Run one allocation pass now (the allocator runner does this on its own loop) (admin)', responses: { '200': { description: '{ assigned, queued }' } } } },
   '/groups': {
     get: { tags: ['IAM'], summary: 'List groups (admin)', responses: ok(listOf('Group')) },
     post: { tags: ['IAM'], summary: 'Create a group (admin)', requestBody: jsonBody({ type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } } }), responses: created(ref('Group')) },

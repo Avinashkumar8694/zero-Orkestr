@@ -18,6 +18,8 @@ Configuration lives in two layers: **environment variables** (deployment-time, r
 | `SCRIPT_TIMEOUT_MS` | `2000` | Wall-clock budget for a `js` script task/condition before it fails with `SCRIPT_TIMEOUT` |
 | `SCRIPT_OVERFLOW_MODE` | `queue` | **Bootstrap default** of the platform's `scriptOverflowModeDefault`: what happens at a workspace's pool size — `queue` (wait, bounded) or `reject` (refuse immediately with `QUOTA_EXCEEDED`) |
 | `RATE_START_PER_MIN` / `RATE_DEPLOY_PER_MIN` / `RATE_IMPORT_PER_MIN` | `120` / `20` / `20` | Per-caller requests per minute for starting instances, deploying and importing. Raise the first for integration clients that start many processes. |
+| `ROLE` | `all` | `all` (API + timer worker + task allocator), `api` (stateless HTTP/WS only), `worker` (timers + allocator), `allocator` (only the task-allocation runner: run one or two of these next to API replicas). |
+| `ALLOCATOR_INTERVAL_MS` | `2000` | How often the allocator looks for tasks waiting for a person (it also runs at once when a task is created in the same process). |
 | `SCRIPT_POOL_DEFAULT_SIZE` | `1` | Bootstrap default of `scriptPoolDefaultSize`: pool size (= parallel scripts) for a workspace that doesn't set one |
 | `SCRIPT_POOL_MAX_SIZE` | `16` | Bootstrap default of `scriptPoolMaxSize`: **hard cap** on any workspace's pool size. Memory worst case per workspace = pool size × 64 MB |
 | `SCRIPT_QUEUE_DEFAULT_MAX` | `1000` | Bootstrap default of `scriptQueueDefaultMax`: how many executions may wait per workspace (queue mode) |

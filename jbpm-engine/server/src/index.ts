@@ -1,4 +1,6 @@
 // Boot: HTTP server + WebSocket hub.
+import { onAllocatorKick } from './engine/allocator-kick.ts';
+import { AllocationService } from './modules/allocation/service.ts';
 import { onKick } from './engine/async-kick.ts';
 import { migrateAnalyticsAll } from './analytics/migrate.ts';
 import http from 'node:http';
@@ -48,6 +50,7 @@ wss.on('connection', async (ws, req) => {
 // never overlaps the next one; the cadence, batch size and idle-task release come from each workspace's settings.
 let stopped = false;
 const isWorkerEnabled = config.role === 'all' || config.role === 'worker';
+const isAllocatorEnabled = config.role === 'all' || config.role === 'worker' || config.role === 'allocator';
 if (isWorkerEnabled) {
   let passRunning = false;
   /** one scheduler pass over every workspace; returns the delay before the next scheduled pass */
@@ -100,6 +103,32 @@ if (isWorkerEnabled) {
   logger.info('timer worker scheduler enabled', { role: config.role, intervalMs: config.timerTickIntervalMs, batchSize: config.timerBatchSize });
 } else {
   logger.info('timer worker scheduler disabled (stateless API role)', { role: config.role });
+}
+
+// the task-allocation runner: assigns tasks flagged 'pending' (modules/allocation). A loop of its own, so it can run in a dedicated replica (ROLE=allocator) apart from
+// the API and the timer worker. One runner works a workspace at a time (a short lease), so replicas never decide the same task twice.
+if (isAllocatorEnabled) {
+  let allocating = false;
+  const allocatePass = async () => {
+    if (allocating || stopped) return;
+    allocating = true;
+    try {
+      const tenants = await store.repo<Tenant>(Collections.tenants).query((t) => t.status === 'active');
+      for (const tenantId of new Set([config.defaultTenant, ...tenants.map((t) => t.id)])) {
+        const release = await coordinator().claim(`allocator:${tenantId}`, 30_000);
+        if (!release) continue;                                                       // another replica is working this workspace
+        try { await new AllocationService(makeContext({ store, tenantId })).runOnce(); }
+        catch (e) { logger.error('task allocation failed', { tenantId, err: (e as Error).message }); }
+        finally { await release(); }
+      }
+    } catch (e) { logger.error('task allocation pass failed', { err: (e as Error).message }); }
+    finally { allocating = false; }
+  };
+  const loop = async () => { if (stopped) return; await allocatePass(); if (!stopped) setTimeout(loop, config.allocatorIntervalMs); };
+  setTimeout(loop, config.allocatorIntervalMs);
+  let allocKick = false;
+  onAllocatorKick(() => { if (allocKick || stopped) return; allocKick = true; setTimeout(() => { allocKick = false; void allocatePass(); }, 50); });
+  logger.info('task allocation runner enabled', { role: config.role, intervalMs: config.allocatorIntervalMs });
 }
 
 // every replica re-applies the stored limits to its own live pools: an admin change made on ANY replica reaches all of them
