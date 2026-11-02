@@ -78,6 +78,9 @@ class PgRepo<T extends DomainEntity> implements Repository<T> {
   }
 }
 
+/** advisory-lock key that serializes schema creation across replicas */
+const SCHEMA_SYNC_LOCK = 7345291;
+
 export class PgStore implements Store {
   private ds?: DataSource;
   private dsPromise?: Promise<DataSource>;
@@ -96,16 +99,28 @@ export class PgStore implements Store {
         type: 'postgres',
         url: this.url,
         entities: [KvRow, SystemAdminRow],
-        // One trivial, schema-less table — safe to auto-create/reconcile; a real multi-table relational
-        // rollout would want real migrations, but there's nothing here for synchronize to drift on.
-        synchronize: true,
+        // One trivial, schema-less table — safe to auto-create/reconcile. The sync itself runs below under a Postgres advisory lock: replicas that boot
+        // together on a fresh database would otherwise create the tables at the same moment and some would die on "duplicate key … pg_type_typname_nsp_index".
+        synchronize: false,
         logging: false,
         extra: {
           max: this.poolOptions?.max ?? config.pgPoolMax,
           idleTimeoutMillis: this.poolOptions?.idleTimeoutMillis ?? config.pgPoolIdleTimeoutMs,
           connectionTimeoutMillis: this.poolOptions?.connectionTimeoutMillis ?? config.pgPoolConnectionTimeoutMs,
         },
-      }).initialize().then((ds) => (this.ds = ds));
+      }).initialize().then(async (ds) => {
+        const qr = ds.createQueryRunner();
+        await qr.connect();
+        try {
+          await qr.query('SELECT pg_advisory_lock($1)', [SCHEMA_SYNC_LOCK]);          // held on this one connection until released: other replicas wait here
+          await ds.synchronize();                                                       // a no-op for every replica after the first
+        } finally {
+          await qr.query('SELECT pg_advisory_unlock($1)', [SCHEMA_SYNC_LOCK]).catch(() => {});
+          await qr.release();
+        }
+        this.ds = ds;
+        return ds;
+      });
     }
     return this.dsPromise;
   }
