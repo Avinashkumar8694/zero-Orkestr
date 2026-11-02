@@ -386,9 +386,16 @@ export class ImportService {
     const report = this.withProvisioning(buildImportReport(engine, files, await this.directory()), provisioned, opts.canProvision);
     const wf = await new WorkflowService(this.ctx).create({ name: name || (engine as any).name || (engine as any).id || 'Imported project' }, actor);
     const ver = new VersionService(this.ctx);
-    const draft = await ver.saveDraft(wf.defaultBranchId, engine, actor);
-    const { published } = await ver.publish(draft.id, actor, 'v1');
-    const dep = await new DeploymentService(this.ctx).deploy(published.id, { environment: opts.environment, tags: opts.tags, env: opts.env, activate: true }, actor);
+    let dep: Awaited<ReturnType<DeploymentService['deploy']>>;
+    try {
+      const draft = await ver.saveDraft(wf.defaultBranchId, engine, actor);
+      const { published } = await ver.publish(draft.id, actor, 'v1');
+      dep = await new DeploymentService(this.ctx).deploy(published.id, { environment: opts.environment, tags: opts.tags, env: opts.env, activate: true }, actor);
+    } catch (e) {
+      // an import that cannot be published or deployed must not leave an empty project behind (the retry would also hit "key already exists")
+      await new WorkflowService(this.ctx).purge(wf.id, actor).catch(() => {});
+      throw e;
+    }
     await this.ctx.audit({ actor, kind: 'project.imported', workflowId: wf.id, data: { processes: engine.processes?.length || 0, deployed: true, deploymentId: dep.id, ...assetReport, report: report.summary } });
     return { workflowId: wf.id, processes: engine.processes?.length || 0, deploymentId: dep.id, ...assetReport, report };
   }

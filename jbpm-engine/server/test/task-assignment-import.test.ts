@@ -96,3 +96,25 @@ test('ASSIGN-5 import creates the missing users (disabled, viewer) and groups, n
   await h.close();
 });
 after(() => setTimeout(() => process.exit(0), 50).unref());   // the JVM sidecar / test server would otherwise keep this process alive
+
+test('IMPORT-1 an import that fails to deploy leaves no project behind, so it can simply be retried; the instances list filters by parent and process', async () => {
+  const h = await boot();
+  const ws = await h.workspace('rollback-ws', ['admin']);
+  const bad = { id: 'bad', name: 'bad', processes: [{ id: 'bad.p', name: 'p', package: 'x', vars: [], flows: [{ id: 'f0', from: 's', to: 'j' }, { id: 'f1', from: 'j', to: 'e' }],
+    nodes: [{ id: 's', type: 'start' }, { id: 'j', type: 'script', name: 'j', lang: 'java', code: 'int x = ;' }, { id: 'e', type: 'end' }] }] };
+  const call = (m: string, p: string, body?: unknown) => h.call(m, p, { token: ws.tokens.admin, tenant: ws.id, body });
+  const r1 = await call('POST', '/import/jbpm/deploy', { files: bad, name: 'rollback project', environment: 'prod' });
+  assert.strictEqual(r1.status, 422);
+  const names = ((await call('GET', '/workflows')).body.items as any[]).map((w) => w.name);
+  assert.ok(!names.includes('rollback project'), 'no empty project left behind');
+  const good = JSON.parse(JSON.stringify(bad)); good.processes[0].nodes[1] = { id: 'j', type: 'script', name: 'j', lang: 'js', code: 'setVariable("a", 1)' };
+  const r2 = await call('POST', '/import/jbpm/deploy', { files: good, name: 'rollback project', environment: 'prod' });
+  assert.strictEqual(r2.status, 201, 'the same name can be imported again');
+  const wf = r2.body.workflowId;
+  const inst = (await call('POST', '/instances', { workflowId: wf, environment: 'prod' })).body;
+  const byProc = (await call('GET', `/instances?processId=bad.p&workflowId=${wf}`)).body.items as any[];
+  assert.ok(byProc.some((i) => i.id === inst.id));
+  const byParent = (await call('GET', `/instances?parentInstanceId=${inst.id}`)).body.items as any[];
+  assert.strictEqual(byParent.length, 0, 'a parent filter returns only that parent\'s children');
+  await h.close();
+});

@@ -24,3 +24,9 @@ Postgres push-down and the Redis lease are now verified live with separate repli
   UPDATE system_admins SET enabled = true WHERE email = 'someone@company.com';   -- or INSERT a row
   ```
 - **Serving replicas** (plan `maxReplicas` and the global / per-workspace cap) is visible to system administrators only. It is removed from workspace settings, plan usage and public plans, and unlike the script settings it cannot be delegated.
+
+## Importing jBPM projects
+- Task assignments are imported (`potentialOwner`, `GroupId`, `#{variable}` owners); missing users and groups are created for the workspace (disabled, read-only) by accounts that may manage users; the import report lists every assignment.
+- `scriptDialect: 'java'` keeps Java scripts as Java on the JVM instead of converting them; Java behaves as in jBPM (long instance ids, deployment environment through `System.getenv`).
+- A failed deploy no longer leaves an empty project; purge removes a project's deployments and runs.
+

@@ -131,6 +131,8 @@ public final class ScriptRunner {
             cls = cache.get(className);
             if (cls != null) return cls;
             String body = asCondition ? conditionBody(code, varTypes) : withVarBindings(code, varTypes);
+            // System.getenv / System.getProperty answer from the deployment's environment (see ScriptEnv), never the host's
+            body = body.replaceAll("\\bSystem\\s*\\.\\s*(getenv|getProperty)\\s*\\(", "bpmscript.ScriptEnv.$1(");
             cls = compile(className, body, asCondition);
             cache.put(className, cls);
             return cls;
@@ -147,12 +149,15 @@ public final class ScriptRunner {
         ByteArrayOutputStream captured = CAPTURE.get();
         captured.reset();
         Object returnValue = null;
+        ScriptEnv.set(ctx.env);
         try {
             Method m = cls.getMethod("run", KContext.class);
             returnValue = m.invoke(null, kcontext);
         } catch (InvocationTargetException ite) {
             Throwable cause = ite.getCause();
             throw cause instanceof Exception ? (Exception) cause : new RuntimeException(cause);
+        } finally {
+            ScriptEnv.clear();
         }
         String logs = toUtf8String(captured);
         return new ExecResult(vars, logs, kcontext.pendingActions(), returnValue);

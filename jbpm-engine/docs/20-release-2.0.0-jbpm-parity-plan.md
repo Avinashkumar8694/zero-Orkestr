@@ -505,3 +505,24 @@ Not validated in the first pass of §17; found when the user pointed out that th
 
 Also changed: `#{var}` (plus `${var}` / `$var`) is now filled in task name, group, actors, groups, administrators and stakeholders at creation (a list variable expands to all its members); an actor entry that names a group admits the members of that group, as in jBPM where a potential owner is a user or a group; and the import report lists every task's assignment (`task-assignment`, `task-unassigned`) and warns (`task-assignee-unknown`) when a user or group does not exist in the workspace. Re-importing the zip reports 17 assigned, 5 unassigned and 14 unknown names (`krisv` is Business Central's placeholder user; `ProcessReviewer`, `ComplexCoverageReviewer`, `OFACComplianceReviewer` are groups to create). Until they exist only business administrators can work those tasks. Export writes the actors back as an `ActorId` data input (equivalent in jBPM, not the `potentialOwner` element).
 
+### 17.2 Source-vs-imported verification and Java support
+Re-done from a clean state (the test copies deleted, the zip imported fresh, what the server **deployed** read back and compared with an independent parse of every BPMN file):
+
+| Check | Result |
+|---|---|
+| Structure | 357 nodes, 360 flows, all process variables: 0 missing, 0 extra, ids / endpoints / condition presence equal |
+| Configuration | names, start / catch / boundary events and timers, REST parameters (constant and variable), call inputs and outputs, gateway mode / direction / default, onEntry / onExit, user-task owners and groups: 0 differences |
+| Scripts | all 280 converted scripts and conditions are valid JavaScript; 192 snippets run on the JVM (original Java) and as converted JS on the same inputs: all agree on realistic inputs; the rest are null-input corners where Java throws on unboxing and JS carries on |
+| Journeys | all 7 `policy_management_process` journeys complete end to end against `mock_server` (JS import) **and** with the Java kept as Java on the JVM (`scriptDialect: 'java'`, `test/live/policy-java-dialect.test.ts`) |
+
+Java support (the dialect that keeps imported Java as Java):
+- `POST /import/jbpm[/deploy]` accepts `scriptDialect: 'java'`; the default still converts to JavaScript.
+- `ProcessInstance.getId()` / `NodeInstance.getId()` are `long`, as in jBPM (a stable 53-bit number derived from the instance id); the API and `signalEvent` / `abortProcessInstance` accept that number wherever they accept the id. `getIdString()` gives the engine's own id.
+- The engine's variable type names (`string`, `int`, `bool`, …) are understood; a script that declares a local with the name of a process variable compiles; `ArrayNode.addObject/addArray/addNull`, `ObjectNode.putNull`, `JsonNode.hasNonNull` exist; a JSON object held by a text/object variable comes back as a node.
+- `System.getenv(..)` / `System.getProperty(..)` answer from the **deployment's environment settings** (never the host's environment, which holds secrets); an unset name is `null`.
+- The sidecar JVM is bounded (small heap, serial GC), requests to it are limited to a few at a time, one slow request no longer kills the shared JVM, and it exits when the engine exits (no orphans).
+
+Other fixes: purging a project removes its deployments, instances, tasks and timers; an import that fails to deploy leaves no project behind; the instances list filters by `parentInstanceId` and `processId`.
+
+Known difference that remains: a converted-JS script that unboxes a missing variable (`(int) kcontext.getVariable("x")` with no value) carries on where Java throws a NullPointerException. Import with `scriptDialect: 'java'` to get the exact Java behaviour.
+

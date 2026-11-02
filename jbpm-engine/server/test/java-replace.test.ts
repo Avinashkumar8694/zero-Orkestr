@@ -85,3 +85,12 @@ test('JID-1 a Java script sees ProcessInstance.getId() as a long (jBPM), the sam
   assert.strictEqual(viaNumber.id, inst.id, 'the numeric id resolves to the instance');
 });
 after(() => setTimeout(() => process.exit(0), 50).unref());   // the JVM sidecar / test server would otherwise keep this process alive
+
+test('JENV-1 in a Java script System.getenv / getProperty answer from the deployment environment, never the host, and an unset name is null', async () => {
+  const v: Record<string, unknown> = {};
+  await runScript('String a = System.getenv("APL_POLICY_MS_URL");\nString b = System.getProperty("APL_POLICY_MS_URL");\nString c = System.getenv("PATH");\nString d = System.getenv("NOT_SET_ANYWHERE");\nkcontext.setVariable("a", a);\nkcontext.setVariable("b", b);\nkcontext.setVariable("pathSeen", c != null);\nkcontext.setVariable("unsetIsNull", d == null);', v, 15000, { lang: 'java', tenantId: 'envtest', env: { APL_POLICY_MS_URL: 'http://mock/policy-api' } } as any);
+  assert.strictEqual(v.a, 'http://mock/policy-api');
+  assert.strictEqual(v.b, 'http://mock/policy-api');
+  assert.strictEqual(v.pathSeen, false, 'the host environment (PATH, secrets) is not visible');
+  assert.strictEqual(v.unsetIsNull, true);
+});

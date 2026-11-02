@@ -355,6 +355,8 @@ export function buildRoutes(): Router {
       workflowId: req.query.workflowId as string,
       deploymentId: req.query.deploymentId as string,
       correlationKey: req.query.correlationKey as string,
+      parentInstanceId: req.query.parentInstanceId as string,
+      processId: req.query.processId as string,
       full: isFull,
     });
 
