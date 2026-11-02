@@ -526,3 +526,8 @@ Other fixes: purging a project removes its deployments, instances, tasks and tim
 
 Known difference that remains: a converted-JS script that unboxes a missing variable (`(int) kcontext.getVariable("x")` with no value) carries on where Java throws a NullPointerException. Import with `scriptDialect: 'java'` to get the exact Java behaviour.
 
+### 17.3 Replica checks (re-run after the changes above)
+- Live suite on real Postgres + Redis, one OS process per replica: 46 pass (single resume, no lost update, one timer fire, crash takeover, simultaneous task creation spreads evenly, 8 replicas booting together on a fresh database, Java-dialect journeys).
+- Two real server processes on shared Postgres + Redis, booted together: a token from one is accepted by the other; one `admin` user; a project imported on one is visible on the other; 21 journeys started and driven through alternating replicas all completed with no duplicated node runs and no log errors.
+- Fixed: replicas booting together on a fresh database crashed creating the schema (now an advisory lock, `test/live/schema-sync.test.ts`); user tasks created at the same moment under `leastLoaded` / `roundRobin` all picked the same person (7 of 9 to one person) because the pick and the save were not atomic (now one lock per workspace, in-process then cluster-wide, `src/engine/assign-lock.ts`; `ASSIGN-6`, `LIVE-6`).
+

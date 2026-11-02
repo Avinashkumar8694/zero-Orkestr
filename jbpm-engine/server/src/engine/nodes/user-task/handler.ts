@@ -4,6 +4,7 @@ import { Collections, type Task, type TaskComment, type TimerJob } from '../../.
 import { computeDue, parseDelay, dueFrom } from '../../duration.ts';
 import { DEADLINE_TYPES, parseDeadlines } from '../../deadlines.ts';
 import { findRows } from '../../../store/find.ts';
+import { withAssignLock } from '../../assign-lock.ts';
 import { SettingsService } from '../../../modules/settings/service.ts';
 
 // taskVar ← $processVar (or a literal) — same "$name reads a process variable" convention as
@@ -30,8 +31,7 @@ const resolveOwners = (v: unknown, vars: Record<string, unknown>): string[] => l
 });
 
 /** Candidates: the listed actors plus registered members of the offered groups (minus excluded owners). Both strategies are stateless queries on indexed
- *  fields — nothing is held in memory or counted in a shared variable — so they behave the same with several replicas (two tasks created at the very same
- *  moment may pick the same person; that is the price of not locking, and the next task balances it). */
+ *  fields — nothing is held in memory or counted in a shared variable — so they behave the same with several replicas (the pick and the save of the task run under one lock, see assign-lock.ts, so tasks created together do not pick the same person). */
 async function pickOwner(c: any, n: any, task: Task): Promise<string | undefined> {
   const store = c.app.store, tenant = c.app.tenantId;
   const candidates = new Set<string>(task.actors ?? []);
@@ -89,15 +89,20 @@ export const handler: NodeHandler = async (c) => {
       if (done?.completedBy && !task.excludedOwners?.includes(done.completedBy)) { task.assignee = done.completedBy; task.status = 'reserved'; task.claimedAt = now; }
     }
   }
-  // Assignment strategy: pick an owner among the offered actors / group members instead of leaving the task in the queue
-  if (!task.assignee && (n.assignmentStrategy === 'leastLoaded' || n.assignmentStrategy === 'roundRobin')) {
-    const chosen = await pickOwner(c, n, task);
-    if (chosen) { task.assignee = chosen; task.status = 'reserved'; task.claimedAt = now; }
-  }
   // "suspend until": the task exists but is hidden from claiming until the time (a durable job makes it available)
   const resumeAt = typeof n.suspendUntil === 'string' && n.suspendUntil.trim() ? dueFrom(n.suspendUntil, now, c.inst.variables) : null;
-  if (resumeAt && resumeAt > now) task.status = 'suspended';
-  await c.app.store.repo<Task>(Collections.tasks).put(task);
+  // Assignment strategy: pick an owner among the offered actors / group members instead of leaving the task in the queue. The pick and the save of the task
+  // run under one lock, so a task created at the same moment (here or on another replica) sees this one and picks someone else.
+  const strategic = !task.assignee && (n.assignmentStrategy === 'leastLoaded' || n.assignmentStrategy === 'roundRobin');
+  const place = async () => {
+    if (strategic) {
+      const chosen = await pickOwner(c, n, task);
+      if (chosen) { task.assignee = chosen; task.status = 'reserved'; task.claimedAt = now; }
+    }
+    if (resumeAt && resumeAt > now) task.status = 'suspended';
+    await c.app.store.repo<Task>(Collections.tasks).put(task);
+  };
+  if (strategic) await withAssignLock(c.app.tenantId, place); else await place();
   if (task.status === 'suspended' && resumeAt) {
     await c.app.store.repo<TimerJob>(Collections.timers).put({ id: c.app.newId(), tenantId: c.app.tenantId, instanceId: c.inst.id, tokenId: task.tokenId, nodeId: n.id, kind: 'deadline', dueAt: resumeAt, fired: 0, status: 'scheduled', taskId: task.id, deadline: { type: 'resumeTask', action: {} } });
   }

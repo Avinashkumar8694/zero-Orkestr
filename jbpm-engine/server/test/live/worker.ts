@@ -15,6 +15,7 @@ const ctx = makeContext({ store, tenantId: cmd.tenant });
 const out: Record<string, unknown> = { replica: co.replicaId, coordinator: co.kind };
 try {
   if (cmd.op === 'signal') await new InstanceService(ctx).signal(cmd.id, cmd.name, undefined, 'amy').then(() => (out.ok = true));
+  else if (cmd.op === 'start') { for (let i = 0; i < cmd.count; i++) await new InstanceService(ctx).start({ workflowId: cmd.workflowId, environment: 'prod' }, 'amy'); out.ok = true; }
   else if (cmd.op === 'vars') {
     for (const [k, v] of Object.entries(cmd.vars)) await new InstanceService(ctx).updateVariables(cmd.id, { [k]: v }, 'amy');
     out.ok = true;

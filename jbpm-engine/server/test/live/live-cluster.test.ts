@@ -86,3 +86,14 @@ test('LIVE-5 a replica killed while holding a lease: others are refused, then ta
   const late = await worker('live-2', { op: 'claim', key: 'crash-key', ttlMs: 3000 });
   assert.strictEqual(late.ok, true, 'lease expired, another replica takes over');
 });
+
+test('LIVE-6 four replicas each create tasks at the same moment under leastLoaded: they spread evenly, nobody is picked twice by mistake', async () => {
+  const l = line({ id: 'u', type: 'userTask', name: 'Review', actors: ['ann', 'bob', 'cy'], assignmentStrategy: 'leastLoaded' });
+  const wf = await deploy('live6', l.nodes, l.flows);
+  const res = await Promise.all(Array.from({ length: 4 }, (_, i) => worker(`as${i}`, { op: 'start', workflowId: wf.id, count: 3 })));
+  assert.ok(res.every((r) => r.ok && r.coordinator === 'redis'), JSON.stringify(res));
+  const tasks = await store.repo<any>('tasks').query((t: any) => t.tenantId === TENANT && t.name === 'Review');
+  const per = new Map<string, number>(); for (const t of tasks) per.set(String(t.assignee), (per.get(String(t.assignee)) || 0) + 1);
+  assert.strictEqual(tasks.length, 12);
+  assert.deepStrictEqual([...per.values()].sort(), [4, 4, 4], `spread was ${JSON.stringify([...per])}`);
+});
