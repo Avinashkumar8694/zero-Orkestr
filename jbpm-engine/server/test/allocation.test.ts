@@ -5,7 +5,7 @@ import assert from 'node:assert';
 import { kit } from './flow-kit.ts';
 import { AllocationService, resetRuleCache } from '../src/modules/allocation/service.ts';
 import { TaskService } from '../src/modules/tasks/service.ts';
-import { Collections, type User, type Task } from '../src/domain.ts';
+import { Collections, type User, type Task, type Role } from '../src/domain.ts';
 
 after(() => setTimeout(() => process.exit(0), 50).unref());
 
@@ -159,4 +159,77 @@ test('ALLOC-9 rule validation, and the user fields (skills, limits, availability
   assert.deepStrictEqual([up.skills, up.maxOpenTasks, up.maxTasksPerDay, up.available], [['motor', 'life'], 5, 20, false]);
   await assert.rejects(iam.updateUser(u.id, { maxOpenTasks: -1 } as any, 'admin'), /whole number/);
   assert.strictEqual((await iam.updateUser(u.id, { maxOpenTasks: null } as any, 'admin')).maxOpenTasks, undefined, 'empty = no limit');
+});
+
+test('ALLOC-10 a disabled account NAMED on the task, an away person, a timed absence and someone who cannot work tasks are never picked', async () => {
+  const k = kit(); resetRuleCache();
+  await people(k, 'g', { amy: { active: false }, bob: { available: false }, cat: { awayUntil: '2999-01-01T00:00:00.000Z' }, dee: {} });
+  await rule(k, { scope: { group: 'g' }, strategy: 'leastLoaded' });
+  const w = await proc(k, 'elig', { group: 'g', actors: ['amy', 'bob', 'cat', 'dee'] });
+  const ids: string[] = []; for (let n = 0; n < 3; n++) ids.push((await k.start(w.wf.id)).id);
+  await run(k);
+  assert.deepStrictEqual((await Promise.all(ids.map(async (id) => (await who(k, id)).assignee))), ['dee', 'dee', 'dee'], 'only the one available, enabled person');
+  // nobody left: waits, with the reason
+  await k.store.repo<User>(Collections.users).put({ ...(await k.store.repo<User>(Collections.users).get('dee'))!, active: false });
+  const j = await k.start(w.wf.id); await run(k);
+  const t = await who(k, j.id); assert.strictEqual(t.assignee, undefined); assert.match(t.allocationNote!, /disabled|away/);
+  // the permission to work tasks: judged once the workspace has roles
+  const k2 = kit(); resetRuleCache();
+  await k2.store.repo<Role>(Collections.roles).put({ id: 'r1', tenantId: 't1', name: 'worker', permissions: ['task:manage'] } as Role);
+  await k2.store.repo<Role>(Collections.roles).put({ id: 'r2', tenantId: 't1', name: 'viewer', permissions: ['workflow:view'] } as Role);
+  await people(k2, 'g', { vic: { roles: ['viewer'] }, wil: { roles: ['worker'] } });
+  await rule(k2, { scope: { group: 'g' }, strategy: 'leastLoaded' });
+  const w2 = await proc(k2, 'perm', { group: 'g' });
+  const i2 = await k2.start(w2.wf.id); await run(k2);
+  assert.strictEqual((await who(k2, i2.id)).assignee, 'wil', 'a viewer cannot work tasks, so is not given one');
+});
+
+test('ALLOC-11 a person marks themselves away: no new tasks, their unstarted ones go back to the pool and to someone else; back = eligible again; a timed absence ends by itself', async () => {
+  const k = kit(); resetRuleCache();
+  await people(k, 'g', { amy: {}, bob: {} });
+  await rule(k, { scope: { group: 'g' }, strategy: 'leastLoaded' });
+  const w = await proc(k, 'away', { group: 'g' });
+  const a = await k.start(w.wf.id), b = await k.start(w.wf.id); await run(k);
+  assert.deepStrictEqual([(await who(k, a.id)).assignee, (await who(k, b.id)).assignee].sort(), ['amy', 'bob']);
+  const svc = new AllocationService(k.ctx);
+  const started = await who(k, b.id); const mine = started.assignee === 'amy' ? b : a;           // the instance whose task amy holds
+  const res = await svc.setAvailability('amy', { available: false }, 'amy');
+  assert.deepStrictEqual([res.available, res.released], [false, 1]);
+  assert.strictEqual((await who(k, mine.id)).allocation, 'pending');
+  await run(k);
+  assert.strictEqual((await who(k, mine.id)).assignee, 'bob', 'given to the person who is there');
+  const c = await k.start(w.wf.id); await run(k);
+  assert.strictEqual((await who(k, c.id)).assignee, 'bob', 'amy gets nothing new while away');
+  await svc.setAvailability('amy', { available: true }, 'amy');
+  const d = await k.start(w.wf.id); await run(k);
+  assert.strictEqual((await who(k, d.id)).assignee, 'amy', 'back: the least loaded again');
+  // keepTasks leaves their work alone; an absence in the past is refused; a timed one needs no switching back
+  const r2 = await svc.setAvailability('bob', { available: false, keepTasks: true }, 'bob'); assert.strictEqual(r2.released, 0);
+  await assert.rejects(svc.setAvailability('bob', { available: false, awayUntil: '2000-01-01T00:00:00.000Z' }, 'bob'), /future/);
+  const r3 = await svc.setAvailability('bob', { available: false, awayUntil: '2999-01-01T00:00:00.000Z' }, 'bob'); assert.strictEqual(r3.available, false); assert.ok(r3.awayUntil);
+  await assert.rejects(svc.setAvailability('nobody', { available: false }, 'x'), /not found|User/i);
+});
+
+test('ALLOC-12 disabling an account returns the tasks it had not started', async () => {
+  const k = kit(); resetRuleCache();
+  const { IamService } = await import('../src/modules/iam/service.ts');
+  const iam = new IamService(k.ctx);
+  const u = await iam.createUser({ username: 'sam', password: 'Str0ng-pass-123!', groups: [] }, 'admin');
+  await k.store.repo<User>(Collections.users).put({ ...(await k.store.repo<User>(Collections.users).get(u.id))!, groups: ['g'] });
+  await people(k, 'g', { tim: {} });
+  await rule(k, { scope: { group: 'g' }, strategy: 'roundRobin' });
+  const w = await proc(k, 'dis', { group: 'g' });
+  const i = await k.start(w.wf.id); await run(k);
+  const first = (await who(k, i.id)).assignee!;
+  if (first === 'sam') {
+    await iam.updateUser(u.id, { active: false }, 'admin');
+    assert.strictEqual((await who(k, i.id)).allocation, 'pending');
+    await run(k); assert.strictEqual((await who(k, i.id)).assignee, 'tim');
+  } else {
+    const i2 = await k.start(w.wf.id); await run(k);
+    assert.strictEqual((await who(k, i2.id)).assignee, 'sam');
+    await iam.updateUser(u.id, { active: false }, 'admin');
+    assert.strictEqual((await who(k, i2.id)).allocation, 'pending');
+    await run(k); assert.strictEqual((await who(k, i2.id)).assignee, 'tim');
+  }
 });

@@ -228,7 +228,7 @@ export interface SystemSettings {
 export interface VariableChange { name: string; from: unknown; to: unknown; at: string; actor: string; }
 
 // ---- IAM (users/groups/roles) ----
-export interface AppUser { id: string; username: string; roles: string[]; groups: string[]; active: boolean; createdAt: string; }
+export interface AppUser { id: string; username: string; roles: string[]; groups: string[]; active: boolean; createdAt: string; skills?: string[]; maxOpenTasks?: number; maxTasksPerDay?: number; available?: boolean; awayUntil?: string; }
 export interface AppGroup { id: string; name: string; description?: string; memberCount?: number; }
 export interface AppRole { id: string; name: string; permissions: string[]; builtIn?: boolean; overridden?: boolean; protected?: boolean; userCount?: number; memberCount?: number; }
 export interface PermissionInfo { key: string; label: string; group: string; }

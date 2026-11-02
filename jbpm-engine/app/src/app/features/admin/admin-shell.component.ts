@@ -21,6 +21,7 @@ import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
         <a routerLink="users" routerLinkActive="active">Users</a>
         <a routerLink="roles" routerLinkActive="active">Roles</a>
         <a routerLink="groups" routerLinkActive="active">Groups</a>
+        <a routerLink="assignment" routerLinkActive="active">Task assignment</a>
       </nav>
       <div class="tabbody"><router-outlet /></div>
     </div>

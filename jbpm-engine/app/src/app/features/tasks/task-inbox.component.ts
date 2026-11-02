@@ -2,11 +2,12 @@ import { RouterLink } from '@angular/router';
 import { ActivatedRoute } from '@angular/router';
 import { Component, HostListener, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { SlicePipe } from '@angular/common';
+import { DatePipe, SlicePipe } from '@angular/common';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import { TaskApiService } from '../../core/api/task-api.service';
 import { IamApiService } from '../../core/api/iam-api.service';
+import { AllocationApiService } from '../../core/api/allocation-api.service';
 import { ToastService } from '../../shared/toast.service';
 import { ModalService } from '../../shared/modal.service';
 import { BreadcrumbComponent } from '../../shared/breadcrumb.component';
@@ -40,13 +41,27 @@ const DEFAULT_TASK_COLUMNS: TaskColumnDef[] = [
 @Component({
   selector: 'app-task-inbox',
   standalone: true,
-  imports: [RouterLink, IconComponent, SlicePipe, FormsModule, BreadcrumbComponent],
+  imports: [RouterLink, IconComponent, SlicePipe, FormsModule, BreadcrumbComponent, DatePipe],
   template: `
     <div class="page">
       <div class="crumbwrap"><app-breadcrumb [crumbs]="[{ label: 'Tasks' }]" /></div>
       <header class="pagehead">
         <h1>Tasks</h1>
         <span class="spacer"></span>
+        @if (avail(); as a) {
+          @if (a.managed) {
+            <div class="avail" title="While you are away you are not given new tasks automatically; tasks you have not started go back to the pool">
+              @if (a.available) {
+                <select class="avail-sel" (change)="goAway($any($event.target).value); $any($event.target).value = ''">
+                  <option value="">● Available</option><option value="indef">Go away until I'm back</option><option value="4h">Away for 4 hours</option><option value="tomorrow">Away until tomorrow 08:00</option>
+                </select>
+              } @else {
+                <span class="away-badge">Away@if (a.awayUntil) { until {{ a.awayUntil | date: 'MMM d, HH:mm' }} }</span>
+                <button class="btn" (click)="back()">I'm back</button>
+              }
+            </div>
+          }
+        }
         <div class="col-picker-wrap">
           <button class="btn" (click)="toggleColPicker($event)" title="Customize visible table columns">
             <app-icon name="columns" [size]="14" /> Columns
@@ -193,6 +208,9 @@ const DEFAULT_TASK_COLUMNS: TaskColumnDef[] = [
     </div>
   `,
   styles: [`
+    .avail { display: flex; align-items: center; gap: 8px; margin-right: 10px; }
+    .avail-sel { border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; font-size: 12.5px; background: var(--surface); color: inherit; cursor: pointer; }
+    .away-badge { background: var(--amber-bg, #fff4d6); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; }
     .ilink, .tlink { color: var(--primary); font-weight: 600; text-decoration: none; } .ilink:hover, .tlink:hover { text-decoration: underline; }
     .page { padding: 12px 14px; }
     .crumbwrap { margin-bottom: 10px; }
@@ -257,6 +275,27 @@ export class TaskInboxComponent {
   private toast = inject(ToastService);
   private modal = inject(ModalService);
   private route = inject(ActivatedRoute);
+  private allocation = inject(AllocationApiService);
+
+  /** my own availability for automatic task assignment (only accounts kept in this workspace have one) */
+  avail = signal<{ available: boolean; awayUntil?: string; managed: boolean } | null>(null);
+  private loadAvail() { this.allocation.myAvailability().subscribe({ next: (a) => this.avail.set(a), error: () => this.avail.set(null) }); }
+  goAway(choice: string) {
+    if (!choice) return;
+    const now = new Date(); let until: string | undefined;
+    if (choice === '4h') until = new Date(now.getTime() + 4 * 3600_000).toISOString();
+    if (choice === 'tomorrow') { const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(8, 0, 0, 0); until = d.toISOString(); }
+    this.allocation.setMyAvailability({ available: false, awayUntil: until }).subscribe({
+      next: (r) => { this.avail.set({ available: r.available, awayUntil: r.awayUntil, managed: true }); this.toast.success(r.released ? `You are away. ${r.released} task${r.released === 1 ? '' : 's'} you had not started went back to the pool.` : 'You are away: no new tasks will be assigned to you.'); this.reload(); },
+      error: (e) => this.toast.error(e?.error?.error?.message || 'Could not change your availability'),
+    });
+  }
+  back() {
+    this.allocation.setMyAvailability({ available: true }).subscribe({
+      next: (r) => { this.avail.set({ available: r.available, awayUntil: r.awayUntil, managed: true }); this.toast.success('You are available again.'); },
+      error: (e) => this.toast.error(e?.error?.error?.message || 'Could not change your availability'),
+    });
+  }
 
   scopes = SCOPES;
   scope = signal<Scope>('mine');
@@ -367,7 +406,7 @@ export class TaskInboxComponent {
   });
   hasFilters = computed(() => !!this.statusFilter || this.overdueOnly || !!this.search);
 
-  constructor() { this.reload(); }
+  constructor() { this.reload(); this.loadAvail(); }
   reload() {
     this.loading.set(true);
     this.api.listTasksPaged({

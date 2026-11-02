@@ -56,6 +56,15 @@ import { IconComponent } from '../../shared/icon.component';
               @if (!groups().length) { <p class="muted sm">No groups yet — create one under the Groups tab.</p> }
             </div>
             <label class="chkrow"><input type="checkbox" [(ngModel)]="editActive" /> Active</label>
+            <h3 class="sec-h aut">Automatic task assignment</h3>
+            <div class="field"><label>Skills</label><input [(ngModel)]="editSkills" placeholder="comma separated, e.g. motor, fraud" />
+              <span class="muted sm">Rules and tasks that require skills only give work to people who have all of them.</span></div>
+            <div class="two">
+              <div class="field"><label>Max open tasks</label><input type="number" min="1" [(ngModel)]="editMaxOpen" placeholder="no limit" /></div>
+              <div class="field"><label>Max tasks given per day</label><input type="number" min="1" [(ngModel)]="editMaxDay" placeholder="no limit" /></div>
+            </div>
+            <label class="chkrow"><input type="checkbox" [(ngModel)]="editAvailable" /> Available for new automatic assignments <span class="muted sm">(untick = away)</span></label>
+            <div class="field"><label>Away until (optional)</label><input type="datetime-local" [(ngModel)]="editAwayUntil" /><span class="muted sm">Skipped until then, without anyone switching them back.</span></div>
             <div class="row">
               <button class="btn primary" (click)="save(u)">Save changes</button>
             </div>
@@ -103,7 +112,8 @@ import { IconComponent } from '../../shared/icon.component';
     .chkrow input { width: auto; }
     .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
     .pwd { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
-    .sec-h { font-size: 13px; margin: 0 0 14px; }
+    .sec-h { font-size: 13px; margin: 0 0 14px; } .sec-h.aut { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 420px; }
     .sm { font-size: 12px; }
   `],
 })
@@ -117,6 +127,7 @@ export class UsersListComponent {
   sel = signal<AppUser | null>(null);
 
   editRoles: string[] = []; editGroups: string[] = []; editActive = true; newPassword = '';
+  editSkills = ''; editMaxOpen: number | null = null; editMaxDay: number | null = null; editAvailable = true; editAwayUntil = '';
   newUsername = ''; newPasswordField = ''; newRoles: string[] = []; newGroups: string[] = [];
 
   constructor() { this.reload(); }
@@ -127,7 +138,9 @@ export class UsersListComponent {
     this.api.listGroups().subscribe({ next: (g) => this.groups.set(g), error: () => {} });
   }
   toggle(list: string[], name: string) { const i = list.indexOf(name); if (i >= 0) list.splice(i, 1); else list.push(name); }
-  select(u: AppUser) { this.sel.set(u); this.editRoles = [...u.roles]; this.editGroups = [...u.groups]; this.editActive = u.active; this.newPassword = ''; }
+  select(u: AppUser) { this.sel.set(u); this.editRoles = [...u.roles]; this.editGroups = [...u.groups]; this.editActive = u.active; this.newPassword = '';
+    this.editSkills = (u.skills ?? []).join(', '); this.editMaxOpen = u.maxOpenTasks ?? null; this.editMaxDay = u.maxTasksPerDay ?? null; this.editAvailable = u.available !== false;
+    this.editAwayUntil = u.awayUntil && u.awayUntil > new Date().toISOString() ? new Date(Date.parse(u.awayUntil) - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''; }
   deselect() { this.sel.set(null); this.newUsername = ''; this.newPasswordField = ''; this.newRoles = []; this.newGroups = []; }
 
   create() {
@@ -140,7 +153,9 @@ export class UsersListComponent {
     });
   }
   save(u: AppUser) {
-    this.api.updateUser(u.id, { roles: this.editRoles, groups: this.editGroups, active: this.editActive }).subscribe({
+    this.api.updateUser(u.id, { roles: this.editRoles, groups: this.editGroups, active: this.editActive,
+      skills: this.editSkills.split(',').map((s) => s.trim()).filter(Boolean), maxOpenTasks: this.editMaxOpen || null, maxTasksPerDay: this.editMaxDay || null, available: this.editAvailable,
+      awayUntil: this.editAwayUntil ? new Date(this.editAwayUntil).toISOString() : null }).subscribe({
       next: () => { this.toast.success('User updated'); this.reload(); },
       error: (e) => this.toast.error(e?.error?.error?.message || 'Could not update user'),
     });

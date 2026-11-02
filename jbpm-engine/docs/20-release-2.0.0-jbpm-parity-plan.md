@@ -545,5 +545,10 @@ A user task is created **unassigned** and, if a rule or a node strategy covers i
 | Release / auto-release | the task goes back to the pool and is not handed straight back |
 | Tracker (`/allocation/tracker`) | per person: open, in progress, assigned today, completed today, limits, away; plus tasks waiting (pending / queued) |
 
-Verified: `test/allocation.test.ts` (10), the strategy tests in `phase3.test.ts`, live 4-replica race (`LIVE-6`, 4/4/4), and the real app with replica A as `api` and replica B as `allocator` (6 tasks created on A, assigned by B: 3 / 3 / 0 for the person who is away). Not built yet: the builder and admin screens for rules, skills and limits (the API is complete).
+Verified: `test/allocation.test.ts` (10), the strategy tests in `phase3.test.ts`, live 4-replica race (`LIVE-6`, 4/4/4), and the real app with replica A as `api` and replica B as `allocator` (6 tasks created on A, assigned by B: 3 / 3 / 0 for the person who is away). The screens are in Admin → Task assignment (workload tracker, rules editor, run-now), Admin → Users (skills, limits, available, away until) and the Tasks page (a person marks themselves available / away).
+
+### 18.1 Who is never picked, and what happens to their work
+The allocator skips: a **disabled** account (also when it is named directly on the task: the auto-created `krisv` is one), someone who is **away** (switched off, or away until a time), an account whose roles give **no `task:manage`** (checked once the workspace has roles), anyone **excluded** on the task, and anyone at their **open-task** or **daily** limit. Nobody left = the task waits in its group queue with the reason and is retried on every pass.
+
+A person marks themselves away from the Tasks page (`PUT /me/availability`: until I am back, 4 hours, until tomorrow 08:00, or any time): they get nothing new, and the tasks the allocator gave them that they have **not started** go back to the pool and are assigned to someone else. Work they started, or claimed by hand, stays with them (`keepTasks` leaves everything). A timed absence ends by itself. **Disabling an account** returns its unstarted allocated tasks the same way. "Per day" is a UTC day; business hours are not modelled.
 

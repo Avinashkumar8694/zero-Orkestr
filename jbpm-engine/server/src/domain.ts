@@ -354,6 +354,8 @@ export interface User extends Entity {
   skills?: string[]; maxOpenTasks?: number; maxTasksPerDay?: number;
   /** false = away: the allocator skips them (default true) */
   available?: boolean;
+  /** away until this time (ISO): the allocator skips them until then, without anyone having to switch them back */
+  awayUntil?: string;
   /** when the allocator last gave this person a task (round-robin order) */
   lastAssignedAt?: string;
   /** brute-force protection */

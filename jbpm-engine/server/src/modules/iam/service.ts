@@ -2,6 +2,7 @@
 // JWT-bound multi-tenancy — see docs/07-security.md) but otherwise implements the RBAC model that doc
 // describes: named roles carrying permission strings, users carrying role + group names, group names
 // matching the same plain strings userTask.group/Task.group already use.
+import { AllocationService } from '../allocation/service.ts';
 import type { AppContext } from '../../context.ts';
 import { Collections, type Group, type Role, type TenantMember, type User } from '../../domain.ts';
 import { hashPassword, verifyPassword, signToken, permissionGrants } from '../../infra/auth.ts';
@@ -130,7 +131,7 @@ export class IamService {
     await this.ctx.audit({ actor, kind: 'user.created', data: { username, roles, groups } });
     return sanitize(u);
   }
-  async updateUser(id: string, patch: Partial<Pick<User, 'roles' | 'groups' | 'active' | 'skills' | 'maxOpenTasks' | 'maxTasksPerDay' | 'available'>>, actor: string, grantable?: string[]): Promise<PublicUser> {
+  async updateUser(id: string, patch: Partial<Pick<User, 'roles' | 'groups' | 'active' | 'skills' | 'maxOpenTasks' | 'maxTasksPerDay' | 'available' | 'awayUntil'>>, actor: string, grantable?: string[]): Promise<PublicUser> {
     this.needWorkspace();
     const u = await this.users().get(id);
     if (!u || u.tenantId !== this.ctx.tenantId) throw notFound('User');
@@ -138,6 +139,7 @@ export class IamService {
     if (patch.active === false && u.active && [u.id, u.username, u.email].some((x) => x && x.toLowerCase() === (actor || '').toLowerCase())) throw validation('You cannot deactivate your own account');
     if (patch.roles !== undefined) u.roles = await this.checkRoleNames(patch.roles, grantable, u.roles);
     if (patch.groups !== undefined) u.groups = await this.checkGroupNames(patch.groups);
+    const wasActive = u.active;
     if (patch.active !== undefined) u.active = patch.active;
     // automatic task assignment: what this person can do and how much they may be given
     if (patch.skills !== undefined) {
@@ -151,8 +153,10 @@ export class IamService {
       else if (!Number.isInteger(v) || v < 1 || v > 100000) throw validation(`${k} must be a whole number of at least 1 (empty = no limit)`);
       else u[k] = v;
     }
+    if (patch.awayUntil !== undefined) { if (patch.awayUntil === null || (patch.awayUntil as any) === '') delete u.awayUntil; else if (Number.isNaN(Date.parse(String(patch.awayUntil)))) throw validation('awayUntil must be a date and time'); else u.awayUntil = new Date(String(patch.awayUntil)).toISOString(); }
     if (patch.available !== undefined) { if (typeof patch.available !== 'boolean') throw validation('available must be true or false'); u.available = patch.available; }
     await this.users().put(u);
+    if (wasActive && !u.active) await new AllocationService(this.ctx).releaseUnstarted(u.username, 'account disabled');   // a disabled person cannot work what was queued for them
     await this.ctx.audit({ actor, kind: 'user.updated', data: { userId: id, roles: u.roles, groups: u.groups, active: u.active } });
     return sanitize(u);
   }

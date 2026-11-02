@@ -18,7 +18,7 @@ export class IamApiService extends ApiBase {
     );
   }
 
-  updateUser(id: string, patch: { roles?: string[]; groups?: string[]; active?: boolean }): Observable<AppUser> {
+  updateUser(id: string, patch: { roles?: string[]; groups?: string[]; active?: boolean; skills?: string[]; maxOpenTasks?: number | null; maxTasksPerDay?: number | null; available?: boolean; awayUntil?: string | null }): Observable<AppUser> {
     return this.http.patch<AppUser>(`${this.base}/users/${id}`, patch);
   }
 

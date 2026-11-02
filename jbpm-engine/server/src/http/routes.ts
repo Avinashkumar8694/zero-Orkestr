@@ -744,6 +744,14 @@ export function buildRoutes(): Router {
   r.post('/allocation/rules', perm('admin:iam'), asyncHandler(async (req, res) => res.status(201).json(await new AllocationService(ctxOf(req)).createRule(req.body || {}, actorOf(req)))));
   r.put('/allocation/rules/:id', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).updateRule(req.params.id, req.body || {}, actorOf(req)))));
   r.delete('/allocation/rules/:id', perm('admin:iam'), asyncHandler(async (req, res) => { await new AllocationService(ctxOf(req)).deleteRule(req.params.id, actorOf(req)); res.status(204).end(); }));
+  // a person marks themselves away / back (optionally until a time): the allocator stops giving them new tasks and returns the ones they have not started
+  r.get('/me/availability', perm('task:manage'), asyncHandler(async (req, res) => {
+    const u = (await ctxOf(req).store.repo<any>(Collections.users).query((x: any) => x.tenantId === ctxOf(req).tenantId && x.username === actorOf(req)))[0];
+    if (!u) return res.json({ available: true, managed: false });
+    const now = ctxOf(req).clock();
+    res.json({ available: u.available !== false && !(u.awayUntil && u.awayUntil > now), awayUntil: u.awayUntil && u.awayUntil > now ? u.awayUntil : undefined, managed: true });
+  }));
+  r.put('/me/availability', perm('task:manage'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).setAvailability(actorOf(req), { available: req.body?.available, awayUntil: req.body?.awayUntil, keepTasks: req.body?.keepTasks === true }, actorOf(req)))));
   r.get('/allocation/tracker', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).tracker())));
   r.post('/allocation/run', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).runOnce())));
   r.get('/groups', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => {

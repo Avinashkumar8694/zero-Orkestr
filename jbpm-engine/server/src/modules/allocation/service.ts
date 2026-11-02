@@ -3,9 +3,11 @@
 // decision can use fresh per-person counts: open tasks, tasks given today, skills, limits, availability. Nobody qualifies = the task stays in its group queue
 // ('queued') and is looked at again on the next pass. A task assigned by hand, by name or by `#{variable}` is never touched.
 import type { AppContext } from '../../context.ts';
-import { Collections, type AssignmentRule, type Task, type User } from '../../domain.ts';
+import { Collections, type AssignmentRule, type Role, type Task, type User } from '../../domain.ts';
 import { findRows } from '../../store/find.ts';
 import { notFound, validation } from '../../infra/errors.ts';
+import { permissionGrants } from '../../infra/auth.ts';
+import { kickAllocator } from '../../engine/allocator-kick.ts';
 
 const STRATEGIES = ['roundRobin', 'leastLoaded', 'skills'] as const;
 const OPEN: string[] = ['created', 'reserved', 'inprogress'];
@@ -24,13 +26,15 @@ export async function enabledRules(ctx: AppContext): Promise<AssignmentRule[]> {
 }
 const specificity = (r: AssignmentRule) => (r.scope.nodeId ? 4 : 0) + (r.scope.workflowId ? 2 : 0) + (r.scope.group ? 1 : 0);
 const ruleOrder = (a: AssignmentRule, b: AssignmentRule) => specificity(b) - specificity(a) || a.priority - b.priority || a.name.localeCompare(b.name);
+/** away = switched off, or away until a time that has not come yet */
+export const isAvailable = (u: Pick<User, 'available' | 'awayUntil'>, now: string) => u.available !== false && !(u.awayUntil && u.awayUntil > now);
 const offeredGroups = (t: Task) => [...new Set([t.group, ...(t.groups ?? [])].filter((g): g is string => !!g))];
 export function ruleCovers(r: AssignmentRule, t: Pick<Task, 'workflowId' | 'nodeId' | 'group' | 'groups'>): boolean {
   return (!r.scope.workflowId || r.scope.workflowId === t.workflowId) && (!r.scope.nodeId || r.scope.nodeId === t.nodeId) && (!r.scope.group || offeredGroups(t as Task).includes(r.scope.group));
 }
 
 export interface RuleInput { name?: string; enabled?: boolean; priority?: number; scope?: AssignmentRule['scope']; strategy?: string; requiredSkills?: string[]; pool?: AssignmentRule['pool']; respectLimits?: boolean }
-export interface PersonLoad { username: string; skills: string[]; available: boolean; maxOpenTasks?: number; maxTasksPerDay?: number; open: number; inProgress: number; assignedToday: number; completedToday: number }
+export interface PersonLoad { username: string; skills: string[]; available: boolean; awayUntil?: string; canWork: boolean; maxOpenTasks?: number; maxTasksPerDay?: number; open: number; inProgress: number; assignedToday: number; completedToday: number }
 
 export class AllocationService {
   constructor(private ctx: AppContext) {}
@@ -84,7 +88,7 @@ export class AllocationService {
     const mine = await findRows<Task>(store, Collections.tasks, t, { eq: { assignee: user.username, status: OPEN } });
     const today = await findRows<Task>(store, Collections.tasks, t, { eq: { assignee: user.username }, gte: { claimedAt: day } });
     const done = await findRows<Task>(store, Collections.tasks, t, { eq: { assignee: user.username, status: 'completed' }, gte: { completedAt: day } });
-    return { username: user.username, skills: user.skills ?? [], available: user.available !== false, maxOpenTasks: user.maxOpenTasks, maxTasksPerDay: user.maxTasksPerDay,
+    return { username: user.username, skills: user.skills ?? [], available: isAvailable(user, now), awayUntil: user.awayUntil && user.awayUntil > now ? user.awayUntil : undefined, canWork: true, maxOpenTasks: user.maxOpenTasks, maxTasksPerDay: user.maxTasksPerDay,
       open: mine.length, inProgress: mine.filter((x) => x.status === 'inprogress').length, assignedToday: today.length, completedToday: done.length };
   }
 
@@ -92,7 +96,9 @@ export class AllocationService {
   async tracker(): Promise<{ people: PersonLoad[]; waiting: { pending: number; queued: number }; rules: number }> {
     const now = this.ctx.clock(), t = this.ctx.tenantId;
     const users = (await this.users().query((u) => u.tenantId === t && u.active)).sort((a, b) => a.username.localeCompare(b.username));
-    const people = await Promise.all(users.map((u) => this.load(u, now)));
+    const roles = await this.ctx.store.repo<Role>(Collections.roles).query((r) => r.tenantId === t);
+    const rolePerms = new Map(roles.map((r) => [r.name, r.permissions] as const));
+    const people = await Promise.all(users.map(async (u) => ({ ...(await this.load(u, now)), canWork: !roles.length || permissionGrants((u.roles ?? []).flatMap((r) => rolePerms.get(r) ?? []), 'task:manage') })));
     const unassigned = async (state: string) => (await findRows<Task>(this.ctx.store, Collections.tasks, t, { eq: { allocation: state } })).filter((x) => !x.assignee && x.status !== 'completed').length;
     const waiting = { pending: await unassigned('pending'), queued: await unassigned('queued') };
     return { people, waiting, rules: (await this.listRules()).filter((r) => r.enabled).length };
@@ -106,9 +112,14 @@ export class AllocationService {
       .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.createdAt.localeCompare(b.createdAt));
     if (!waiting.length) return { assigned: 0, queued: 0 };
     const rules = await enabledRules(this.ctx);
-    const users = new Map((await this.users().query((u) => u.tenantId === t && u.active)).map((u) => [u.username, u] as const));
+    const everyone = await this.users().query((u) => u.tenantId === t);                    // disabled accounts too: a disabled person NAMED on a task must still be recognised and skipped
+    const users = new Map(everyone.map((u) => [u.username, u] as const));
+    const roles = await this.ctx.store.repo<Role>(Collections.roles).query((r) => r.tenantId === t);
+    const rolePerms = new Map(roles.map((r) => [r.name, r.permissions] as const));
+    // can this person actually work tasks? Only judged when the workspace has roles defined (a workspace without any keeps every account eligible)
+    const canWork = (u: User) => !roles.length || permissionGrants((u.roles ?? []).flatMap((r) => rolePerms.get(r) ?? []), 'task:manage');
     const byGroup = new Map<string, string[]>();
-    for (const u of users.values()) for (const g of u.groups ?? []) (byGroup.get(g) ?? byGroup.set(g, []).get(g)!).push(u.username);
+    for (const u of everyone.filter((x) => x.active)) for (const g of u.groups ?? []) (byGroup.get(g) ?? byGroup.set(g, []).get(g)!).push(u.username);
     const loads = new Map<string, PersonLoad>();                                   // fresh per pass, and updated as this pass assigns, so one pass spreads work evenly
     const loadOf = async (name: string) => loads.get(name) ?? loads.set(name, await this.load(users.get(name)!, now)).get(name)!;
     let assigned = 0, queued = 0;
@@ -129,7 +140,9 @@ export class AllocationService {
       const eligible: PersonLoad[] = []; const why = new Set<string>();
       for (const name of [...names].sort()) {
         const user = users.get(name);
-        if (!user) { if (!need.length) eligible.push({ username: name, skills: [], available: true, open: 0, inProgress: 0, assignedToday: 0, completedToday: 0 }); else why.add('no one with the required skills'); continue; }
+        if (!user) { if (!need.length) eligible.push({ username: name, skills: [], available: true, canWork: true, open: 0, inProgress: 0, assignedToday: 0, completedToday: 0 }); else why.add('no one with the required skills'); continue; }
+        if (!user.active) { why.add('the people offered the task are disabled'); continue; }
+        if (!canWork(user)) { why.add('the people offered the task have no permission to work tasks'); continue; }
         const l = await loadOf(name);
         if (!l.available) { why.add('everyone qualified is away'); continue; }
         if (need.some((s) => !l.skills.includes(s))) { why.add(`no one with the skills ${need.join(', ')}`); continue; }
@@ -151,5 +164,43 @@ export class AllocationService {
     }
     return { assigned, queued };
   }
+  // ---- availability (a person for themselves, an admin for anyone) and giving unstarted work back
+  /** Mark a person away (optionally until a time) or back. Becoming unavailable returns their not-yet-started, automatically assigned tasks to the pool
+   *  so someone else gets them; work they have started, or claimed by hand, stays with them (`keepTasks` keeps everything). */
+  async setAvailability(username: string, input: { available: boolean; awayUntil?: string | null; keepTasks?: boolean }, actor: string): Promise<{ available: boolean; awayUntil?: string; released: number }> {
+    if (typeof input.available !== 'boolean') throw validation('available must be true or false');
+    const user = (await this.users().query((u) => u.tenantId === this.ctx.tenantId && u.username === username))[0];
+    if (!user) throw notFound('User account (availability is kept on workspace user accounts)');
+    const now = this.ctx.clock();
+    let until: string | undefined;
+    if (input.awayUntil) {
+      if (Number.isNaN(Date.parse(input.awayUntil))) throw validation('awayUntil must be a date and time');
+      until = new Date(input.awayUntil).toISOString();
+      if (until <= now) throw validation('awayUntil must be in the future');
+    }
+    // "away until a time" is a timed absence (the person stays marked available and the time does the rest); plain "away" stays until they switch back
+    if (input.available) { user.available = true; delete user.awayUntil; }
+    else if (until) { user.available = true; user.awayUntil = until; }
+    else { user.available = false; delete user.awayUntil; }
+    await this.users().put(user);
+    const away = !isAvailable(user, now);
+    const released = away && !input.keepTasks ? await this.releaseUnstarted(username, 'person is away') : 0;
+    await this.ctx.audit({ actor, kind: away ? 'user.away' : 'user.available', data: { username, awayUntil: until, released } });
+    return { available: !away, awayUntil: user.awayUntil, released };
+  }
+
+  /** Give back what the allocator assigned but the person has not started: it returns to the pool and is assigned again. */
+  async releaseUnstarted(username: string, why: string): Promise<number> {
+    const mine = await findRows<Task>(this.ctx.store, Collections.tasks, this.ctx.tenantId, { eq: { assignee: username, status: 'reserved' } });
+    let n = 0;
+    for (const t of mine) {
+      if (t.allocation !== 'assigned') continue;                 // claimed or assigned by hand: not ours to take back
+      t.assignee = undefined; t.status = 'created'; t.claimedAt = undefined; t.allocation = 'pending'; t.allocationNote = `returned to the pool: ${why}`;
+      await this.tasks().put(t); n++;
+    }
+    if (n) kickAllocator();
+    return n;
+  }
+
   private async park(task: Task, note: string) { if (task.allocation !== 'queued' || task.allocationNote !== note) { task.allocation = 'queued'; task.allocationNote = note; await this.tasks().put(task); } }
 }
