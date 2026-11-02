@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { parseProject, parseBpmn, serializeProcess, validateModel } from '../dist/index.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT = path.resolve(__dirname, '..', '..'); // prudential-claims-bpm
+const PROJECT = path.resolve(__dirname, 'fixtures', 'prudential-project');   // a real Business Central project kept as a fixture
 
 test('parses the BPM project', () => {
   const project = parseProject(PROJECT);

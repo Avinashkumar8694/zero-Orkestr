@@ -17,7 +17,7 @@ test('from-scratch project generates project.imports and project.repositories', 
 });
 
 test('existing project.imports/repositories are round-tripped verbatim (not overwritten)', () => {
-  const PROJECT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+  const PROJECT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'prudential-project');
   const p = parseProject(PROJECT);
   const origImports = p.descriptor.files['project.imports'];
   const origRepos = p.descriptor.files['project.repositories'];

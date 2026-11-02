@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parseProject, writeProject, parseWid, widMvel } from '../dist/index.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT = path.resolve(__dirname, '..', '..');
+const PROJECT = path.resolve(__dirname, 'fixtures', 'prudential-project');   // a real Business Central project kept as a fixture
 
 test('real project: form (.frm) and .wid are captured into descriptor.files', () => {
   const p = parseProject(PROJECT);
