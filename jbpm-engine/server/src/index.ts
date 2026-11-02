@@ -117,7 +117,14 @@ if (isAllocatorEnabled) {
       for (const tenantId of new Set([config.defaultTenant, ...tenants.map((t) => t.id)])) {
         const release = await coordinator().claim(`allocator:${tenantId}`, 30_000);
         if (!release) continue;                                                       // another replica is working this workspace
-        try { await new AllocationService(makeContext({ store, tenantId })).runOnce(); }
+        try {
+          // bounded batches, repeated while there is more new work and the time budget (kept well inside the 30 s lease) lasts; the rest waits for the next pass
+          const started = Date.now();
+          for (;;) {
+            const r = await new AllocationService(makeContext({ store, tenantId })).runOnce(config.allocatorBatchSize);
+            if (!r.more || stopped || Date.now() - started > config.allocatorPassBudgetMs) break;
+          }
+        }
         catch (e) { logger.error('task allocation failed', { tenantId, err: (e as Error).message }); }
         finally { await release(); }
       }

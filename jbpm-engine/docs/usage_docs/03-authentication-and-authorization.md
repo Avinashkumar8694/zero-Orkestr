@@ -53,7 +53,11 @@ server does zero validation on a hand-typed permission string):
 | `workflow:deploy` | Deploy projects |
 | `workflow:run` | Start/signal/suspend/resume/abort/retry instances |
 | `query:read` | Read analytics & cross-project queries |
-| `task:manage` | Access the Task Inbox and act on tasks |
+| `task:manage` | Access the Task Inbox and work tasks **of your own groups** (see below) |
+| `task:viewAll` | See every task in the workspace. Without it a person sees only tasks assigned to or naming them, the unassigned tasks of their own groups, and tasks they administer. Granted to `developer` |
+| `task:reassign` | Hand a task to someone outside its group or to another group, and take work over from whoever holds it. Not in any built-in role (admins have everything) |
+
+**Task visibility and hand-over.** Holding `task:manage` alone lets a person see and claim only tasks offered to a group they belong to (or named to them); a task they may not see answers `404`. Delegating or forwarding to a member of the task's own groups is the holder's call; anyone or any group outside needs `task:reassign` (the task's business administrator may also). Single-sign-on seats are held to the groups in their token. An API key has no person behind it, so it sees tasks only if it carries `task:viewAll`. Role and permission grants cannot exceed what the granting person holds.
 | `admin:iam` | Manage users, roles, groups, System Settings, and the Audit Log |
 | `*` | Everything (only meaningful on `admin`) |
 

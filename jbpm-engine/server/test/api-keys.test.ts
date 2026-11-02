@@ -89,3 +89,21 @@ test('KEY-7 last use is recorded (at most once a minute) and the audit log recor
   const kinds = (await h.store.repo<any>(Collections.audit).query((a: any) => a.data?.id === k.id)).map((a: any) => a.kind).sort();
   assert.deepStrictEqual(kinds, ['api-key.created', 'api-key.revoked']);
 });
+
+import { resetCoordinator } from '../src/infra/coordinator.ts';
+
+test('KEY-8 guessing is stopped: after 10 wrong secrets for a key from one address that address is refused for that key (even with the right secret); other keys and the next minute are unaffected', async () => {
+  resetCoordinator();
+  const a = (await make({ name: 'guess target', permissions: ['workflow:view'] })).body;
+  const b = (await make({ name: 'bystander', permissions: ['workflow:view'] })).body;
+  const wrong = `ork_${a.id}.${'x'.repeat(43)}`;
+  const codes: number[] = []; for (let i = 0; i < 10; i++) codes.push((await asKey(wrong, '/workflows')).status);
+  assert.deepStrictEqual(new Set(codes), new Set([401]), 'ten wrong guesses are plain 401s');
+  const locked = await asKey(a.key, '/workflows');
+  assert.strictEqual(locked.status, 429, 'then even the right key from this address is refused');
+  assert.match(locked.body.error.message, /too many invalid API keys/);
+  assert.strictEqual((await asKey(b.key, '/workflows')).status, 200, 'a different key is not affected');
+  assert.strictEqual((await asKey(`ork_unknown.${'y'.repeat(43)}`, '/workflows')).status, 401, 'unknown ids are counted on their own');
+  resetCoordinator();                                              // the minute passes
+  assert.strictEqual((await asKey(a.key, '/workflows')).status, 200);
+});

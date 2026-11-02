@@ -4,7 +4,12 @@
 // jwtAuth → tenant membership → requirePermission chain.
 import type { Request, Response, NextFunction } from 'express';
 import { verifyBearer, permissionGrants, type JwtClaims } from '../infra/auth.ts';
-import { authRequired, forbidden } from '../infra/errors.ts';
+import { authRequired, forbidden, rateLimited } from '../infra/errors.ts';
+import { coordinator } from '../infra/coordinator.ts';
+import { config } from '../infra/config.ts';
+
+/** wrong API keys tolerated per source address per key per minute */
+const API_KEY_FAILURES_PER_MINUTE = 10;
 import { Collections, type ApiKey, type Role, type Tenant, type TenantMember, type User } from '../domain.ts';
 import { apiKeyFromRequest, authenticateApiKey } from '../modules/apikeys/service.ts';
 import { makeContext, type AppContext } from '../context.ts';
@@ -23,9 +28,17 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   // an API key is accepted next to an access token (X-API-Key, Authorization: ApiKey …, or a Bearer value that starts with ork_)
   const rawKey = apiKeyFromRequest(req);
   if (rawKey) {
+    // Guessing protection: wrong keys are counted per (source address, claimed key id). Past the limit the address is refused for that key until the minute
+    // ends, even with the right secret, so a guesser gains nothing and other addresses / other keys are unaffected. Shared through Redis across replicas.
+    const claimed = /^ork_([A-Za-z0-9]+)\./.exec(rawKey)?.[1] ?? '-';
+    const bucket = `apikey-fail:${req.ip}:${claimed}`;
+    const co = coordinator();
     try {
+      if (await co.rateExhausted(bucket, API_KEY_FAILURES_PER_MINUTE)) throw rateLimited('too many invalid API keys from this address — try again in a minute');
       const ctx = (req as any).ctx as AppContext;
-      const key = await authenticateApiKey(ctx.store, rawKey, new Date().toISOString());
+      let key: ApiKey;
+      try { key = await authenticateApiKey(ctx.store, rawKey, new Date().toISOString()); }
+      catch (e) { await co.rate(bucket, API_KEY_FAILURES_PER_MINUTE).catch(() => {}); throw e; }
       (req as any).apiKey = key;
       (req as any).user = { sub: `apikey:${key.id}`, username: `apikey:${key.name}`, roles: [], groups: [], source: 'apikey' } satisfies JwtClaims;
       (req as any).actor = `apikey:${key.name}`;

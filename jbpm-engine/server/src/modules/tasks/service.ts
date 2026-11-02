@@ -1,4 +1,6 @@
 // User-task inbox: list/claim/complete. Completing a task resumes the waiting instance token.
+import { permissionGrants } from '../../infra/auth.ts';
+import { coordinator } from '../../infra/coordinator.ts';
 import { kickAllocator } from '../../engine/allocator-kick.ts';
 import type { AppContext } from '../../context.ts';
 import { inList } from '../../infra/filters.ts';
@@ -17,10 +19,46 @@ export class TaskService {
   private repo() { return this.ctx.store.repo<Task>(Collections.tasks); }
   /** set by the HTTP layer for a workspace owner/admin or the platform admin: they may act on a task someone else holds. */
   adminOverride = false;
+  /** set by the HTTP layer: who is asking and what they hold. Without it (engine-internal use) nothing is restricted. Restrictions apply to accounts that
+   *  live in this workspace (a registered user with groups); callers with no such account (single sign-on seats, API keys) keep the permission-level rules only. */
+  viewer?: { user: string; perms: () => Promise<string[]>; groups?: string[]; apiKey?: boolean };
+  private viewerState?: { user: User | undefined; noIdentity?: boolean; viewAll: boolean; reassign: boolean };
+  private async who() {
+    if (!this.viewer) return undefined;
+    if (!this.viewerState) {
+      const perms = await this.viewer.perms();
+      // a single-sign-on seat has no local account: its own token's groups stand in; an API key has no person behind it and needs task:viewAll to see tasks at all
+      const local = await this.lookupUser(this.viewer.user);
+      const stand = !local && this.viewer.groups?.length && !this.viewer.apiKey ? ({ username: this.viewer.user, groups: this.viewer.groups } as unknown as User) : undefined;
+      this.viewerState = { user: local ?? stand, noIdentity: !local && !stand && !!this.viewer.apiKey, viewAll: this.adminOverride || permissionGrants(perms, 'task:viewAll'), reassign: this.adminOverride || permissionGrants(perms, 'task:reassign') };
+    }
+    return this.viewerState;
+  }
+  /** a restricted person sees: tasks held by them or naming them, the unassigned tasks of their own groups, and tasks they administer or follow */
+  private async visible(t: Task): Promise<boolean> {
+    const w = await this.who();
+    if (!w || w.viewAll) return true;
+    if (w.noIdentity) return false;
+    if (!w.user) return true;                         // an account-less caller with no groups keeps the permission-level rules only
+    const me = w.user.username, mine = w.user.groups ?? [];
+    if (t.excludedOwners?.includes(me) && t.assignee !== me) return false;
+    if (t.assignee === me || t.actors?.includes(me) || t.businessAdmin === me || t.stakeholders?.includes(me)) return true;
+    if (t.businessAdminGroups?.some((g) => mine.includes(g))) return true;
+    return !t.assignee && [t.group, ...(t.groups ?? [])].some((g) => !!g && mine.includes(g));
+  }
+  /** may this person hand the task to `target` (a user's groups, or a group name)? Same group: yes. Outside it: needs task:reassign, or being its administrator. */
+  private async assertMayHandOver(t: Task, to: { user?: User; group?: string }, user: string): Promise<void> {
+    const w = await this.who();
+    if (!w || (!w.user && !w.noIdentity) || w.reassign || t.businessAdmin === user || (await this.inAdminGroup(t, user))) return;
+    const offered = [t.group, ...(t.groups ?? [])].filter((g): g is string => !!g);
+    const inside = to.group ? offered.includes(to.group) : !!to.user && (t.actors?.includes(to.user.username) || (to.user.groups ?? []).some((g) => offered.includes(g)));
+    if (!inside) throw forbidden(`handing this task to ${to.group ? `group "${to.group}"` : `"${to.user?.username}"`} is outside its group${offered.length ? ` (${offered.join(', ')})` : ''}; that needs the permission task:reassign`);
+  }
   /** Once a task is claimed, only its owner (or the task's businessAdmin, or a workspace admin) may work on it —
    *  otherwise any member with task:manage could complete, release or hand off a colleague's task. An unclaimed task
    *  (no assignee) stays open to whoever passes assertOwnable. */
-  private async assertOwnerOrAdmin(t: Task, user: string): Promise<void> {
+  private async assertOwnerOrAdmin(t: Task, user: string, viaReassign = false): Promise<void> {
+    if (viaReassign && (await this.who())?.reassign) return;     // a supervisor who may re-route work may take it from whoever holds it
     if (this.adminOverride || t.businessAdmin === user || !t.assignee || t.assignee === user) return;
     if (await this.inAdminGroup(t, user)) return;
     throw forbidden(`task is assigned to ${t.assignee}`);
@@ -73,7 +111,7 @@ export class TaskService {
 
   async get(id: string): Promise<Task> {
     const t = await this.repo().get(id);
-    if (!t || t.tenantId !== this.ctx.tenantId) throw notFound('Task');
+    if (!t || t.tenantId !== this.ctx.tenantId || !(await this.visible(t))) throw notFound('Task');   // a task you may not see does not exist as far as you are concerned
     return t;
   }
 
@@ -90,12 +128,15 @@ export class TaskService {
       // higher priority first (undefined = lowest), then newest first within the same priority
       .sort((a, b) => (b.priority ?? -Infinity) - (a.priority ?? -Infinity) || b.createdAt.localeCompare(a.createdAt));
 
+    const seen: Task[] = []; for (const x of all) if (await this.visible(x)) seen.push(x);
     const offset = filter.offset != null ? Number(filter.offset) : 0;
-    const limit = filter.limit != null ? Number(filter.limit) : all.length;
-    return all.slice(offset, offset + limit);
+    const limit = filter.limit != null ? Number(filter.limit) : seen.length;
+    return seen.slice(offset, offset + limit);
   }
 
-  async claim(id: string, user: string): Promise<Task> {
+  /** one change to a task at a time across replicas, so two people claiming it, or a claim and the allocator, cannot both win */
+  async claim(id: string, user: string): Promise<Task> { return coordinator().mutex(`task:${this.ctx.tenantId}:${id}`, () => this.claimLocked(id, user)); }
+  private async claimLocked(id: string, user: string): Promise<Task> {
     const t = await this.get(id);
     await this.assertOwnable(t, user);
     await this.assertInstanceActionable(t);
@@ -109,7 +150,9 @@ export class TaskService {
     return t;
   }
 
-  async release(id: string, user: string): Promise<Task> {
+  /** one change to a task at a time across replicas, so two people claiming it, or a claim and the allocator, cannot both win */
+  async release(id: string, user: string): Promise<Task> { return coordinator().mutex(`task:${this.ctx.tenantId}:${id}`, () => this.releaseLocked(id, user)); }
+  private async releaseLocked(id: string, user: string): Promise<Task> {
     const t = await this.get(id);
     await this.assertOwnerOrAdmin(t, user);
     await this.assertInstanceActionable(t);
@@ -343,11 +386,13 @@ export class TaskService {
   }
 
   /** jBPM Delegate: hand the task to a specific user (goes to their inbox as reserved). */
-  async delegate(id: string, to: string, user: string): Promise<Task> {
+  /** one change to a task at a time across replicas, so two people claiming it, or a claim and the allocator, cannot both win */
+  async delegate(id: string, to: string, user: string): Promise<Task> { return coordinator().mutex(`task:${this.ctx.tenantId}:${id}`, () => this.delegateLocked(id, to, user)); }
+  private async delegateLocked(id: string, to: string, user: string): Promise<Task> {
     const t = await this.get(id);
     const target = (to || '').trim();
     if (!target) throw validation('target user is required');
-    await this.assertOwnerOrAdmin(t, user);
+    await this.assertOwnerOrAdmin(t, user, true);
     await this.assertInstanceActionable(t);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
     if (t.excludedOwners?.includes(target)) throw conflict(`${target} is excluded from this task`);
@@ -359,6 +404,7 @@ export class TaskService {
       if (!u) throw conflict(`cannot delegate to "${target}": user is not registered in the system`);
       if (!u.active) throw conflict(`cannot delegate to "${target}": user account is inactive`);
     }
+    await this.assertMayHandOver(t, { user: registeredUsers.find((x) => x.username === target) ?? ({ username: target, groups: [] } as unknown as User) }, user);
 
     const from = t.assignee;
     t.assignee = target; t.status = 'reserved';
@@ -373,12 +419,14 @@ export class TaskService {
 
   /** jBPM Forward: push the task back to Ready in another user's or group's queue — the target must
    *  claim it (unlike delegate, which reserves it for them directly). */
-  async forward(id: string, to: { user?: string; group?: string }, user: string): Promise<Task> {
+  /** one change to a task at a time across replicas, so two people claiming it, or a claim and the allocator, cannot both win */
+  async forward(id: string, to: { user?: string; group?: string }, user: string): Promise<Task> { return coordinator().mutex(`task:${this.ctx.tenantId}:${id}`, () => this.forwardLocked(id, to, user)); }
+  private async forwardLocked(id: string, to: { user?: string; group?: string }, user: string): Promise<Task> {
     const t = await this.get(id);
     const targetUser = (to?.user || '').trim();
     const targetGroup = (to?.group || '').trim();
     if (!targetUser && !targetGroup) throw validation('a target user or group is required');
-    await this.assertOwnerOrAdmin(t, user);
+    await this.assertOwnerOrAdmin(t, user, true);
     await this.assertInstanceActionable(t);
     if (t.status === 'completed' || t.status === 'skipped') throw conflict(`task already ${t.status}`);
 
@@ -389,7 +437,9 @@ export class TaskService {
         if (!u) throw conflict(`cannot forward to "${targetUser}": user is not registered in the system`);
         if (!u.active) throw conflict(`cannot forward to "${targetUser}": user account is inactive`);
       }
+      await this.assertMayHandOver(t, { user: registeredUsers.find((x) => x.username === targetUser) ?? ({ username: targetUser, groups: [] } as unknown as User) }, user);
     }
+    if (targetGroup) await this.assertMayHandOver(t, { group: targetGroup }, user);
     if (targetGroup) {
       const registeredGroups = await this.ctx.store.repo<Group>(Collections.groups).query((g) => g.tenantId === this.ctx.tenantId);
       if (registeredGroups.length > 0) {

@@ -22,8 +22,13 @@ export interface Config {
   pgPoolConnectionTimeoutMs: number;
   /** Process role: 'all' (API + Timer Worker), 'api' (stateless HTTP/WS only), 'worker' (background scheduler only) */
   role: 'all' | 'api' | 'worker' | 'allocator';
+  /** behind a load balancer set TRUST_PROXY (hops, or true) so request.ip is the real client, which per-address protections rely on */
+  trustProxy: boolean | number | string;
   /** how often the allocator runner looks for tasks waiting to be assigned (it also runs at once when a task is created in the same process) */
   allocatorIntervalMs: number;
+  /** tasks one allocator pass decides per workspace, and how long (ms) one runner may keep working a workspace before yielding the lease */
+  allocatorBatchSize: number;
+  allocatorPassBudgetMs: number;
   /** Interval in ms between timer scheduler ticks (default: 5000) */
   timerTickIntervalMs: number;
   /** Max due timer jobs to fetch and process in a single tick batch (default: 50) */
@@ -129,7 +134,10 @@ export const config: Config = {
   pgPoolIdleTimeoutMs: Number(env.PG_POOL_IDLE_TIMEOUT_MS || 30000),
   pgPoolConnectionTimeoutMs: Number(env.PG_POOL_CONNECTION_TIMEOUT_MS || 5000),
   role: (env.ROLE as 'all' | 'api' | 'worker' | 'allocator') || 'all',
+  trustProxy: env.TRUST_PROXY === undefined || env.TRUST_PROXY === '' || env.TRUST_PROXY === 'false' ? false : env.TRUST_PROXY === 'true' ? true : Number.isInteger(Number(env.TRUST_PROXY)) ? Number(env.TRUST_PROXY) : env.TRUST_PROXY,
   allocatorIntervalMs: Math.max(250, Number(env.ALLOCATOR_INTERVAL_MS || 2000)),
+  allocatorBatchSize: Math.min(2000, Math.max(1, Math.floor(Number(env.ALLOCATOR_BATCH_SIZE || 200)) || 200)),
+  allocatorPassBudgetMs: Math.min(20_000, Math.max(1000, Number(env.ALLOCATOR_PASS_BUDGET_MS || 10_000))),
   timerTickIntervalMs: Number(env.TIMER_TICK_INTERVAL_MS || 5000),
   timerBatchSize: Number(env.TIMER_BATCH_SIZE || 50),
   timerAdvisoryLockKey: Number(env.TIMER_ADVISORY_LOCK_KEY || 424242),

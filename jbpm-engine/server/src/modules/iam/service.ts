@@ -21,7 +21,7 @@ import { sanitize, finishSignIn, type PublicUser, type LoginResult } from './ses
  *  Matches docs/07-security.md's role list exactly. */
 export const DEFAULT_ROLES: Record<string, string[]> = {
   admin: ['*'],
-  developer: ['workflow:view', 'workflow:edit', 'workflow:run', 'query:read', 'task:manage', 'team:read'],
+  developer: ['workflow:view', 'workflow:edit', 'workflow:run', 'query:read', 'task:manage', 'task:viewAll', 'team:read'],
   author: ['workflow:view', 'workflow:edit', 'team:read'],
   release: ['workflow:view', 'workflow:deploy', 'workflowInstance:admin', 'team:read'],
   operator: ['workflow:view', 'workflow:run', 'query:read', 'workflowInstance:manage', 'analytics:query', 'team:read'],

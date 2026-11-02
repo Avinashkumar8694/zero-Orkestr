@@ -14,7 +14,7 @@ const people = async (k: ReturnType<typeof kit>, group: string, spec: Record<str
 };
 const proc = (k: ReturnType<typeof kit>, name: string, task: Record<string, unknown>) =>
   k.deploy(name, [{ id: 's', type: 'start' }, { id: 'u', type: 'userTask', name: `Review ${name}`, ...task }, { id: 'e', type: 'end' }], [{ id: 'f0', from: 's', to: 'u' }, { id: 'f1', from: 'u', to: 'e' }]);
-const run = (k: ReturnType<typeof kit>) => new AllocationService(k.ctx).runOnce();
+const run = (k: ReturnType<typeof kit>) => new AllocationService(k.ctx).runOnce(200, { force: true });
 const who = async (k: ReturnType<typeof kit>, instId: string) => (await k.tasks(instId))[0]!;
 const rule = (k: ReturnType<typeof kit>, r: Record<string, unknown>) => { resetRuleCache(); return new AllocationService(k.ctx).createRule({ name: 'r', ...r } as any, 'admin'); };
 
@@ -26,7 +26,7 @@ test('ALLOC-1 creating a task never assigns inline: it is flagged and the alloca
   const i = await k.start(w.wf.id);
   const before = await who(k, i.id);
   assert.strictEqual(before.assignee, undefined); assert.strictEqual(before.allocation, 'pending');
-  assert.deepStrictEqual(await run(k), { assigned: 1, queued: 0 });
+  assert.deepStrictEqual(await run(k), { assigned: 1, queued: 0, more: false });
   const after1 = await who(k, i.id);
   assert.strictEqual(after1.assignee, 'amy'); assert.strictEqual(after1.status, 'reserved'); assert.strictEqual(after1.allocation, 'assigned');
 });
@@ -232,4 +232,40 @@ test('ALLOC-12 disabling an account returns the tasks it had not started', async
     assert.strictEqual((await who(k, i2.id)).allocation, 'pending');
     await run(k); assert.strictEqual((await who(k, i2.id)).assignee, 'tim');
   }
+});
+
+test('ALLOC-13 a task nobody could take is retried after a pause, not on every pass (a pass over queued tasks must stay cheap); "run now" retries at once', async () => {
+  const k = kit(); resetRuleCache();
+  await people(k, 'g', { amy: { available: false } });
+  await rule(k, { scope: { group: 'g' }, strategy: 'leastLoaded' });
+  const w = await proc(k, 'backoff', { group: 'g' });
+  const i = await k.start(w.wf.id);
+  const svc = new AllocationService(k.ctx);
+  assert.deepStrictEqual(await svc.runOnce(), { assigned: 0, queued: 1, more: false }, 'first look: queued');
+  await k.store.repo<User>(Collections.users).put({ ...(await k.store.repo<User>(Collections.users).get('amy'))!, available: true });
+  assert.deepStrictEqual(await svc.runOnce(), { assigned: 0, queued: 0, more: false }, 'a moment later it is not even looked at');
+  assert.strictEqual((await who(k, i.id)).assignee, undefined);
+  assert.deepStrictEqual(await svc.runOnce(200, { force: true }), { assigned: 1, queued: 0, more: false }, 'run now (or the retry interval passing) picks it up');
+  assert.strictEqual((await who(k, i.id)).assignee, 'amy');
+});
+
+test('ALLOC-14 a backlog is worked in bounded batches, and two runners working at once never decide the same task', async () => {
+  const k = kit(); resetRuleCache();
+  await people(k, 'g', { amy: {}, bob: {}, cat: {}, dan: {} });
+  await rule(k, { scope: { group: 'g' }, strategy: 'leastLoaded' });
+  const w = await proc(k, 'burst', { group: 'g' });
+  const ids: string[] = [];
+  for (let n = 0; n < 40; n++) ids.push((await k.start(w.wf.id)).id);
+  const a = new AllocationService(k.ctx), b = new AllocationService(k.ctx);
+  const first = await a.runOnce(10);
+  assert.deepStrictEqual(first, { assigned: 10, queued: 0, more: true }, 'a pass takes at most the batch size and says there is more');
+  // two runners (as if two replicas lost the workspace lease at the same time) race over the rest, in batches of 10
+  const rounds = await Promise.all([a.runOnce(10), b.runOnce(10), a.runOnce(10), b.runOnce(10)]);
+  assert.ok(rounds.every((r) => r.assigned <= 10));
+  for (let n = 0; n < 5; n++) await a.runOnce(10);
+  const all = (await k.store.repo<Task>(Collections.tasks).query((t) => t.tenantId === 't1'));
+  assert.strictEqual(all.length, 40);
+  assert.ok(all.every((t) => t.assignee && t.allocation === 'assigned'), 'every task assigned exactly once');
+  const per = new Map<string, number>(); for (const t of all) per.set(t.assignee!, (per.get(t.assignee!) ?? 0) + 1);
+  assert.deepStrictEqual([...per.values()].sort(), [10, 10, 10, 10], 'and spread evenly, whichever runner decided');
 });

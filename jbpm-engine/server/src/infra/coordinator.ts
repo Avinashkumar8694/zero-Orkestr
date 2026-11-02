@@ -29,6 +29,8 @@ export interface SharedBackend {
   members(key: string): Promise<string[]>;
   /** fixed window: counts only admitted hits; `retryMs` = time until the window resets */
   hit(key: string, windowMs: number, max: number): Promise<HitResult>;
+  /** hits counted so far in the current window of `key`, without adding one */
+  peek(key: string, windowMs: number): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -70,6 +72,7 @@ export class MemoryBackend implements SharedBackend {
     w.count++;
     return { ok: true, count: w.count, retryMs };
   }
+  async peek(key: string, windowMs: number): Promise<number> { const w = this.windows.get(key); return w && this.clock() - w.start < windowMs ? w.count : 0; }
   async close(): Promise<void> { this.sets.clear(); this.windows.clear(); }
   /** test hook: drop everything */
   clear(): void { this.sets.clear(); this.windows.clear(); }
@@ -121,6 +124,7 @@ return redis.call('ZRANGE', KEYS[1], 0, -1)`;
 export interface RedisLike {
   eval(script: string, numKeys: number, ...args: Array<string | number>): Promise<unknown>;
   zrem(key: string, member: string): Promise<unknown>;
+  get?(key: string): Promise<string | null>;
   quit(): Promise<unknown>;
 }
 
@@ -138,6 +142,7 @@ export class RedisBackend implements SharedBackend {
     const [ok, count, ttl] = (await this.r.eval(HIT_LUA, 1, this.k(key), windowMs, max)) as number[];
     return { ok: ok === 1, count, retryMs: Math.max(1, ttl) };
   }
+  async peek(key: string, _windowMs: number): Promise<number> { return Number(await (this.r as any).get(this.k(key)).catch(() => 0)) || 0; }
   async close(): Promise<void> { await this.r.quit().catch(() => {}); }
 }
 
@@ -216,6 +221,8 @@ export class Coordinator {
   }
 
   // ---- rate: shared requests-per-minute budget
+  /** has `ws` already used up its per-minute budget? (reads the same counter as rate(), adds nothing) */
+  async rateExhausted(ws: string, perMinute: number): Promise<boolean> { return (await this.guard((b) => b.peek(`rate:${ws}`, 60_000))) >= perMinute; }
   rate(ws: string, perMinute: number): Promise<HitResult> { return this.guard((b) => b.hit(`rate:${ws}`, 60_000, perMinute)); }
 
   // ---- concurrency: shared slots; null = none free
@@ -269,6 +276,14 @@ export class Coordinator {
     const r = await this.guard((b) => b.lease(`claim:${key}`, this.replicaId, 1, ttlMs));
     if (!r.ok) return null;
     return async () => { await this.guard((b) => b.release(`claim:${key}`, this.replicaId)).catch(() => {}); };
+  }
+
+  /** non-blocking form of `mutex`: the lock (same key space) or null when someone holds it. Expires on its own if this replica dies. */
+  async tryLock(key: string, ttlMs = 30_000): Promise<Release | null> {
+    const id = `${this.replicaId}:l${++this.seq}`;
+    const r = await this.guard((b) => b.lease(`mutex:${key}`, id, 1, ttlMs));
+    if (!r.ok) return null;
+    return async () => { await this.guard((b) => b.release(`mutex:${key}`, id)).catch(() => {}); };
   }
 
   // ---- cluster-wide critical section (only worth it when state is shared; otherwise just runs `fn`)

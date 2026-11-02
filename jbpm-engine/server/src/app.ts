@@ -27,6 +27,7 @@ function resolveStore(): Store {
 
 export function createApp(store?: Store) {
   const app = express();
+  if (config.trustProxy) app.set('trust proxy', config.trustProxy);   // behind a load balancer: request.ip must be the real client
   const theStore: Store = store || resolveStore();
   app.use(express.json({ limit: '4mb' }));
 

@@ -188,7 +188,7 @@ export interface Task extends Entity {
   /** automatic assignment, done by the allocator runner (modules/allocation): 'pending' = waiting for it, 'assigned' = it chose someone, 'queued' = nobody
    *  qualified right now, the task stays in its group queue and is retried. Absent = not subject to automatic assignment. */
   allocation?: 'pending' | 'assigned' | 'queued';
-  allocationNote?: string; allocatedAt?: string;
+  allocationNote?: string; allocatedAt?: string; allocationTriedAt?: string;
   /** set on the node: leastLoaded / roundRobin over the offered people; skills the person must have */
   allocationStrategy?: 'leastLoaded' | 'roundRobin'; requiredSkills?: string[];
   status: TaskStatus;

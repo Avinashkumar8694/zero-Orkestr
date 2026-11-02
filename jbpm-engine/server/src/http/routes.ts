@@ -108,6 +108,7 @@ const taskSvc = (req: Request, e?: (ev: any) => void) => {
   const svc = new TaskService(ctxOf(req), e);
   const a = (req as any).access as { platformAdmin?: boolean; member?: { role: string } } | undefined;
   svc.adminOverride = !!a && (!!a.platformAdmin || a.member?.role === 'owner' || a.member?.role === 'admin');
+  svc.viewer = { user: actorOf(req), perms: () => callerPermissions(req), groups: ((req as any).user?.groups as string[] | undefined), apiKey: !!(req as any).apiKey };      // what this person may see and hand over (modules/tasks)
   return svc;
 };
 // per-user (post-auth) limits on the routes most likely to be hammered by a runaway script or abused
@@ -759,7 +760,7 @@ export function buildRoutes(): Router {
   }));
   r.put('/me/availability', perm('task:manage'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).setAvailability(actorOf(req), { available: req.body?.available, awayUntil: req.body?.awayUntil, keepTasks: req.body?.keepTasks === true }, actorOf(req)))));
   r.get('/allocation/tracker', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).tracker())));
-  r.post('/allocation/run', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).runOnce())));
+  r.post('/allocation/run', perm('admin:iam'), asyncHandler(async (req, res) => res.json(await new AllocationService(ctxOf(req)).runOnce(200, { force: true }))));
   r.get('/groups', perm('admin:iam', 'task:manage'), asyncHandler(async (req, res) => {
     const items = await iam(req).listGroups();
     res.json({ items: (await isIamAdmin(req)) ? items : items.map((g) => ({ id: g.id, name: g.name, description: g.description })) });
